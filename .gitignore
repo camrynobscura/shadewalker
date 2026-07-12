@@ -1,0 +1,17 @@
+# Data is regenerable from the pipeline — never committed (can be 100s of MB citywide)
+data/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Frontend (arrives in M4)
+node_modules/
+web/dist/
+
+# macOS
+.DS_Store
+
+# Claude Code local (per-machine) settings
+.claude/settings.local.json
