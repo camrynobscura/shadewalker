@@ -11,7 +11,7 @@
   --text: #ecedf1;
   --muted: #a4a6b8;
   --green: #3ddc68;         /* route + accents; 8:1 on --panel */
-  --green-dim: #2a9a49;
+  --green-dim: #1e7c37;     /* button bg; 5.3:1 with white text (AA) */
   --orange: #f5a623;        /* end marker */
   --focus: #7cc4ff;
   --danger: #ff7a7a;

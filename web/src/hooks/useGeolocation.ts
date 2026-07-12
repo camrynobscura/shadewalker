@@ -7,19 +7,23 @@ export interface GeoPosition {
   accuracy: number
 }
 
-/** Subscribe to the browser's live position. Returns null until the first
- * fix, and null forever if permission is denied or unsupported — callers
- * must handle the null case (the app works fully without location).
+/** Subscribe to the browser's live position — but only once `enabled` is
+ * true. Location is opt-in (a button click), never requested on page load:
+ * ambushing first-time visitors with a permission prompt is both hostile UX
+ * and a Lighthouse best-practices failure.
  *
- * The classic subscribe/unsubscribe useEffect pair: watchPosition on mount,
- * clearWatch in the cleanup on unmount so the GPS isn't left running.
+ * Returns null until the first fix, and null forever if permission is denied
+ * or unsupported — callers must handle the null case (the app works fully
+ * without location).
  */
-export function useGeolocation(): GeoPosition | null {
+export function useGeolocation(enabled: boolean): GeoPosition | null {
   const [position, setPosition] = useState<GeoPosition | null>(null)
 
   useEffect(() => {
-    if (!('geolocation' in navigator)) return
+    if (!enabled || !('geolocation' in navigator)) return
 
+    // The classic subscribe/unsubscribe pair: watchPosition when enabled
+    // flips on, clearWatch in the cleanup so the GPS isn't left running.
     const watchId = navigator.geolocation.watchPosition(
       (pos) =>
         setPosition({
@@ -31,7 +35,7 @@ export function useGeolocation(): GeoPosition | null {
       { enableHighAccuracy: true },
     )
     return () => navigator.geolocation.clearWatch(watchId)
-  }, [])
+  }, [enabled])
 
   return position
 }

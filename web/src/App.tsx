@@ -37,7 +37,8 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const position = useGeolocation()
+  const [locationEnabled, setLocationEnabled] = useState(false)
+  const position = useGeolocation(locationEnabled)
 
   // Fetch whenever the request changes. The AbortController in the cleanup
   // cancels the in-flight request each time a newer one supersedes it (e.g.
@@ -123,6 +124,8 @@ export default function App() {
             onSetEnd={setEnd}
             onClear={handleClear}
             position={position}
+            locationEnabled={locationEnabled}
+            onEnableLocation={() => setLocationEnabled(true)}
             hasRoute={route !== null}
           />
           <RouteStats data={route} loading={loading} error={error} />

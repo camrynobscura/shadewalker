@@ -2,6 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Map tiles come from this CDN the moment Leaflet mounts; opening the
+         connection early shaves the TLS handshake off first paint. -->
+    <link rel="preconnect" href="https://a.basemaps.cartocdn.com" crossorigin />
+    <link rel="preconnect" href="https://b.basemaps.cartocdn.com" crossorigin />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Find the greenest walking route in NYC, powered by the live NYC Tree Map." />
     <meta name="theme-color" content="#14141c" />

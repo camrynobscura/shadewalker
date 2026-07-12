@@ -79,6 +79,8 @@ interface ControlsProps {
   onSetEnd: (p: Point) => void
   onClear: () => void
   position: GeoPosition | null
+  locationEnabled: boolean
+  onEnableLocation: () => void
   hasRoute: boolean
 }
 
@@ -89,6 +91,8 @@ export function Controls({
   onSetEnd,
   onClear,
   position,
+  locationEnabled,
+  onEnableLocation,
   hasRoute,
 }: ControlsProps) {
   const sliderId = useId()
@@ -97,10 +101,21 @@ export function Controls({
       <AddressField label="Start address" placeholder="e.g. 250 Court St" onResolve={onSetStart} />
       <AddressField label="End address" placeholder="e.g. 3rd St & 3rd Ave" onResolve={onSetEnd} />
 
-      {position && (
+      {/* Location is opt-in: first a button that *requests* it (triggering
+          the browser permission prompt on a user gesture, never on load),
+          which then becomes "use it" once a fix arrives. */}
+      {!locationEnabled ? (
+        <button type="button" className={styles.secondaryButton} onClick={onEnableLocation}>
+          Show my location on the map
+        </button>
+      ) : position ? (
         <button type="button" className={styles.secondaryButton} onClick={() => onSetStart(position)}>
           Use my location as start
         </button>
+      ) : (
+        <p className={styles.addressStatus} role="status">
+          Locating…
+        </p>
       )}
 
       <div className={styles.sliderBlock}>
