@@ -1,0 +1,48 @@
+.mapRegion,
+.map {
+  height: 100%;
+  width: 100%;
+}
+
+/* A/B markers: shape + letter + color, never color alone. */
+.marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-weight: 700;
+  font-size: 15px;
+  color: #10131a;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.markerStart {
+  background: var(--green);
+  border-radius: 50%; /* circle */
+}
+
+.markerEnd {
+  background: var(--orange);
+  border-radius: 4px; /* square */
+}
+
+.locateButton {
+  position: absolute;
+  right: 10px;
+  bottom: 24px;
+  z-index: 1000; /* above Leaflet's map panes */
+  padding: 8px 14px;
+  min-height: 44px; /* comfortable touch target */
+  background: var(--panel-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.locateButton:hover {
+  background: var(--border);
+}

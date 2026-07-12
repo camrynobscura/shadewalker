@@ -1,0 +1,54 @@
+/* Global theme + accessibility baseline. Component-specific styles live in
+   *.module.css files next to their components. */
+
+:root {
+  /* Dark theme tuned for AA contrast: --text on --panel is ~13:1,
+     --muted on --panel is ~4.9:1. */
+  --bg: #14141c;
+  --panel: #1d1d29;
+  --panel-raised: #262635;
+  --border: #34344a;
+  --text: #ecedf1;
+  --muted: #a4a6b8;
+  --green: #3ddc68;         /* route + accents; 8:1 on --panel */
+  --green-dim: #2a9a49;
+  --orange: #f5a623;        /* end marker */
+  --focus: #7cc4ff;
+  --danger: #ff7a7a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  line-height: 1.45;
+}
+
+/* One loud, consistent focus indicator everywhere. :focus-visible fires for
+   keyboard focus but not mouse clicks — exactly what WCAG wants. */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* WCAG 2.3.3: users who ask the OS for less motion get none. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

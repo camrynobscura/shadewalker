@@ -1,0 +1,51 @@
+.heading {
+  font-size: 17px;
+  margin: 18px 0 10px;
+  color: var(--green);
+}
+
+.subheading {
+  font-size: 15px;
+  margin: 16px 0 6px;
+}
+
+.stats {
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.stats dt {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.stats dd {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.description {
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+
+.sparseNote {
+  font-size: 14px;
+  padding: 10px 12px;
+  margin: 12px 0;
+  background: var(--panel-raised);
+  border-left: 3px solid var(--orange);
+  border-radius: 0 8px 8px 0;
+}
+
+.quiet {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 14px;
+}

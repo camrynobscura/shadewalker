@@ -1,0 +1,94 @@
+.addressForm {
+  margin-bottom: 14px;
+}
+
+.addressForm label {
+  display: block;
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.addressRow {
+  display: flex;
+  gap: 8px;
+}
+
+.addressRow input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  background: var(--panel-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 15px;
+}
+
+.addressRow input::placeholder {
+  color: var(--muted);
+}
+
+.addressRow button {
+  min-height: 44px;
+  min-width: 56px;
+  padding: 0 14px;
+  background: var(--green-dim);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.addressRow button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.addressStatus {
+  min-height: 1.2em;
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.sliderBlock {
+  margin: 18px 0;
+}
+
+.sliderBlock label {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.sliderHint {
+  color: var(--muted);
+}
+
+.sliderBlock input[type='range'] {
+  width: 100%;
+  accent-color: var(--green);
+  min-height: 32px;
+}
+
+.secondaryButton {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 6px 0;
+  padding: 8px 12px;
+  background: var(--panel-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.secondaryButton:hover {
+  background: var(--border);
+}
