@@ -4,10 +4,20 @@ osmnx downloads OSM data and hands it back already graph-shaped: a networkx
 MultiDiGraph whose nodes are intersections (keyed by global OSM node ids) and
 whose edges are street segments with geometry, length, and street names.
 
+WHY THE CUSTOM FILTER (instead of network_type="walk"):
+NYC's OSM community maps sidewalks as separate, unnamed footway lines running
+parallel to each street — and tags the streets themselves "use the sidewalk",
+which makes osmnx's built-in walk network *drop the streets*. On the pilot
+tile that produced 3,512 unnamed sidewalk fragments and only 9 real street
+edges — no names for route descriptions, and inconsistent coverage across the
+city. So we ask Overpass (OSM's query API) directly for the centerline model:
+walkable *streets* + standalone park/plaza paths, minus the sidewalk and
+crossing fragments. One edge per block, carrying its street name.
+
 Caching is two-layer:
-  1. osmnx's own HTTP cache (raw Overpass API responses) in data/raw/osmnx_cache
+  1. osmnx's own HTTP cache (raw Overpass responses) in data/raw/osmnx_cache
   2. our per-tile GraphML file in data/raw/streets/ — GraphML is a standard
-     XML format for graphs; loading it back skips all network + assembly work.
+     XML graph format; loading it back skips all network + assembly work.
 """
 
 import networkx as nx
@@ -18,6 +28,26 @@ from pipeline.config import Bbox
 
 STREETS_DIR = config.RAW_DIR / "streets"
 
+# Bump this whenever WALK_FILTER changes: it's baked into the cache filename,
+# so old cached graphs are ignored rather than silently reused.
+GRAPH_CACHE_VERSION = 2
+
+# Overpass QL tag filters, applied to every way ("way" = an OSM line feature).
+# Each ["key"~"regex"] clause requires a match; ["key"!~"regex"] excludes
+# (and also passes ways that lack the key entirely).
+WALK_FILTER = (
+    # street/path types a pedestrian can use — note no motorways/trunks
+    '["highway"~"primary|primary_link|secondary|secondary_link|tertiary|tertiary_link'
+    '|unclassified|residential|living_street|pedestrian|footway|path|steps|service"]'
+    '["area"!~"yes"]'                                  # skip plaza *areas* (not lines)
+    '["foot"!~"no"]'                                   # explicitly closed to pedestrians
+    '["access"!~"private|no"]'                         # gated/private ways
+    '["service"!~"private|driveway|parking_aisle"]'    # not real walking streets
+    '["footway"!~"sidewalk|crossing"]'                 # the separately-mapped sidewalk
+                                                       # fragments (unnamed) — we model
+                                                       # streets as centerlines instead
+)
+
 # Point osmnx's internal HTTP cache into our data/ tree so everything the
 # pipeline ever downloads lives under one gitignored roof.
 ox.settings.cache_folder = config.RAW_DIR / "osmnx_cache"
@@ -25,7 +55,7 @@ ox.settings.cache_folder = config.RAW_DIR / "osmnx_cache"
 
 def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph:
     """Return the walkable street graph for the bbox, cached per tile."""
-    graphml_path = STREETS_DIR / f"{tile_id}.graphml"
+    graphml_path = STREETS_DIR / f"{tile_id}_v{GRAPH_CACHE_VERSION}.graphml"
 
     if graphml_path.exists():
         graph = ox.load_graphml(graphml_path)
@@ -33,11 +63,13 @@ def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph:
         return graph
 
     # osmnx bbox order is (left, bottom, right, top) = (west, south, east, north).
-    # network_type="walk" keeps ways pedestrians can use (streets, paths, steps)
-    # and drops car-only infrastructure like highways.
+    # retain_all=False keeps only the largest connected piece, dropping stray
+    # fragments (a courtyard path not linked to any street) that could trap
+    # the router if a click snapped onto them.
     graph = ox.graph_from_bbox(
         bbox=(bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max),
-        network_type="walk",
+        custom_filter=WALK_FILTER,
+        retain_all=False,
     )
 
     STREETS_DIR.mkdir(parents=True, exist_ok=True)
