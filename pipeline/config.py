@@ -110,6 +110,12 @@ EVERGREEN_GENERA = {
 # to matter. Calibrated by eye on real routes in M3.
 TREE_WEIGHT = 10.0
 
+# When computing tree density (score ÷ length), treat very short edges as at
+# least this long. Tiny intersection stubs (2 m edges) inherit the cross
+# street's trees in their buffer corridor and would otherwise post absurd
+# densities (0.8+ vs a leafy block's 0.05).
+DENSITY_LENGTH_FLOOR_M = 20.0
+
 
 # ── Data sources ──────────────────────────────────────────────────────────────
 
