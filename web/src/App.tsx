@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchRoute, type Point, type RouteResponse } from './api'
-import { Controls } from './components/Controls'
+import { Controls, DEFAULT_TREE_WEIGHT, snapToPreset } from './components/Controls'
 import { MapView } from './components/MapView'
 import { RouteStats } from './components/RouteStats'
 import { useGeolocation } from './hooks/useGeolocation'
@@ -29,8 +29,9 @@ export default function App() {
   const [start, setStart] = useState<Point | null>(() => parsePoint(initialParams.get('from')))
   const [end, setEnd] = useState<Point | null>(() => parsePoint(initialParams.get('to')))
   const [treeWeight, setTreeWeight] = useState<number>(() => {
+    // Old bookmarks may carry any slider value 0–40; snap it to a preset.
     const w = Number(initialParams.get('w'))
-    return Number.isFinite(w) && w >= 0 && w <= 40 && initialParams.has('w') ? w : 10
+    return initialParams.has('w') && Number.isFinite(w) ? snapToPreset(w) : DEFAULT_TREE_WEIGHT
   })
 
   const [route, setRoute] = useState<RouteResponse | null>(null)

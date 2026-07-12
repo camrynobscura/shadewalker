@@ -55,24 +55,79 @@
   color: var(--muted);
 }
 
-.sliderBlock {
+.presetGroup {
+  /* Fieldsets ship with a browser-default border and padding meant for
+     old-school form sections — reset both so it lays out like a plain div. */
   margin: 18px 0;
+  padding: 0;
+  border: none;
 }
 
-.sliderBlock label {
-  display: block;
-  font-size: 14px;
+.presetGroup legend {
+  padding: 0;
   margin-bottom: 6px;
+  font-size: 14px;
 }
 
-.sliderHint {
+.segmented {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.segment {
+  flex: 1;
+  position: relative;
+}
+
+/* The real radio is invisible but stretched over the whole segment
+   (inset: 0 = top/right/bottom/left all 0), so clicks, taps, focus, and
+   arrow keys all hit the native input. display: none would remove it from
+   the tab order — opacity keeps it interactive, just unseen. */
+.segmentInput {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.segmentText {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  border-radius: 6px;
+  font-size: 14px;
   color: var(--muted);
 }
 
-.sliderBlock input[type='range'] {
-  width: 100%;
-  accent-color: var(--green);
-  min-height: 32px;
+/* `+` is the adjacent-sibling selector: style the visible text based on the
+   state of the input right before it. This is how the hidden input's
+   :checked and :focus-visible states reach the label the user sees. */
+.segmentInput:checked + .segmentText {
+  background: var(--green-dim);
+  color: #fff;
+  font-weight: 600;
+}
+
+.segmentInput:focus-visible + .segmentText {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.segmentInput:hover:not(:checked) + .segmentText {
+  color: var(--text);
+}
+
+.presetHint {
+  min-height: 1.2em;
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .secondaryButton {

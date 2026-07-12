@@ -65,11 +65,33 @@ function AddressField({
   )
 }
 
-function weightDescription(weight: number): string {
-  if (weight === 0) return 'shortest path, trees ignored'
-  if (weight <= 12) return 'takes free green detours'
-  if (weight <= 25) return 'moderate detours for trees'
-  return 'maximum greenery, long detours allowed'
+/* The three routing intensities, calibrated against real routes: 5 only
+ * takes near-free detours, 15 sits mid-plateau where short detours appear,
+ * 40 is where the router trades serious distance for trees (+523 m for
+ * +115 trees on one Gowanus test walk).
+ *
+ * `as const` freezes the array into a readonly tuple of literal types —
+ * TypeScript then knows each value is exactly 5 | 15 | 40, not just
+ * `number`, and will reject a typo like TREE_PRESETS[0].value = 6. */
+export const TREE_PRESETS = [
+  { value: 5, label: 'Low', hint: 'greener only when it’s nearly free' },
+  { value: 15, label: 'Medium', hint: 'short detours for leafier blocks' },
+  { value: 40, label: 'Max', hint: 'longest, greenest route' },
+] as const
+
+export const DEFAULT_TREE_WEIGHT: number = TREE_PRESETS[1].value
+
+/** Old bookmarked URLs carry any 0–40 slider value; snap it to the nearest
+ * preset. `<=` makes ties go to the later (greener) option, so the old
+ * default of 10 — equidistant from 5 and 15 — lands on Medium. */
+export function snapToPreset(weight: number): number {
+  let nearest: number = TREE_PRESETS[0].value
+  for (const preset of TREE_PRESETS) {
+    if (Math.abs(preset.value - weight) <= Math.abs(nearest - weight)) {
+      nearest = preset.value
+    }
+  }
+  return nearest
 }
 
 interface ControlsProps {
@@ -95,7 +117,10 @@ export function Controls({
   onEnableLocation,
   hasRoute,
 }: ControlsProps) {
-  const sliderId = useId()
+  // Radios become one group (arrow keys move between them, only one can be
+  // checked) by sharing a `name` — useId gives us one that's unique even if
+  // this component ever renders twice.
+  const groupName = useId()
   return (
     <section aria-label="Plan a route">
       <AddressField label="Start address" placeholder="e.g. 250 Court St" onResolve={onSetStart} />
@@ -118,22 +143,30 @@ export function Controls({
         </p>
       )}
 
-      <div className={styles.sliderBlock}>
-        <label htmlFor={sliderId}>
-          Tree preference: <strong>{treeWeight}</strong>
-          <span className={styles.sliderHint}> — {weightDescription(treeWeight)}</span>
-        </label>
-        <input
-          id={sliderId}
-          type="range"
-          min={0}
-          max={40}
-          step={1}
-          value={treeWeight}
-          aria-valuetext={`${treeWeight} — ${weightDescription(treeWeight)}`}
-          onChange={(e) => onTreeWeightChange(Number(e.target.value))}
-        />
-      </div>
+      {/* <fieldset> + <legend> is the native way to give a radio group its
+          label: screen readers announce "Tree preference" alongside whichever
+          option is focused. No ARIA needed — the built-in semantics do it. */}
+      <fieldset className={styles.presetGroup}>
+        <legend>Tree preference</legend>
+        <div className={styles.segmented}>
+          {TREE_PRESETS.map((preset) => (
+            <label key={preset.value} className={styles.segment}>
+              <input
+                type="radio"
+                name={groupName}
+                value={preset.value}
+                checked={treeWeight === preset.value}
+                onChange={() => onTreeWeightChange(preset.value)}
+                className={styles.segmentInput}
+              />
+              <span className={styles.segmentText}>{preset.label}</span>
+            </label>
+          ))}
+        </div>
+        <p className={styles.presetHint}>
+          {TREE_PRESETS.find((preset) => preset.value === treeWeight)?.hint}
+        </p>
+      </fieldset>
 
       {hasRoute && (
         <button type="button" className={styles.secondaryButton} onClick={onClear}>
