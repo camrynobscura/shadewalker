@@ -101,8 +101,16 @@ export function MapView({ start, end, green, shortest, position, onMapClick }: M
           />
         )}
 
-        {start && <Marker position={[start.lat, start.lon]} icon={startIcon} alt="Start point (A)" />}
-        {end && <Marker position={[end.lat, end.lon]} icon={endIcon} alt="End point (B)" />}
+        {/* interactive/keyboard off: the markers are visual decoration (the
+            same info is in the panel as text). Without this, Leaflet renders
+            them as focusable role="button" divs with no accessible name —
+            nameless buttons that do nothing, a double a11y fault. */}
+        {start && (
+          <Marker position={[start.lat, start.lon]} icon={startIcon} interactive={false} keyboard={false} />
+        )}
+        {end && (
+          <Marker position={[end.lat, end.lon]} icon={endIcon} interactive={false} keyboard={false} />
+        )}
 
         {/* The blue dot + its GPS-accuracy halo. */}
         {position && (
