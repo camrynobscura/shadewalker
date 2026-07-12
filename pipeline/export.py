@@ -1,0 +1,66 @@
+"""Write one tile's finished graph to data/tiles/<tile_id>.json.gz.
+
+The exported file is the contract between the pipeline and the routing
+server: plain JSON (gzipped), no Python-specific types.
+
+Hard-won rule encoded here (this exact bug shipped in the v1 prototype):
+everything written to the file is in lat/lon degrees (EPSG:4326) — the
+meter-based geometry is for pipeline math only and must never leak into
+the export, or the frontend would try to draw UTM coordinates on a map.
+Coordinate pairs are [lon, lat] to match the GeoJSON convention.
+"""
+
+import gzip
+import json
+from datetime import date
+
+import geopandas as gpd
+
+from pipeline import config
+
+
+def write_tile(tile_id: str, nodes: gpd.GeoDataFrame, edges: gpd.GeoDataFrame) -> None:
+    node_records = {}
+    # nodes.iterrows() yields (node_id, row) — osmnx stores lon as x, lat as y.
+    for node_id, row in nodes.iterrows():
+        node_records[str(node_id)] = [round(row["x"], 6), round(row["y"], 6)]
+
+    edge_records = []
+    for (u, v, key), row in edges.iterrows():
+        edge_records.append({
+            "u": str(u),
+            "v": str(v),
+            "key": int(key),        # disambiguates rare parallel edges (same u,v)
+            "side": "C",            # centerline; "L"/"R" reserved for Stage 3
+            "length_m": row["length_m"],
+            "name": row["name"],
+            "tree_deciduous": row["tree_deciduous"],
+            "tree_evergreen": row["tree_evergreen"],
+            "tree_count": int(row["tree_count"]),
+            # row["geometry"] is the LAT/Lon one — see module docstring.
+            "coords": [[round(lon, 6), round(lat, 6)] for lon, lat in row["geometry"].coords],
+        })
+
+    tile = {
+        "meta": {
+            "tile_id": tile_id,
+            "created": date.today().isoformat(),
+            "crs": "EPSG:4326",
+            "coord_order": "lon,lat",
+            "node_count": len(node_records),
+            "edge_count": len(edge_records),
+        },
+        "nodes": node_records,
+        "edges": edge_records,
+    }
+
+    config.TILES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = config.TILES_DIR / f"{tile_id}.json.gz"
+    # gzip.open in text mode ("wt") lets json.dump write straight into a
+    # compressed file — no intermediate uncompressed copy.
+    with gzip.open(out_path, "wt") as f:
+        json.dump(tile, f)
+
+    size_kb = out_path.stat().st_size / 1024
+    print(f"  [export] {out_path.relative_to(config.REPO_ROOT)}: "
+          f"{len(node_records)} nodes, {len(edge_records)} edges, {size_kb:.0f} KB gzipped")
