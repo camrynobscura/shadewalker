@@ -49,8 +49,13 @@
   color: var(--muted);
 }
 
+/* No min-height: an AddressField's status paragraph is empty almost all
+   of the time now (no more "// LOCKED" message, and "searching" moved to
+   the button), so reserving space for text that's usually absent just
+   left a dead gap under every field. A genuinely empty <p> collapses to
+   0 height on its own; NOT_FOUND appearing/disappearing shifts the layout
+   by one line instead, which reads as normal, not "weird". */
 .addressStatus {
-  min-height: 1.2em;
   margin: 0;
   font-size: 0.8125rem; /* 13px */
   color: var(--muted);

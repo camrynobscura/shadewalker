@@ -69,9 +69,10 @@ function AddressField({
         onChange={(e) => onChange(e.target.value)}
       />
       {/* role="status" = a polite live region: screen readers announce the
-          result without stealing focus. */}
+          result without stealing focus. Nothing shown for 'searching' —
+          the Find_route button's own "FINDING…" label already covers that,
+          and showing it here too just flickered on and off per field. */}
       <p className={styles.addressStatus} role="status">
-        {status === 'searching' && '// searching…'}
         {status === 'notfound' && '// NOT_FOUND: try adding a borough'}
       </p>
     </div>
