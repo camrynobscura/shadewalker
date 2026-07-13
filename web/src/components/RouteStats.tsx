@@ -30,44 +30,46 @@ function StatsBody({ data }: { data: RouteResponse }) {
   const isSparse = green.tree_count / green.length_m < SPARSE_TREES_PER_M
 
   return (
+    /* No visible heading here — the section's aria-label carries the
+       accessible name instead, matching the flat terminal-readout layout
+       the Greenhouse design uses in place of prose headings. */
     <section aria-label="Route details">
-      <h2 className={styles.heading}>Your green route</h2>
+      <div className={styles.statRow}>
+        <div className={styles.stat}>
+          <span className={styles.statVal}>{formatDistance(green.length_m)}</span>
+          <span className={styles.statLabel}>dist</span>
+        </div>
+        <div className={styles.stat}>
+          <span className={styles.statVal}>
+            {green.minutes}
+            <small> min</small>
+          </span>
+          <span className={styles.statLabel}>eta</span>
+        </div>
+        <div className={styles.stat}>
+          <span className={styles.statVal}>{green.tree_count}</span>
+          <span className={styles.statLabel}>trees</span>
+        </div>
+      </div>
 
-      <dl className={styles.stats}>
-        <div>
-          <dt>Distance</dt>
-          <dd>
-            {formatDistance(green.length_m)} <span className={styles.quiet}>({green.minutes} min)</span>
-          </dd>
-        </div>
-        <div>
-          <dt>Trees along the way</dt>
-          <dd>{green.tree_count}</dd>
-        </div>
-        <div>
-          <dt>vs. shortest path</dt>
-          <dd>
-            {extra_trees > 0
-              ? `+${extra_trees} trees for +${formatDistance(extra_length_m)}`
-              : 'the shortest path is already the greenest'}
-          </dd>
-        </div>
-      </dl>
+      <p className={styles.compare}>
+        {extra_trees > 0
+          ? `+${extra_trees} trees detected · anomaly: +${formatDistance(extra_length_m)} · acceptable`
+          : '// no anomaly — shortest path is already the greenest'}
+      </p>
 
       {isSparse && (
         <p className={styles.sparseNote}>
-          This area has few street trees ({green.tree_count} over{' '}
-          {formatDistance(green.length_m)}) — this is the best available, but expect
-          limited shade.
+          // LOW_TREE_DENSITY: {green.tree_count} over {formatDistance(green.length_m)} — expect
+          limited shade
         </p>
       )}
 
-      <h3 className={styles.subheading}>Directions</h3>
-      <p className={styles.description}>{data.description}</p>
+      <p className={styles.description}>&gt; {data.description}</p>
 
       <p className={styles.quiet}>
-        Shortest alternative: {formatDistance(shortest.length_m)} ({shortest.minutes} min),{' '}
-        {shortest.tree_count} trees — shown dashed on the map.
+        // shortest_alt: {formatDistance(shortest.length_m)} · {shortest.minutes} min ·{' '}
+        {shortest.tree_count} trees (dashed on map)
       </p>
     </section>
   )

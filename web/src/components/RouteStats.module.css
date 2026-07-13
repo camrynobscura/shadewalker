@@ -1,42 +1,58 @@
-.heading {
-  font-size: 15px;
-  margin: 18px 0 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  /* --green-dim, not --green: jade is only 2.9:1 on the light panel — fine
+.statRow {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.stat {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  line-height: 1.25;
+}
+
+.statVal {
+  display: block;
+  font-size: 19px;
+  font-weight: 600;
+  /* Keeps digits the same width as they change, so the three cells don't
+     visibly jiggle every time a new route comes in. */
+  font-variant-numeric: tabular-nums;
+  /* --green-dim, not --green: jade is only ~3:1 on the light panel — fine
      for thick route lines, too faint for text. The deep jade passes AA. */
   color: var(--green-dim);
 }
 
-.subheading {
-  font-size: 15px;
-  margin: 16px 0 6px;
-}
-
-.stats {
-  margin: 0;
-  display: grid;
-  gap: 10px;
-}
-
-.stats dt {
-  font-size: 13px;
+.statVal small {
+  font-size: 0.62em;
+  font-weight: 500;
   color: var(--muted);
 }
 
-.stats dd {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+.statLabel {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.compare {
+  font-size: 12px;
+  margin: 11px 0 0;
 }
 
 .description {
-  font-size: 14px;
-  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 7px 0 0;
+  line-height: 1.55;
 }
 
 .sparseNote {
-  font-size: 13px;
+  font-size: 12px;
   padding: 10px 12px;
   margin: 12px 0;
   background: var(--panel-raised);
@@ -46,7 +62,7 @@
 
 .quiet {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .error {

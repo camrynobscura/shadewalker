@@ -4,9 +4,9 @@
 
 .addressForm label {
   display: block;
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.1em;
   color: var(--muted);
   margin-bottom: 4px;
 }
@@ -68,9 +68,9 @@
 .presetGroup legend {
   padding: 0;
   margin-bottom: 6px;
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.1em;
   color: var(--muted);
 }
 
@@ -131,7 +131,7 @@
 .presetHint {
   min-height: 1.2em;
   margin: 6px 0 0;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted);
 }
 

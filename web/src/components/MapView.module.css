@@ -8,9 +8,11 @@
   position: relative; /* anchors the .scanlines overlay */
 }
 
-/* A/B markers: shape + letter + color, never color alone. Flat and
-   borderless like the Greenhouse mockup; a faint shadow keeps them
-   separable from busy tiles without reading as an outline. */
+/* A/B markers: both neon magenta so neither blends into the jade route —
+   they're told apart by shape + letter (circle-A vs square-B), which is
+   what WCAG's use-of-color rule actually asks for. Flat and borderless
+   like the Greenhouse mockup; a faint shadow keeps them separable from
+   busy tiles without reading as an outline. */
 .marker {
   display: flex;
   align-items: center;
@@ -19,12 +21,12 @@
   height: 30px;
   font-weight: 700;
   font-size: 15px;
-  color: #0b2418; /* ink on jade 6:1, ink on neon magenta 5.6:1 */
+  color: #0b2418; /* ink on neon magenta: 5.6:1 */
   box-shadow: 0 1px 3px rgba(11, 36, 24, 0.3);
 }
 
 .markerStart {
-  background: var(--green);
+  background: var(--magenta);
   border-radius: 50%; /* circle */
 }
 
