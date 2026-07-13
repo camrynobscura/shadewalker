@@ -41,6 +41,7 @@
 
 .tagline {
   font-weight: 400;
+  font-style: italic;
   font-size: 13px;
   color: var(--cyan);
   /* text-shadow inherits, so the h1's glitch fringes must be switched off
