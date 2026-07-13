@@ -17,4 +17,10 @@ dependencies = [
 [dependency-groups]
 dev = [
     "folium>=0.20.0",
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]  # so `import server`/`import pipeline` resolve from the repo root

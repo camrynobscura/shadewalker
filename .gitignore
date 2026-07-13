@@ -5,6 +5,7 @@ data/
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Frontend (arrives in M4)
 node_modules/
