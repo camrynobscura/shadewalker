@@ -40,7 +40,7 @@
 
 .statVal {
   display: block;
-  font-size: 19px;
+  font-size: 1.1875rem; /* 19px */
   font-weight: 600;
   /* Keeps digits the same width as they change, so the three cells don't
      visibly jiggle every time a new route comes in. */
@@ -59,19 +59,19 @@
 .statLabel {
   display: block;
   margin-top: 2px;
-  font-size: 10.5px;
+  font-size: 0.65625rem; /* 10.5px */
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
 .compare {
-  font-size: 12px;
+  font-size: 0.75rem; /* 12px */
   margin: 0;
 }
 
 .description {
-  font-size: 12px;
+  font-size: 0.75rem; /* 12px */
   color: var(--muted);
   margin: 0;
   line-height: 1.55;
@@ -92,7 +92,7 @@
 .toggleGroup legend {
   padding: 0;
   margin-bottom: var(--space-xs);
-  font-size: 10px;
+  font-size: 0.625rem; /* 10px */
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);
@@ -125,7 +125,7 @@
   justify-content: center;
   min-height: 30px;
   padding: 0 12px;
-  font-size: 11px;
+  font-size: 0.6875rem; /* 11px */
   color: var(--muted);
 }
 
@@ -145,7 +145,7 @@
 }
 
 .directionsList {
-  font-size: 12px;
+  font-size: 0.75rem; /* 12px */
   color: var(--muted);
   margin: 0;
   padding-left: 20px;
@@ -157,7 +157,7 @@
 }
 
 .sparseNote {
-  font-size: 12px;
+  font-size: 0.75rem; /* 12px */
   padding: 10px 12px;
   margin: 0;
   background: var(--panel-raised);
@@ -167,7 +167,7 @@
 
 .quiet {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem; /* 12px */
   /* Previously unset — silently fell back to the browser's default <p>
      margin (~1em top/bottom), one of the actual sources of "spacing is all
      over the place". Now the parent's `gap` is the only source. */
@@ -176,5 +176,5 @@
 
 .error {
   color: var(--danger);
-  font-size: 14px;
+  font-size: 0.875rem; /* 14px */
 }

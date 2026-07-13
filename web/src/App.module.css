@@ -28,7 +28,7 @@
 
 .title {
   margin: 0;
-  font-size: 16px;
+  font-size: 1rem; /* 16px */
   text-transform: uppercase;
   letter-spacing: 0.08em;
   /* The "misprint" masthead: magenta and cyan fringes offset left/right,
@@ -42,8 +42,8 @@
 .tagline {
   font-weight: 400;
   font-style: italic;
-  font-size: 13px;
-  color: var(--cyan);
+  font-size: 0.8125rem; /* 13px */
+  color: var(--magenta);
   opacity: 0.8;
   /* text-shadow inherits, so the h1's glitch fringes must be switched off
      here — the tagline is small text and needs to stay crisp. */
@@ -73,7 +73,7 @@
 }
 
 .hint {
-  font-size: 14px;
+  font-size: 0.875rem; /* 14px */
   color: var(--muted);
   /* Was unset, so it fell back to the browser's default <p> margin —
      explicit now, matching the --space-lg gap used everywhere else in the

@@ -20,7 +20,7 @@
   width: 30px;
   height: 30px;
   font-weight: 700;
-  font-size: 15px;
+  font-size: 0.9375rem; /* 15px */
   color: #0b2418; /* ink on neon magenta: 5.6:1 */
   box-shadow: 0 1px 3px rgba(11, 36, 24, 0.3);
 }
@@ -50,7 +50,7 @@
   gap: 4px;
   background: var(--panel-raised);
   border: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 0.75rem; /* 12px */
   color: var(--text);
 }
 
@@ -82,7 +82,7 @@
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 0;
-  font-size: 13px;
+  font-size: 0.8125rem; /* 13px */
   cursor: pointer;
 }
 

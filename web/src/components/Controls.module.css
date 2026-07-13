@@ -18,7 +18,7 @@
 
 .addressForm label {
   display: block;
-  font-size: 10px;
+  font-size: 0.625rem; /* 10px */
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);
@@ -39,7 +39,7 @@
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 0;
-  font-size: 14px;
+  font-size: 0.875rem; /* 14px */
 }
 
 .addressRow input::placeholder {
@@ -54,7 +54,7 @@
   color: #fff;
   border: none;
   border-radius: 0;
-  font-size: 14px;
+  font-size: 0.875rem; /* 14px */
   font-weight: 600;
   cursor: pointer;
 }
@@ -67,7 +67,7 @@
 .addressStatus {
   min-height: 1.2em;
   margin: 0;
-  font-size: 13px;
+  font-size: 0.8125rem; /* 13px */
   color: var(--muted);
 }
 
@@ -83,7 +83,7 @@
 .presetGroup legend {
   padding: 0;
   margin-bottom: var(--space-xs);
-  font-size: 10px;
+  font-size: 0.625rem; /* 10px */
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);
@@ -121,7 +121,7 @@
   justify-content: center;
   min-height: 40px;
   border-radius: 0;
-  font-size: 13px;
+  font-size: 0.8125rem; /* 13px */
   color: var(--muted);
 }
 
@@ -146,7 +146,7 @@
 .presetHint {
   min-height: 1.2em;
   margin: var(--space-xs) 0 0;
-  font-size: 12px;
+  font-size: 0.75rem; /* 12px */
   color: var(--muted);
 }
 
@@ -174,7 +174,7 @@
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 0;
-  font-size: 13px;
+  font-size: 0.8125rem; /* 13px */
   cursor: pointer;
 }
 
