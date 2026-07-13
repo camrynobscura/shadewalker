@@ -96,8 +96,8 @@ def route(
             detail="End point is outside our current coverage area — pick a point inside the shaded area on the map.",
         )
 
-    start = store.snap(from_lat, from_lon)
-    end = store.snap(to_lat, to_lon)
+    start = store.snap_to_edge(from_lat, from_lon)
+    end = store.snap_to_edge(to_lat, to_lon)
 
     green = store.route(start, end, tree_weight=tree_weight, month=month)
     shortest = store.route(start, end, tree_weight=0, month=month)
@@ -107,6 +107,16 @@ def route(
     return {
         "green": _to_feature(green),
         "shortest": _to_feature(shortest),
+        "snapped": {
+            # Where the request actually starts/ends once resolved onto the
+            # street network — the frontend draws the A/B marker here
+            # instead of at the raw clicked/geocoded point, since that
+            # point can sit mid-block. One shared pair, not one per
+            # feature: the snap itself doesn't depend on tree_weight, only
+            # which side of it a given route connects through does.
+            "start": {"lat": start.point[1], "lon": start.point[0]},
+            "end": {"lat": end.point[1], "lon": end.point[0]},
+        },
         "comparison": {
             # Honest-stats inputs for the frontend (plan: absolute numbers
             # alongside percentages, so sparse areas aren't oversold).

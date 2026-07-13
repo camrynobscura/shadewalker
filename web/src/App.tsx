@@ -38,6 +38,28 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Where the route actually starts/ends once the server resolves it onto
+  // the street network — can differ from `start`/`end` (what was clicked or
+  // geocoded), since that point may sit mid-block. Display-only: MapView
+  // draws markers here (falling back to the raw point until a route
+  // resolves), but nothing about the fetch itself depends on this state.
+  const [snappedStart, setSnappedStart] = useState<Point | null>(null)
+  const [snappedEnd, setSnappedEnd] = useState<Point | null>(null)
+
+  // Wrap the raw setters so picking a new point immediately drops its own
+  // stale snapped marker — without this, setting a new `start` while `end`
+  // stays put (e.g. searching a different start address) wouldn't clear
+  // `snappedStart`, and the old marker would sit in the wrong place until
+  // the next fetch resolves.
+  function updateStart(p: Point | null) {
+    setSnappedStart(null)
+    setStart(p)
+  }
+  function updateEnd(p: Point | null) {
+    setSnappedEnd(null)
+    setEnd(p)
+  }
+
   const [locationEnabled, setLocationEnabled] = useState(false)
   const position = useGeolocation(locationEnabled)
 
@@ -58,6 +80,8 @@ export default function App() {
   useEffect(() => {
     if (!start || !end) {
       setRoute(null)
+      setSnappedStart(null)
+      setSnappedEnd(null)
       return
     }
     const controller = new AbortController()
@@ -66,6 +90,8 @@ export default function App() {
     fetchRoute(start, end, treeWeight, controller.signal)
       .then((data) => {
         setRoute(data)
+        setSnappedStart(data.snapped.start)
+        setSnappedEnd(data.snapped.end)
         setLoading(false)
       })
       .catch((err: unknown) => {
@@ -74,6 +100,8 @@ export default function App() {
         // (e.g. outside coverage) — show that. Anything else (dead server,
         // no network) gets the generic fallback instead of a raw fetch error.
         setError(err instanceof RouteError ? err.message : 'Could not find a route — is the server running?')
+        setSnappedStart(null)
+        setSnappedEnd(null)
         setLoading(false)
       })
     return () => controller.abort()
@@ -91,16 +119,16 @@ export default function App() {
   // Map clicks fill A, then B, then start a fresh route.
   function handleMapClick(p: Point) {
     if (!start || (start && end)) {
-      setStart(p)
-      setEnd(null)
+      updateStart(p)
+      updateEnd(null)
     } else {
-      setEnd(p)
+      updateEnd(p)
     }
   }
 
   function handleClear() {
-    setStart(null)
-    setEnd(null)
+    updateStart(null)
+    updateEnd(null)
     setRoute(null)
     setError(null)
   }
@@ -121,8 +149,8 @@ export default function App() {
       <div className={styles.layout}>
         <main className={styles.mapArea}>
           <MapView
-            start={start}
-            end={end}
+            start={snappedStart ?? start}
+            end={snappedEnd ?? end}
             green={route?.green ?? null}
             shortest={route?.shortest ?? null}
             coverage={coverage}
@@ -135,8 +163,8 @@ export default function App() {
           <Controls
             treeWeight={treeWeight}
             onTreeWeightChange={setTreeWeight}
-            onSetStart={setStart}
-            onSetEnd={setEnd}
+            onSetStart={updateStart}
+            onSetEnd={updateEnd}
             onClear={handleClear}
             position={position}
             locationEnabled={locationEnabled}

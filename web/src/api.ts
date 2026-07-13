@@ -35,6 +35,11 @@ export interface RouteFeature {
 export interface RouteResponse {
   green: RouteFeature
   shortest: RouteFeature
+  /** Where the request actually starts/ends once resolved onto the street
+   * network — can differ from what was clicked/geocoded, since that point
+   * may sit mid-block. One shared pair (not per-route): the snap itself
+   * doesn't depend on tree_weight. */
+  snapped: { start: Point; end: Point }
   comparison: {
     extra_length_m: number
     extra_trees: number
