@@ -65,83 +65,11 @@
   color: var(--muted);
 }
 
-.compare {
-  font-size: 0.75rem; /* 12px */
-  margin: 0;
-}
-
 .description {
   font-size: 0.75rem; /* 12px */
   color: var(--muted);
   margin: 0;
   line-height: 1.55;
-}
-
-/* A smaller sibling of Controls.module.css's Shade-priority segmented
-   control — same recipe (hidden radio stretched over a visible label),
-   sized down since choosing whose directions to read is secondary to
-   choosing the route itself. */
-.toggleGroup {
-  /* Reset all 3 of a fieldset's browser defaults (margin, padding, border)
-     — same reasoning as Controls.module.css's .presetGroup. */
-  margin: 0;
-  padding: 0;
-  border: none;
-}
-
-.toggleGroup legend {
-  padding: 0;
-  margin-bottom: var(--space-xs);
-  font-size: 0.625rem; /* 10px */
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted);
-}
-
-.toggleSeg {
-  display: flex;
-  gap: 1px;
-  padding: 2px;
-  width: fit-content;
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
-}
-
-.toggleItem {
-  position: relative;
-}
-
-.toggleInput {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  margin: 0;
-  cursor: pointer;
-}
-
-.toggleText {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 30px;
-  padding: 0 12px;
-  font-size: 0.6875rem; /* 11px */
-  color: var(--muted);
-}
-
-.toggleInput:checked + .toggleText {
-  background: var(--magenta);
-  color: var(--text); /* ink on neon magenta: 5.6:1 — matches Shade priority */
-  font-weight: 600;
-}
-
-.toggleInput:focus-visible + .toggleText {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
-
-.toggleInput:hover:not(:checked) + .toggleText {
-  color: var(--text);
 }
 
 .directionsList {

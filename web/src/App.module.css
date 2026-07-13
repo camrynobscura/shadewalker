@@ -64,8 +64,8 @@
 }
 
 .panel {
-  width: 360px; /* +20px over the old 340, so more side padding doesn't
-                   also shrink the usable content width */
+  width: 400px; /* +40px over the old 360, for the 4-way NONE/LOW/MED/MAX
+                   Shade priority control's extra segment */
   overflow-y: auto;
   padding: var(--space-lg) 24px; /* was 16px all around — more breathing room on the sides */
   background: var(--panel);

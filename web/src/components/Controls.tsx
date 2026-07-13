@@ -1,5 +1,6 @@
 import { useId, useState } from 'react'
-import { geocode, type Point } from '../api'
+import { geocode, type Point, type RouteResponse } from '../api'
+import { formatDistance } from '../format'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import styles from './Controls.module.css'
 
@@ -79,24 +80,29 @@ function AddressField({
   )
 }
 
-/* The three routing intensities, calibrated against real routes: 5 only
- * takes near-free detours, 15 sits mid-plateau where short detours appear,
- * 40 is where the router trades serious distance for trees (+523 m for
- * +115 trees on one Gowanus test walk).
+/* Four routing intensities, calibrated against real routes: 0 is the plain
+ * shortest path (no tree preference — the baseline the other three are
+ * measured against), 5 only takes near-free detours, 15 sits mid-plateau
+ * where short detours appear, 40 is where the router trades serious
+ * distance for trees (+523 m for +115 trees on one Gowanus test walk).
  *
  * `as const` freezes the array into a readonly tuple of literal types —
- * TypeScript then knows each value is exactly 5 | 15 | 40, not just
+ * TypeScript then knows each value is exactly 0 | 5 | 15 | 40, not just
  * `number`, and will reject a typo like TREE_PRESETS[0].value = 6. */
 export const TREE_PRESETS = [
-  { value: 5, label: 'LOW', hint: 'greener only when it’s nearly free' },
-  { value: 15, label: 'MED', hint: 'short detours for leafier blocks' },
-  { value: 40, label: 'MAX', hint: 'longest, greenest route' },
+  { value: 0, label: 'NONE', hint: 'fastest route, no detours for shade' },
+  { value: 5, label: 'LOW', hint: 'shadier only when it’s nearly free' },
+  { value: 15, label: 'MED', hint: 'short detours for shadier blocks' },
+  { value: 40, label: 'MAX', hint: 'longest, shadiest route' },
 ] as const
 
-export const DEFAULT_TREE_WEIGHT: number = TREE_PRESETS[1].value
+// Looked up by label rather than array position — a moderate middle
+// ground, not the first or last entry, so it shouldn't depend on where
+// MED happens to sit in the list above.
+export const DEFAULT_TREE_WEIGHT: number = TREE_PRESETS.find((preset) => preset.label === 'MED')!.value
 
 /** Old bookmarked URLs carry any 0–40 slider value; snap it to the nearest
- * preset. `<=` makes ties go to the later (greener) option, so the old
+ * preset. `<=` makes ties go to the later (shadier) option, so the old
  * default of 10 — equidistant from 5 and 15 — lands on Medium. */
 export function snapToPreset(weight: number): number {
   let nearest: number = TREE_PRESETS[0].value
@@ -118,6 +124,7 @@ interface ControlsProps {
   locationEnabled: boolean
   onEnableLocation: () => void
   hasRoute: boolean
+  route: RouteResponse | null
 }
 
 export function Controls({
@@ -130,6 +137,7 @@ export function Controls({
   locationEnabled,
   onEnableLocation,
   hasRoute,
+  route,
 }: ControlsProps) {
   // Radios become one group (arrow keys move between them, only one can be
   // checked) by sharing a `name` — useId gives us one that's unique even if
@@ -228,6 +236,15 @@ export function Controls({
         <p className={styles.presetHint}>
           &gt; mode: {selected?.label.toLowerCase()} // {selected?.hint}
         </p>
+        {/* The router's actual cost for this preset, once a route exists —
+            minutes leads since that's the number a walker weighs most
+            heavily when deciding whether a shadier route is worth taking. */}
+        {route && (
+          <p className={styles.presetHint}>
+            &gt; +{Math.round(route.green.properties.minutes - route.shortest.properties.minutes)} min · +
+            {route.comparison.extra_trees} trees · +{formatDistance(route.comparison.extra_length_m)}
+          </p>
+        )}
       </fieldset>
     </section>
   )

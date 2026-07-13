@@ -1,5 +1,5 @@
-import { useId, useState } from 'react'
 import type { RouteResponse } from '../api'
+import { formatDistance } from '../format'
 import styles from './RouteStats.module.css'
 
 /** Below ~0.02 trees-per-meter along the route, even the "greenest" option
@@ -32,17 +32,7 @@ export function RouteStats({ data, loading, error }: RouteStatsProps) {
 
 function StatsBody({ data }: { data: RouteResponse }) {
   const green = data.green.properties
-  const shortest = data.shortest.properties
-  const { extra_length_m, extra_trees } = data.comparison
   const isSparse = green.tree_count / green.length_m < SPARSE_TREES_PER_M
-
-  // Which route's turn-by-turn is showing. Own piece of state (not lifted
-  // to App) since it's a display choice about data already in `data` —
-  // nothing else needs to know about it. Persists across new route
-  // fetches since React keeps state for the same component instance.
-  const [directionsFor, setDirectionsFor] = useState<'green' | 'shortest'>('green')
-  const activeSegments = directionsFor === 'green' ? green.segments : shortest.segments
-  const groupName = useId()
 
   return (
     /* No visible heading here — the section's aria-label carries the
@@ -67,12 +57,6 @@ function StatsBody({ data }: { data: RouteResponse }) {
         </div>
       </div>
 
-      <p className={styles.compare}>
-        {extra_trees > 0
-          ? `+${extra_trees} trees · +${formatDistance(extra_length_m)} extra · worth it`
-          : '// shortest path is already the shadiest'}
-      </p>
-
       {isSparse && (
         <p className={styles.sparseNote}>
           // LOW_TREE_DENSITY: {green.tree_count} over {formatDistance(green.length_m)} — expect
@@ -80,72 +64,27 @@ function StatsBody({ data }: { data: RouteResponse }) {
         </p>
       )}
 
-      {/* Directions can show either route's turn-by-turn — the map only
-          ever drew the shadiest one, but someone comparing routes should
-          be able to read the fastest one's directions too. */}
-      <fieldset className={styles.toggleGroup}>
-        <legend>Directions_for</legend>
-        <div className={styles.toggleSeg}>
-          <label className={styles.toggleItem}>
-            <input
-              type="radio"
-              name={groupName}
-              checked={directionsFor === 'green'}
-              onChange={() => setDirectionsFor('green')}
-              className={styles.toggleInput}
-            />
-            <span className={styles.toggleText}>SHADIEST</span>
-          </label>
-          <label className={styles.toggleItem}>
-            <input
-              type="radio"
-              name={groupName}
-              checked={directionsFor === 'shortest'}
-              onChange={() => setDirectionsFor('shortest')}
-              className={styles.toggleInput}
-            />
-            <span className={styles.toggleText}>FASTEST</span>
-          </label>
-        </div>
-      </fieldset>
-
-      {activeSegments.length > 0 ? (
+      {green.segments.length > 0 ? (
         /* Ordered list, not the old one-sentence paragraph: each turn gets
            its own line, and a screen reader announces "item 2 of 4" instead
            of one long run-on. Built from `segments` (structured data)
            rather than parsing `data.description` (English prose), so it
            can use formatDistance() and stay unit-consistent with the rest
-           of the panel. */
+           of the panel. Always the shadiest route's directions — Shade
+           priority's NONE option gives the plain shortest route directly
+           (same segments), so there's no separate route to switch to here. */
         <ol className={styles.directionsList}>
-          {activeSegments.map((segment, i) => (
+          {green.segments.map((segment, i) => (
             <li key={i}>
               {i === 0 ? 'Head' : 'then'} {formatDistance(segment.length_m)} along {segment.name}
             </li>
           ))}
         </ol>
       ) : (
-        // Empty segments means start == end for both routes alike, so the
-        // server's generic "already there" text is accurate either way.
+        // Empty segments means start == end, so the server's generic
+        // "already there" text is accurate.
         <p className={styles.description}>&gt; {data.description}</p>
       )}
-
-      <p className={styles.quiet}>
-        // fastest_route: {formatDistance(shortest.length_m)} · {Math.round(shortest.minutes)} min ·{' '}
-        {shortest.tree_count} trees (dashed on map)
-      </p>
     </section>
   )
-}
-
-const METERS_PER_FOOT = 0.3048
-const FEET_PER_MILE = 5280
-
-function formatDistance(meters: number): string {
-  const feet = meters / METERS_PER_FOOT
-  // Same idea as the old km/m split, just at imperial units: short routes
-  // read better as whole feet, longer ones as miles with one decimal —
-  // the convention US map apps use.
-  return feet >= FEET_PER_MILE * 0.1
-    ? `${(feet / FEET_PER_MILE).toFixed(1)} mi`
-    : `${Math.round(feet)} ft`
 }
