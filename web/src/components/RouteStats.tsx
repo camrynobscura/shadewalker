@@ -41,7 +41,7 @@ function StatsBody({ data }: { data: RouteResponse }) {
         </div>
         <div className={styles.stat}>
           <span className={styles.statVal}>
-            {green.minutes}
+            {Math.round(green.minutes)}
             <small> min</small>
           </span>
           <span className={styles.statLabel}>eta</span>
@@ -68,7 +68,7 @@ function StatsBody({ data }: { data: RouteResponse }) {
       <p className={styles.description}>&gt; {data.description}</p>
 
       <p className={styles.quiet}>
-        // shortest_alt: {formatDistance(shortest.length_m)} · {shortest.minutes} min ·{' '}
+        // shortest_alt: {formatDistance(shortest.length_m)} · {Math.round(shortest.minutes)} min ·{' '}
         {shortest.tree_count} trees (dashed on map)
       </p>
     </section>
