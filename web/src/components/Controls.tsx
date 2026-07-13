@@ -136,22 +136,33 @@ export function Controls({
       <AddressField label="Origin_node" placeholder="e.g. 250 Court St" onResolve={onSetStart} />
       <AddressField label="Dest_node" placeholder="e.g. 3rd St & 3rd Ave" onResolve={onSetEnd} />
 
-      {/* Location is opt-in: first a button that *requests* it (triggering
-          the browser permission prompt on a user gesture, never on load),
-          which then becomes "use it" once a fix arrives. */}
-      {!locationEnabled ? (
-        <button type="button" className={styles.secondaryButton} onClick={onEnableLocation}>
-          ACQUIRE_POSITION
-        </button>
-      ) : position ? (
-        <button type="button" className={styles.secondaryButton} onClick={() => onSetStart(position)}>
-          SET_ORIGIN_NODE
-        </button>
-      ) : (
-        <p className={styles.addressStatus} role="status">
-          ACQUIRING…
-        </p>
-      )}
+      {/* Location and Clear share a row — both are secondary, one-off
+          actions, as opposed to Origin/Dest (always needed) and Shade
+          priority (a standing preference). Location is opt-in: first a
+          button that *requests* it (triggering the browser permission
+          prompt on a user gesture, never on load), which then becomes
+          "use it" once a fix arrives. */}
+      <div className={styles.buttonRow}>
+        {!locationEnabled ? (
+          <button type="button" className={styles.secondaryButton} onClick={onEnableLocation}>
+            ACQUIRE_POSITION
+          </button>
+        ) : position ? (
+          <button type="button" className={styles.secondaryButton} onClick={() => onSetStart(position)}>
+            SET_ORIGIN_NODE
+          </button>
+        ) : (
+          <p className={styles.addressStatus} role="status">
+            ACQUIRING…
+          </p>
+        )}
+
+        {hasRoute && (
+          <button type="button" className={styles.secondaryButton} onClick={onClear}>
+            CLEAR_ROUTE
+          </button>
+        )}
+      </div>
 
       {/* <fieldset> + <legend> is the native way to give a radio group its
           label: screen readers announce "Shade priority" alongside whichever
@@ -180,12 +191,6 @@ export function Controls({
           &gt; mode: {selected?.label.toLowerCase()} // {selected?.hint}
         </p>
       </fieldset>
-
-      {hasRoute && (
-        <button type="button" className={styles.secondaryButton} onClick={onClear}>
-          CLEAR_ROUTE
-        </button>
-      )}
     </section>
   )
 }

@@ -150,6 +150,20 @@
   color: var(--muted);
 }
 
+/* Holds the location control (button or status text) and, once a route
+   exists, Clear route beside it. flex: 1 on each child means a lone child
+   still fills the row exactly as a block button did before. */
+.buttonRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.buttonRow > * {
+  flex: 1;
+  margin: 0;
+}
+
 .secondaryButton {
   display: block;
   width: 100%;

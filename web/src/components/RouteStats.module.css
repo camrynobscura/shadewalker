@@ -11,9 +11,13 @@
 }
 
 /* Applied to the aria-live wrapper only once it actually has content — see
-   the comment in RouteStats.tsx. */
+   the comment in RouteStats.tsx. The hairline marks the one conceptual
+   jump in the panel: from settings you choose (Controls, above) to
+   results the router gives back (this). */
 .liveRegion {
   margin-top: var(--space-lg);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--line);
 }
 
 .statRow {
