@@ -69,8 +69,8 @@ function StatsBody({ data }: { data: RouteResponse }) {
 
       <p className={styles.compare}>
         {extra_trees > 0
-          ? `+${extra_trees} trees detected · anomaly: +${formatDistance(extra_length_m)} · acceptable`
-          : '// no anomaly — shortest path is already the greenest'}
+          ? `+${extra_trees} trees · +${formatDistance(extra_length_m)} extra · worth it`
+          : '// shortest path is already the shadiest'}
       </p>
 
       {isSparse && (
@@ -130,7 +130,7 @@ function StatsBody({ data }: { data: RouteResponse }) {
       )}
 
       <p className={styles.quiet}>
-        // shortest_alt: {formatDistance(shortest.length_m)} · {Math.round(shortest.minutes)} min ·{' '}
+        // fastest_route: {formatDistance(shortest.length_m)} · {Math.round(shortest.minutes)} min ·{' '}
         {shortest.tree_count} trees (dashed on map)
       </p>
     </section>

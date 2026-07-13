@@ -133,11 +133,11 @@ export function Controls({
   const selected = TREE_PRESETS.find((preset) => preset.value === treeWeight)
   return (
     <section aria-label="Plan a route" className={styles.section}>
-      <AddressField label="Origin_node" placeholder="e.g. 250 Court St" onResolve={onSetStart} />
-      <AddressField label="Dest_node" placeholder="e.g. 3rd St & 3rd Ave" onResolve={onSetEnd} />
+      <AddressField label="Start_point" placeholder="e.g. 250 Court St" onResolve={onSetStart} />
+      <AddressField label="End_point" placeholder="e.g. 3rd St & 3rd Ave" onResolve={onSetEnd} />
 
       {/* Location and Clear share a row — both are secondary, one-off
-          actions, as opposed to Origin/Dest (always needed) and Shade
+          actions, as opposed to Start/End (always needed) and Shade
           priority (a standing preference). Location is opt-in: first a
           button that *requests* it (triggering the browser permission
           prompt on a user gesture, never on load), which then becomes
@@ -145,11 +145,11 @@ export function Controls({
       <div className={styles.buttonRow}>
         {!locationEnabled ? (
           <button type="button" className={styles.secondaryButton} onClick={onEnableLocation}>
-            ACQUIRE_POSITION
+            USE_LOCATION
           </button>
         ) : position ? (
           <button type="button" className={styles.secondaryButton} onClick={() => onSetStart(position)}>
-            SET_ORIGIN_NODE
+            SET_START_POINT
           </button>
         ) : (
           <p className={styles.addressStatus} role="status">
