@@ -26,6 +26,13 @@ from scipy.spatial import cKDTree
 from pipeline import config
 
 
+def _dist2(p: list[float], q: np.ndarray) -> float:
+    """Squared distance between a [lon, lat] point and a node's [lon, lat]
+    array. Squared because we only ever compare two distances — skipping
+    the square root doesn't change which one is smaller."""
+    return (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2
+
+
 class GraphStore:
     def __init__(self) -> None:
         # id ↔ index: igraph and numpy work in dense integer positions;
@@ -146,11 +153,25 @@ class GraphStore:
         current = from_node
         for e in edge_path:
             u, v = self._graph.es[e].tuple
+            next_node = v if u == current else u
             step = self._coords[e]
-            if u != current:  # edge stored v→u relative to our walk: flip it
+
+            # An edge's stored geometry doesn't always run u→v: osmnx's
+            # to_undirected() collapses each one-way pair into a single
+            # edge but keeps whichever original direction's geometry it
+            # happened to retain, regardless of which node ended up
+            # labeled u vs v. Trusting "u == current" to predict direction
+            # was wrong for edges stored backwards — it flipped a
+            # correctly-oriented line, drawing a there-and-back spike.
+            # Checking which *end* of the raw geometry is actually closer
+            # to where we're standing is correct regardless of storage
+            # direction.
+            here = self._node_lonlat[current]
+            if _dist2(step[0], here) > _dist2(step[-1], here):
                 step = step[::-1]  # [::-1] = reversed copy (JS: [...a].reverse())
+
             coords.extend(step if not coords else step[1:])  # skip duplicated joint
-            current = v if u == current else u
+            current = next_node
 
             name = self._names[e] or "unnamed path"
             if segments and segments[-1]["name"] == name:
