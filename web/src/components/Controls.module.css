@@ -25,14 +25,11 @@
   margin: 0;
 }
 
-.addressRow {
-  display: flex;
-  gap: 8px;
-}
-
-.addressRow input {
-  flex: 1;
-  min-width: 0;
+/* No submit button anymore — resolution happens on blur (see
+   AddressField's `resolve()`), so this is just the input's own styling,
+   carried over unchanged from the old .addressRow input. */
+.addressInput {
+  width: 100%;
   min-height: 44px;
   padding: 8px 10px;
   background: var(--panel-raised);
@@ -42,26 +39,8 @@
   font-size: 0.875rem; /* 14px */
 }
 
-.addressRow input::placeholder {
+.addressInput::placeholder {
   color: var(--muted);
-}
-
-.addressRow button {
-  min-height: 44px;
-  min-width: 56px;
-  padding: 0 14px;
-  background: var(--green-dim);
-  color: #fff;
-  border: none;
-  border-radius: 0;
-  font-size: 0.875rem; /* 14px */
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.addressRow button:disabled {
-  opacity: 0.6;
-  cursor: wait;
 }
 
 .addressStatus {

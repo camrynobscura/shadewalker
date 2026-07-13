@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from 'react'
+import { useId, useState } from 'react'
 import { geocode, type Point } from '../api'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import styles from './Controls.module.css'
@@ -12,9 +12,12 @@ function slugify(label: string): string {
     .replace(/^_+|_+$/g, '')
 }
 
-/** One labeled address field with its own submit + status. The keyboard /
- * screen-reader path for setting route points (map clicks are the pointer
- * path — WCAG requires both). */
+/** One labeled address field that resolves itself — no submit button. The
+ * keyboard / screen-reader path for setting route points (map clicks are
+ * the pointer path — WCAG requires both). Resolution fires on blur (tab or
+ * click away) so typing an address is the only action needed; the <form>
+ * wrapper keeps Enter-to-submit working too, as a fast-path fallback for
+ * anyone who prefers it. */
 function AddressField({
   label,
   placeholder,
@@ -31,9 +34,12 @@ function AddressField({
   const [status, setStatus] = useState<'idle' | 'searching' | 'notfound' | 'found'>('idle')
   const [foundLabel, setFoundLabel] = useState('')
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!query.trim()) return
+  // Shared by blur and Enter-to-submit. `status !== 'idle'` blocks a
+  // repeat: onChange resets status back to 'idle' on every keystroke, so
+  // this only re-fires once there's actually new text to resolve — not
+  // every time focus happens to leave an already-resolved field.
+  async function resolve() {
+    if (!query.trim() || status !== 'idle') return
     setStatus('searching')
     const result = await geocode(query)
     if (result) {
@@ -46,27 +52,31 @@ function AddressField({
   }
 
   return (
-    <form onSubmit={handleSubmit} className={styles.addressForm}>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault()
+        resolve()
+      }}
+      className={styles.addressForm}
+    >
       <label htmlFor={id}>{label}</label>
-      <div className={styles.addressRow}>
-        <input
-          id={id}
-          type="text"
-          value={query}
-          placeholder={placeholder}
-          autoComplete="street-address"
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setStatus('idle')
-          }}
-        />
-        <button type="submit" disabled={status === 'searching'}>
-          {status === 'searching' ? '…' : 'LOCK'}
-        </button>
-      </div>
+      <input
+        id={id}
+        className={styles.addressInput}
+        type="text"
+        value={query}
+        placeholder={placeholder}
+        autoComplete="street-address"
+        onChange={(e) => {
+          setQuery(e.target.value)
+          setStatus('idle')
+        }}
+        onBlur={resolve}
+      />
       {/* role="status" = a polite live region: screen readers announce the
           result without stealing focus. */}
       <p className={styles.addressStatus} role="status">
+        {status === 'searching' && '// searching…'}
         {status === 'found' && `// LOCKED: ${slugify(foundLabel)}`}
         {status === 'notfound' && '// NOT_FOUND: try adding a borough'}
       </p>
