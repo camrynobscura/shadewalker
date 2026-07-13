@@ -48,6 +48,25 @@ function ClickHandler({ onMapClick }: { onMapClick: (p: Point) => void }) {
   return null
 }
 
+/** Explains the two line styles. Real text (not just aria-hidden swatches)
+ * so the meaning doesn't depend on noticing the color/dash difference —
+ * screen readers get it too, since it's plain content in reading order,
+ * not decoration. */
+function Legend() {
+  return (
+    <ul className={styles.legend}>
+      <li className={styles.legendRow}>
+        <span className={styles.legendSwatch} aria-hidden="true" />
+        greenest route
+      </li>
+      <li className={styles.legendRow}>
+        <span className={`${styles.legendSwatch} ${styles.legendSwatchDashed}`} aria-hidden="true" />
+        fastest route
+      </li>
+    </ul>
+  )
+}
+
 /** "Locate me" — rendered inside the map so useMap() can pan it. */
 function LocateButton({ position }: { position: GeoPosition | null }) {
   const map = useMap()
@@ -149,6 +168,7 @@ export function MapView({ start, end, green, shortest, position, onMapClick }: M
       {/* Purely decorative texture; aria-hidden keeps it out of the
           accessibility tree entirely. */}
       <div className={styles.scanlines} aria-hidden="true" />
+      {(green || shortest) && <Legend />}
     </div>
   )
 }

@@ -35,6 +35,42 @@
   border-radius: 0; /* square */
 }
 
+/* Bottom-left, mirroring the locate button's bottom-right slot so neither
+   ever competes with the other for space. */
+.legend {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 1000; /* above Leaflet's map panes, same tier as .locateButton */
+  margin: 0;
+  padding: 8px 10px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.legendRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legendSwatch {
+  width: 22px;
+  height: 0;
+  border-top: 3px solid var(--green);
+  flex-shrink: 0;
+}
+
+.legendSwatchDashed {
+  border-top: 3px dashed var(--magenta);
+}
+
 .locateButton {
   position: absolute;
   right: 10px;
