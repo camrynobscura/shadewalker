@@ -11,7 +11,7 @@
   padding: 10px 16px;
   background: var(--panel-raised);
   color: var(--text);
-  border-radius: 0 0 8px 0;
+  border: 1px solid var(--border);
 }
 
 /* Visible only while keyboard-focused — standard skip-link pattern. */
@@ -28,13 +28,26 @@
 
 .title {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  /* The "misprint" masthead: magenta and cyan fringes offset left/right,
+     like a risograph pass that slipped. Decorative only — the translucent
+     shadows never carry information. */
+  text-shadow:
+    -2px 0 rgba(214, 27, 176, 0.55),
+    2px 0 rgba(0, 146, 184, 0.55);
 }
 
 .tagline {
   font-weight: 400;
-  font-size: 14px;
-  color: var(--muted);
+  font-size: 13px;
+  color: var(--cyan);
+  /* text-shadow inherits, so the h1's glitch fringes must be switched off
+     here — the tagline is small text and needs to stay crisp. */
+  text-shadow: none;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .layout {

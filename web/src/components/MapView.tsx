@@ -82,23 +82,39 @@ export function MapView({ start, end, green, shortest, position, onMapClick }: M
       <MapContainer center={PILOT_CENTER} zoom={15} className={styles.map}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          subdomains={['a', 'b']} /* only the two hosts we preconnect in index.html */
         />
         <ClickHandler onMapClick={onMapClick} />
 
         {/* Shortest first so the green route draws on top of it. Routes are
-            told apart by pattern (dashed vs solid), not color alone. */}
+            told apart by pattern (dashed vs solid), not color alone.
+            Each route is two Polylines on the same coords: a wide translucent
+            "casing" underneath plus the crisp line on top — the cheap way to
+            fake the Greenhouse glow (SVG strokes can't blur). */}
         {shortest && (
-          <Polyline
-            positions={toLatLngs(shortest)}
-            pathOptions={{ color: '#8f93a5', weight: 3, dashArray: '6 8', opacity: 0.8 }}
-          />
+          <>
+            <Polyline
+              positions={toLatLngs(shortest)}
+              pathOptions={{ color: '#d61bb0', weight: 9, opacity: 0.15 }}
+            />
+            <Polyline
+              positions={toLatLngs(shortest)}
+              pathOptions={{ color: '#d61bb0', weight: 3, dashArray: '6 8', opacity: 0.85 }}
+            />
+          </>
         )}
         {green && (
-          <Polyline
-            positions={toLatLngs(green)}
-            pathOptions={{ color: '#3ddc68', weight: 5, opacity: 0.95 }}
-          />
+          <>
+            <Polyline
+              positions={toLatLngs(green)}
+              pathOptions={{ color: '#00a86b', weight: 11, opacity: 0.2 }}
+            />
+            <Polyline
+              positions={toLatLngs(green)}
+              pathOptions={{ color: '#00a86b', weight: 4.5, opacity: 0.95 }}
+            />
+          </>
         )}
 
         {/* interactive/keyboard off: the markers are visual decoration (the
@@ -118,7 +134,7 @@ export function MapView({ start, end, green, shortest, position, onMapClick }: M
             <Circle
               center={[position.lat, position.lon]}
               radius={position.accuracy}
-              pathOptions={{ color: '#7cc4ff', weight: 1, opacity: 0.4, fillOpacity: 0.08 }}
+              pathOptions={{ color: '#0077a3', weight: 1, opacity: 0.4, fillOpacity: 0.08 }}
             />
             <CircleMarker
               center={[position.lat, position.lon]}
@@ -130,6 +146,9 @@ export function MapView({ start, end, green, shortest, position, onMapClick }: M
 
         <LocateButton position={position} />
       </MapContainer>
+      {/* Purely decorative texture; aria-hidden keeps it out of the
+          accessibility tree entirely. */}
+      <div className={styles.scanlines} aria-hidden="true" />
     </div>
   )
 }

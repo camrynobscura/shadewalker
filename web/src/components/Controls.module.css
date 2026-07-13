@@ -4,7 +4,9 @@
 
 .addressForm label {
   display: block;
-  font-size: 14px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
   color: var(--muted);
   margin-bottom: 4px;
 }
@@ -22,8 +24,8 @@
   background: var(--panel-raised);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 15px;
+  border-radius: 0;
+  font-size: 14px;
 }
 
 .addressRow input::placeholder {
@@ -37,8 +39,8 @@
   background: var(--green-dim);
   color: #fff;
   border: none;
-  border-radius: 8px;
-  font-size: 15px;
+  border-radius: 0;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -66,16 +68,19 @@
 .presetGroup legend {
   padding: 0;
   margin-bottom: 6px;
-  font-size: 14px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted);
 }
 
 .segmented {
   display: flex;
-  gap: 4px;
-  padding: 4px;
+  gap: 1px;
+  padding: 2px;
   background: var(--panel-raised);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
 }
 
 .segment {
@@ -100,8 +105,8 @@
   align-items: center;
   justify-content: center;
   min-height: 40px;
-  border-radius: 6px;
-  font-size: 14px;
+  border-radius: 0;
+  font-size: 13px;
   color: var(--muted);
 }
 
@@ -109,7 +114,7 @@
    state of the input right before it. This is how the hidden input's
    :checked and :focus-visible states reach the label the user sees. */
 .segmentInput:checked + .segmentText {
-  background: var(--green-dim);
+  background: var(--magenta);
   color: #fff;
   font-weight: 600;
 }
@@ -139,11 +144,11 @@
   background: var(--panel-raised);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: 0;
+  font-size: 13px;
   cursor: pointer;
 }
 
 .secondaryButton:hover {
-  background: var(--border);
+  background: var(--line);
 }

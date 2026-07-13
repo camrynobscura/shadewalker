@@ -1,7 +1,11 @@
 .heading {
-  font-size: 17px;
+  font-size: 15px;
   margin: 18px 0 10px;
-  color: var(--green);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  /* --green-dim, not --green: jade is only 2.9:1 on the light panel — fine
+     for thick route lines, too faint for text. The deep jade passes AA. */
+  color: var(--green-dim);
 }
 
 .subheading {
@@ -32,12 +36,12 @@
 }
 
 .sparseNote {
-  font-size: 14px;
+  font-size: 13px;
   padding: 10px 12px;
   margin: 12px 0;
   background: var(--panel-raised);
-  border-left: 3px solid var(--orange);
-  border-radius: 0 8px 8px 0;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--magenta);
 }
 
 .quiet {

@@ -1,20 +1,30 @@
 /* Global theme + accessibility baseline. Component-specific styles live in
-   *.module.css files next to their components. */
+   *.module.css files next to their components.
+
+   Theme: "Greenhouse" — Glitch Garden with the lights on. Mint-tinted paper,
+   deep forest ink, jade + magenta accents, everything monospace, zero corner
+   radius. Light ground chosen on purpose: this app is used outdoors at noon,
+   where dark UIs glare and wash out. */
 
 :root {
-  /* Dark theme tuned for AA contrast: --text on --panel is ~13:1,
-     --muted on --panel is ~4.9:1. */
-  --bg: #14141c;
-  --panel: #1d1d29;
-  --panel-raised: #262635;
-  --border: #34344a;
-  --text: #ecedf1;
-  --muted: #a4a6b8;
-  --green: #3ddc68;         /* route + accents; 8:1 on --panel */
-  --green-dim: #1e7c37;     /* button bg; 5.3:1 with white text (AA) */
-  --orange: #f5a623;        /* end marker */
-  --focus: #7cc4ff;
-  --danger: #ff7a7a;
+  /* Light theme tuned for AA contrast: --text on --panel is ~15:1,
+     --muted on --panel is ~4.7:1. The mockup's brighter neons are deepened
+     where they carry text (jade #00a86b → #007a4d at 5.4:1 with white;
+     cyan #0092b8 → #0077a3 at 4.8:1) — same hue, legal contrast. */
+  --bg: #f2f8f4;
+  --panel: #f7fcf8;
+  --panel-raised: #ffffff;
+  --border: #a9ccb8;
+  --line: #d3e6da; /* hairlines between sections */
+  --text: #0b2418;
+  --muted: #4f7a66;
+  --green: #00a86b; /* jade: route line, markers, graphics (3:1+ vs map) */
+  --green-dim: #007a4d; /* button bg; 5.4:1 with white text (AA) */
+  --magenta: #c716a2; /* selected state + end marker; 5.1:1 with white */
+  --magenta-bright: #d61bb0; /* map graphics only (dashed route + glow) */
+  --cyan: #0077a3; /* tagline + small accents; 4.8:1 on --panel */
+  --focus: #0077a3;
+  --danger: #b3261e; /* 6.4:1 on --panel */
 }
 
 * {
@@ -31,8 +41,19 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* ui-monospace resolves to SF Mono on macOS; the rest is the fallback
+     chain for other platforms. Mono everywhere is the theme's voice. */
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   line-height: 1.45;
+}
+
+/* Form controls don't inherit font-family by default — without this, buttons
+   and inputs would silently stay in the system font. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }
 
 /* One loud, consistent focus indicator everywhere. :focus-visible fires for
@@ -40,7 +61,6 @@ body {
 :focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
-  border-radius: 2px;
 }
 
 /* WCAG 2.3.3: users who ask the OS for less motion get none. */
