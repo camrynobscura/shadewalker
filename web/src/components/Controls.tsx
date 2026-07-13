@@ -144,10 +144,10 @@ export function Controls({
       )}
 
       {/* <fieldset> + <legend> is the native way to give a radio group its
-          label: screen readers announce "Tree preference" alongside whichever
+          label: screen readers announce "Shade priority" alongside whichever
           option is focused. No ARIA needed — the built-in semantics do it. */}
       <fieldset className={styles.presetGroup}>
-        <legend>Tree preference</legend>
+        <legend>Shade priority</legend>
         <div className={styles.segmented}>
           {TREE_PRESETS.map((preset) => (
             <label key={preset.value} className={styles.segment}>
