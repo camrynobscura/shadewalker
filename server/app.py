@@ -10,6 +10,7 @@ at /docs.
 
 Endpoints:
     GET /health
+    GET /coverage
     GET /route?from_lat=..&from_lon=..&to_lat=..&to_lon=..[&tree_weight=..][&month=..]
 
 Every /route response carries BOTH the green route and the plain-shortest
@@ -45,6 +46,27 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/coverage")
+def coverage() -> dict:
+    """The loaded data's extent as a GeoJSON polygon, so the frontend can
+    draw it on the map — pilot tile today, whatever's loaded once Stage 2
+    adds more tiles, with no server code change needed either time."""
+    lon_min, lat_min, lon_max, lat_max = store.coverage_bounds()
+    return {
+        "type": "Feature",
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[
+                [lon_min, lat_min],
+                [lon_max, lat_min],
+                [lon_max, lat_max],
+                [lon_min, lat_max],
+                [lon_min, lat_min],
+            ]],
+        },
+    }
+
+
 @app.get("/route")
 def route(
     from_lat: float,
@@ -58,6 +80,21 @@ def route(
         month = datetime.now().month
     if not 1 <= month <= 12:
         raise HTTPException(status_code=400, detail="month must be 1-12")
+
+    # Snapping alone can't tell "outside our data" from "a real address" —
+    # it always returns the nearest node, however far away. Without this,
+    # a destination beyond the pilot tile's edge silently snapped to the
+    # tile boundary instead of reaching where the user actually asked for.
+    if not store.in_coverage(from_lat, from_lon):
+        raise HTTPException(
+            status_code=422,
+            detail="Start point is outside our current coverage area — pick a point inside the shaded area on the map.",
+        )
+    if not store.in_coverage(to_lat, to_lon):
+        raise HTTPException(
+            status_code=422,
+            detail="End point is outside our current coverage area — pick a point inside the shaded area on the map.",
+        )
 
     start = store.snap(from_lat, from_lon)
     end = store.snap(to_lat, to_lon)

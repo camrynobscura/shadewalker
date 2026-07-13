@@ -44,6 +44,11 @@ export interface RouteResponse {
   description: string
 }
 
+/** Distinguishes "the server responded but rejected the request" (has a
+ * specific, useful reason worth showing) from a plain failed fetch — a
+ * dead server or no network throws a generic browser Error instead. */
+export class RouteError extends Error {}
+
 export async function fetchRoute(
   from: Point,
   to: Point,
@@ -59,8 +64,26 @@ export async function fetchRoute(
   })
   const res = await fetch(`/route?${params}`, { signal })
   if (!res.ok) {
-    throw new Error(`Routing failed (${res.status})`)
+    const body: { detail?: string } = await res.json().catch(() => ({}))
+    throw new RouteError(body.detail ?? `Routing failed (${res.status})`)
   }
+  return res.json()
+}
+
+/** GeoJSON polygon of the area we actually have street + tree data for —
+ * drawn on the map so people can see where a route can start/end before
+ * they try one. */
+export interface CoverageFeature {
+  type: 'Feature'
+  geometry: {
+    type: 'Polygon'
+    coordinates: [number, number][][]
+  }
+}
+
+export async function fetchCoverage(): Promise<CoverageFeature> {
+  const res = await fetch('/coverage')
+  if (!res.ok) throw new Error(`Could not load coverage area (${res.status})`)
   return res.json()
 }
 

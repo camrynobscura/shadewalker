@@ -119,6 +119,13 @@ TREE_WEIGHT = 10.0
 # densities (0.8+ vs a leafy block's 0.05).
 DENSITY_LENGTH_FLOOR_M = 20.0
 
+# How far a requested point may sit from the nearest graph node and still be
+# considered "in coverage". Intersections along a real block are already
+# 80-100 m apart, so this has to be generous enough not to reject a
+# legitimate mid-block address — it's a backstop for genuine gaps (a point
+# in the middle of the Gowanus Canal, say), not a precision check.
+MAX_SNAP_DISTANCE_M = 200.0
+
 
 # ── Data sources ──────────────────────────────────────────────────────────────
 

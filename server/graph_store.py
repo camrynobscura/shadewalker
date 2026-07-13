@@ -33,6 +33,12 @@ def _dist2(p: list[float], q: np.ndarray) -> float:
     return (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2
 
 
+# A degree of latitude is ~111.32 km everywhere on Earth — used to convert
+# the KDTree's query distance (in degrees-of-latitude units, since only
+# longitude gets scaled) back into real meters.
+METERS_PER_DEGREE_LAT = 111_320.0
+
+
 class GraphStore:
     def __init__(self) -> None:
         # id ↔ index: igraph and numpy work in dense integer positions;
@@ -41,6 +47,7 @@ class GraphStore:
         self._node_lonlat: np.ndarray | None = None  # (N, 2) float64
         self._kdtree: cKDTree | None = None
         self._lat_scale = 1.0  # see _build_kdtree
+        self._bounds: tuple[float, float, float, float] | None = None  # lon_min, lat_min, lon_max, lat_max
 
         # Edge attribute arrays, all aligned by edge position.
         self._length = np.empty(0, dtype=np.float32)
@@ -93,6 +100,12 @@ class GraphStore:
                 self._coords.append(edge["coords"])
 
         self._node_lonlat = np.array(node_lonlat)
+        # The data's actual extent — whatever tiles happen to be loaded —
+        # rather than a hardcoded bbox from pipeline/config.py, so this
+        # stays correct without a server change once Stage 2 adds more tiles.
+        lon_min, lat_min = self._node_lonlat.min(axis=0)
+        lon_max, lat_max = self._node_lonlat.max(axis=0)
+        self._bounds = (float(lon_min), float(lat_min), float(lon_max), float(lat_max))
         self._length = np.array(length, dtype=np.float32)
         self._tree_deciduous = np.array(deciduous, dtype=np.float32)
         self._tree_evergreen = np.array(evergreen, dtype=np.float32)
@@ -127,6 +140,25 @@ class GraphStore:
         """Nearest graph node (as internal index) to a clicked point."""
         _, idx = self._kdtree.query([lon * self._lat_scale, lat])
         return int(idx)
+
+    def coverage_bounds(self) -> tuple[float, float, float, float]:
+        """(lon_min, lat_min, lon_max, lat_max) of the loaded graph data."""
+        return self._bounds
+
+    def in_coverage(self, lat: float, lon: float) -> bool:
+        """Whether a point is somewhere we actually have routable data.
+
+        Two checks, cheapest first: outside the loaded data's bounding box
+        is an easy no. Inside the box isn't automatically a yes, though —
+        a point in the middle of the Gowanus Canal is "inside" the pilot
+        tile's bbox but nowhere near a real sidewalk, so the second check
+        also requires a graph node within MAX_SNAP_DISTANCE_M.
+        """
+        lon_min, lat_min, lon_max, lat_max = self._bounds
+        if not (lon_min <= lon <= lon_max and lat_min <= lat <= lat_max):
+            return False
+        dist_deg, _ = self._kdtree.query([lon * self._lat_scale, lat])
+        return dist_deg * METERS_PER_DEGREE_LAT <= config.MAX_SNAP_DISTANCE_M
 
     def edge_costs(self, tree_weight: float, month: int) -> np.ndarray:
         """The plan's trees-only cost formula, vectorized over every edge."""

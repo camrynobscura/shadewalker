@@ -4,12 +4,13 @@ import {
   CircleMarker,
   MapContainer,
   Marker,
+  Polygon,
   Polyline,
   TileLayer,
   useMap,
   useMapEvents,
 } from 'react-leaflet'
-import type { Point, RouteFeature } from '../api'
+import type { CoverageFeature, Point, RouteFeature } from '../api'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import styles from './MapView.module.css'
 
@@ -36,6 +37,63 @@ function toLatLngs(feature: RouteFeature): [number, number][] {
   return feature.geometry.coordinates.map(([lon, lat]) => [lat, lon])
 }
 
+/** A ring well outside the coverage polygon in every direction. Paired with
+ * the coverage ring as a Polygon's two rings (outer boundary + hole),
+ * Leaflet fills only the area *between* them — everything outside coverage
+ * gets dimmed, the coverage area itself stays a clear "hole". Sized off the
+ * coverage ring itself rather than a hardcoded NYC box, so this keeps
+ * working unchanged once Stage 2 covers more than one tile. */
+function maskRing(coverageRing: [number, number][]): [number, number][] {
+  const lons = coverageRing.map(([lon]) => lon)
+  const lats = coverageRing.map(([, lat]) => lat)
+  const margin = 0.5 // degrees (~55 km) — comfortably beyond any zoom-out
+  // a user would realistically reach in an NYC-scoped app, and bigger than
+  // Stage 2's eventual citywide coverage ring too
+  const lonMin = Math.min(...lons) - margin
+  const lonMax = Math.max(...lons) + margin
+  const latMin = Math.min(...lats) - margin
+  const latMax = Math.max(...lats) + margin
+  return [
+    [lonMin, latMin],
+    [lonMax, latMin],
+    [lonMax, latMax],
+    [lonMin, latMax],
+    [lonMin, latMin],
+  ]
+}
+
+/** Dims everything outside the routable area, plus a dashed line marking
+ * its edge. Two separate Polygons rather than one: the dimming needs a
+ * hole (fill between two rings, coverage area excluded); the edge needs
+ * its own stroke-only pass so the boundary itself reads crisply on top. */
+function CoverageOverlay({ coverage }: { coverage: CoverageFeature }) {
+  const ring = coverage.geometry.coordinates[0]
+  const outer = maskRing(ring)
+  const toLatLng = ([lon, lat]: [number, number]): [number, number] => [lat, lon]
+
+  return (
+    <>
+      <Polygon
+        // The hole ring has to wind opposite the outer ring — Leaflet's SVG
+        // paths use the default (nonzero) fill-rule, which fills straight
+        // through a same-direction inner ring instead of punching a hole.
+        // Reversing point order flips winding without changing the shape.
+        positions={[outer.map(toLatLng), [...ring].reverse().map(toLatLng)]}
+        pathOptions={{ stroke: false, fillColor: '#0b2418', fillOpacity: 0.16 }}
+        interactive={false}
+      />
+      <Polygon
+        // Same weight/dash/opacity as the fastest route's pink line below —
+        // green instead, so it reads as "a line like that one" rather than
+        // an unrelated new style.
+        positions={[ring.map(toLatLng)]}
+        pathOptions={{ color: '#00a86b', weight: 3, dashArray: '6 8', opacity: 0.85, fill: false }}
+        interactive={false}
+      />
+    </>
+  )
+}
+
 const reducedMotion = () =>
   window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -48,21 +106,34 @@ function ClickHandler({ onMapClick }: { onMapClick: (p: Point) => void }) {
   return null
 }
 
-/** Explains the two line styles. Real text (not just aria-hidden swatches)
+/** Explains the map's line styles. Real text (not just aria-hidden swatches)
  * so the meaning doesn't depend on noticing the color/dash difference —
  * screen readers get it too, since it's plain content in reading order,
- * not decoration. */
-function Legend() {
+ * not decoration. Route rows only once a route exists; the coverage row
+ * as soon as the boundary itself has loaded, independent of that — it's
+ * meant to help *before* someone tries a route, not just explain one after. */
+function Legend({ hasRoute, hasCoverage }: { hasRoute: boolean; hasCoverage: boolean }) {
+  if (!hasRoute && !hasCoverage) return null
   return (
     <ul className={styles.legend}>
-      <li className={styles.legendRow}>
-        <span className={styles.legendSwatch} aria-hidden="true" />
-        shadiest route
-      </li>
-      <li className={styles.legendRow}>
-        <span className={`${styles.legendSwatch} ${styles.legendSwatchDashed}`} aria-hidden="true" />
-        fastest route
-      </li>
+      {hasRoute && (
+        <>
+          <li className={styles.legendRow}>
+            <span className={styles.legendSwatch} aria-hidden="true" />
+            shadiest route
+          </li>
+          <li className={styles.legendRow}>
+            <span className={`${styles.legendSwatch} ${styles.legendSwatchDashed}`} aria-hidden="true" />
+            fastest route
+          </li>
+        </>
+      )}
+      {hasCoverage && (
+        <li className={styles.legendRow}>
+          <span className={`${styles.legendSwatch} ${styles.legendSwatchCoverage}`} aria-hidden="true" />
+          coverage area
+        </li>
+      )}
     </ul>
   )
 }
@@ -87,11 +158,12 @@ interface MapViewProps {
   end: Point | null
   green: RouteFeature | null
   shortest: RouteFeature | null
+  coverage: CoverageFeature | null
   position: GeoPosition | null
   onMapClick: (p: Point) => void
 }
 
-export function MapView({ start, end, green, shortest, position, onMapClick }: MapViewProps) {
+export function MapView({ start, end, green, shortest, coverage, position, onMapClick }: MapViewProps) {
   return (
     <div
       className={styles.mapRegion}
@@ -105,6 +177,10 @@ export function MapView({ start, end, green, shortest, position, onMapClick }: M
           subdomains={['a', 'b']} /* only the two hosts we preconnect in index.html */
         />
         <ClickHandler onMapClick={onMapClick} />
+
+        {/* Drawn first (and non-interactive) so the route lines and markers
+            always sit visually on top of it, never the other way round. */}
+        {coverage && <CoverageOverlay coverage={coverage} />}
 
         {/* Shortest first so the green route draws on top of it. Routes are
             told apart by pattern (dashed vs solid), not color alone.
@@ -168,7 +244,7 @@ export function MapView({ start, end, green, shortest, position, onMapClick }: M
       {/* Purely decorative texture; aria-hidden keeps it out of the
           accessibility tree entirely. */}
       <div className={styles.scanlines} aria-hidden="true" />
-      {(green || shortest) && <Legend />}
+      <Legend hasRoute={Boolean(green || shortest)} hasCoverage={Boolean(coverage)} />
     </div>
   )
 }

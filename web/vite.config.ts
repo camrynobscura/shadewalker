@@ -12,6 +12,7 @@ export default defineConfig({
     proxy: {
       '/route': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
+      '/coverage': 'http://localhost:8000',
     },
   },
 })

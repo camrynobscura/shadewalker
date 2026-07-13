@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchRoute, type Point, type RouteResponse } from './api'
+import { fetchCoverage, fetchRoute, RouteError, type CoverageFeature, type Point, type RouteResponse } from './api'
 import { Controls, DEFAULT_TREE_WEIGHT, snapToPreset } from './components/Controls'
 import { MapView } from './components/MapView'
 import { RouteStats } from './components/RouteStats'
@@ -41,6 +41,16 @@ export default function App() {
   const [locationEnabled, setLocationEnabled] = useState(false)
   const position = useGeolocation(locationEnabled)
 
+  const [coverage, setCoverage] = useState<CoverageFeature | null>(null)
+  // Fetched once, not tied to any route request. Purely a visual aid — the
+  // server enforces real coverage on every /route call regardless of
+  // whether this loaded, so a failure here just means no boundary drawn.
+  useEffect(() => {
+    fetchCoverage()
+      .then(setCoverage)
+      .catch(() => {})
+  }, [])
+
   // Fetch whenever the request changes. The AbortController in the cleanup
   // cancels the in-flight request each time a newer one supersedes it (e.g.
   // dragging the slider) — otherwise slow responses could arrive out of
@@ -60,7 +70,10 @@ export default function App() {
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return // superseded, not an error
-        setError('Could not find a route — is the server running?')
+        // RouteError = the server responded with a specific, useful reason
+        // (e.g. outside coverage) — show that. Anything else (dead server,
+        // no network) gets the generic fallback instead of a raw fetch error.
+        setError(err instanceof RouteError ? err.message : 'Could not find a route — is the server running?')
         setLoading(false)
       })
     return () => controller.abort()
@@ -101,7 +114,7 @@ export default function App() {
 
       <header className={styles.header}>
         <h1 className={styles.title}>
-          Shady Stroll <span className={styles.tagline}>find the shadiest path for your route</span>
+          Shady Stroll <span className={styles.tagline}>- find the shadiest path for your route</span>
         </h1>
       </header>
 
@@ -112,6 +125,7 @@ export default function App() {
             end={end}
             green={route?.green ?? null}
             shortest={route?.shortest ?? null}
+            coverage={coverage}
             position={position}
             onMapClick={handleMapClick}
           />
@@ -128,11 +142,12 @@ export default function App() {
             locationEnabled={locationEnabled}
             onEnableLocation={() => setLocationEnabled(true)}
             hasRoute={route !== null}
+            route={route}
           />
           <RouteStats data={route} loading={loading} error={error} />
           {!start && !end && (
             <p className={styles.hint}>
-              Click the map (A, then B) or type two addresses to find your greenest walk.
+              Click the map (A, then B) or type two addresses to find your shadiest walk.
             </p>
           )}
         </aside>
