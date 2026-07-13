@@ -57,7 +57,7 @@ function Legend() {
     <ul className={styles.legend}>
       <li className={styles.legendRow}>
         <span className={styles.legendSwatch} aria-hidden="true" />
-        greenest route
+        shadiest route
       </li>
       <li className={styles.legendRow}>
         <span className={`${styles.legendSwatch} ${styles.legendSwatchDashed}`} aria-hidden="true" />
