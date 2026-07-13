@@ -15,3 +15,4 @@ web/dist/
 
 # Claude Code local (per-machine) state — settings, plans, scheduled-task locks
 .claude/
+CLAUDE.md
