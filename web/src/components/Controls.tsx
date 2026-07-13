@@ -3,62 +3,61 @@ import { geocode, type Point } from '../api'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import styles from './Controls.module.css'
 
-/** Turns a geocoded place name into the terminal-style slug the Greenhouse
- * design uses for status text ("250 Court St, Brooklyn" → "250_court_st_brooklyn"). */
-function slugify(label: string): string {
-  return label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-}
+type FieldStatus = 'idle' | 'searching' | 'notfound' | 'found'
 
-/** One labeled address field that resolves itself — no submit button. The
- * keyboard / screen-reader path for setting route points (map clicks are
- * the pointer path — WCAG requires both). Resolution fires on blur (tab or
- * click away) so typing an address is the only action needed; the <form>
- * wrapper keeps Enter-to-submit working too, as a fast-path fallback for
- * anyone who prefers it. */
-function AddressField({
-  label,
-  placeholder,
-  onResolve,
-}: {
-  label: string
-  placeholder: string
-  onResolve: (p: Point) => void
-}) {
-  // useId generates a unique, SSR-safe id so <label htmlFor> can point at
-  // the input even when the component appears twice on the page.
-  const id = useId()
+/** Owns one address field's query/status and how to resolve it. A hook,
+ * not a component, because Controls needs two independent copies (start,
+ * end) that a single shared "find route" submit can resolve together. */
+function useAddressField(onResolve: (p: Point) => void) {
   const [query, setQuery] = useState('')
-  const [status, setStatus] = useState<'idle' | 'searching' | 'notfound' | 'found'>('idle')
-  const [foundLabel, setFoundLabel] = useState('')
+  const [status, setStatus] = useState<FieldStatus>('idle')
 
-  // Shared by blur and Enter-to-submit. `status !== 'idle'` blocks a
-  // repeat: onChange resets status back to 'idle' on every keystroke, so
-  // this only re-fires once there's actually new text to resolve — not
-  // every time focus happens to leave an already-resolved field.
+  function onChange(value: string) {
+    setQuery(value)
+    setStatus('idle')
+  }
+
+  // `status !== 'idle'` blocks a repeat: onChange resets status back to
+  // 'idle' on every keystroke, so this only re-fires once there's actually
+  // new text to resolve — not every time "find route" is pressed again.
   async function resolve() {
     if (!query.trim() || status !== 'idle') return
     setStatus('searching')
     const result = await geocode(query)
     if (result) {
       setStatus('found')
-      setFoundLabel(result.label)
       onResolve({ lat: result.lat, lon: result.lon })
     } else {
       setStatus('notfound')
     }
   }
 
+  return { query, status, onChange, resolve }
+}
+
+/** One labeled address field. Purely presentational — Controls owns the
+ * query/status/resolve logic (via useAddressField) so one submit button
+ * can resolve both fields together. No status message once found: the
+ * address is already sitting right there in the input, restating it back
+ * as text would just be duplicating what's on screen. */
+function AddressField({
+  label,
+  placeholder,
+  query,
+  status,
+  onChange,
+}: {
+  label: string
+  placeholder: string
+  query: string
+  status: FieldStatus
+  onChange: (value: string) => void
+}) {
+  // useId generates a unique, SSR-safe id so <label htmlFor> can point at
+  // the input even when the component appears twice on the page.
+  const id = useId()
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault()
-        resolve()
-      }}
-      className={styles.addressForm}
-    >
+    <div className={styles.addressField}>
       <label htmlFor={id}>{label}</label>
       <input
         id={id}
@@ -67,20 +66,15 @@ function AddressField({
         value={query}
         placeholder={placeholder}
         autoComplete="street-address"
-        onChange={(e) => {
-          setQuery(e.target.value)
-          setStatus('idle')
-        }}
-        onBlur={resolve}
+        onChange={(e) => onChange(e.target.value)}
       />
       {/* role="status" = a polite live region: screen readers announce the
           result without stealing focus. */}
       <p className={styles.addressStatus} role="status">
         {status === 'searching' && '// searching…'}
-        {status === 'found' && `// LOCKED: ${slugify(foundLabel)}`}
         {status === 'notfound' && '// NOT_FOUND: try adding a borough'}
       </p>
-    </form>
+    </div>
   )
 }
 
@@ -141,10 +135,43 @@ export function Controls({
   // this component ever renders twice.
   const groupName = useId()
   const selected = TREE_PRESETS.find((preset) => preset.value === treeWeight)
+
+  const start = useAddressField(onSetStart)
+  const end = useAddressField(onSetEnd)
+  const isSearching = start.status === 'searching' || end.status === 'searching'
+
   return (
     <section aria-label="Plan a route" className={styles.section}>
-      <AddressField label="Start_point" placeholder="e.g. 250 Court St" onResolve={onSetStart} />
-      <AddressField label="End_point" placeholder="e.g. 3rd St & 3rd Ave" onResolve={onSetEnd} />
+      {/* One form for both fields, so Enter in either one — or the button —
+          resolves whichever isn't already resolved. Each field's own
+          resolve() no-ops on an empty or already-resolved query, so this
+          is safe to fire even if only one field changed. */}
+      <form
+        className={styles.routeForm}
+        onSubmit={(e) => {
+          e.preventDefault()
+          start.resolve()
+          end.resolve()
+        }}
+      >
+        <AddressField
+          label="Start_point"
+          placeholder="e.g. 250 Court St"
+          query={start.query}
+          status={start.status}
+          onChange={start.onChange}
+        />
+        <AddressField
+          label="End_point"
+          placeholder="e.g. 3rd St & 3rd Ave"
+          query={end.query}
+          status={end.status}
+          onChange={end.onChange}
+        />
+        <button type="submit" className={styles.primaryButton} disabled={isSearching}>
+          {isSearching ? 'FINDING…' : 'FIND_ROUTE'}
+        </button>
+      </form>
 
       {/* Location and Clear share a row — both are secondary, one-off
           actions, as opposed to Start/End (always needed) and Shade

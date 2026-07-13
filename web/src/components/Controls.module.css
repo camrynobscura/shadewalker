@@ -9,14 +9,23 @@
   gap: var(--space-lg);
 }
 
-.addressForm {
+/* One form wraps both address fields plus the Find_route button (below),
+   at the same --space-lg tier as .section — visually it's still just one
+   flat list, this is purely so Enter in either field submits both. */
+.routeForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.addressField {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
   margin: 0;
 }
 
-.addressForm label {
+.addressField label {
   display: block;
   font-size: 0.625rem; /* 10px */
   text-transform: uppercase;
@@ -25,9 +34,6 @@
   margin: 0;
 }
 
-/* No submit button anymore — resolution happens on blur (see
-   AddressField's `resolve()`), so this is just the input's own styling,
-   carried over unchanged from the old .addressRow input. */
 .addressInput {
   width: 100%;
   min-height: 44px;
@@ -127,6 +133,29 @@
   margin: var(--space-xs) 0 0;
   font-size: 0.75rem; /* 12px */
   color: var(--muted);
+}
+
+/* The one button that actually produces a route — solid fill, same
+   treatment the old per-field LOCK button had, so it outranks the
+   bordered .secondaryButton controls below it. */
+.primaryButton {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--green-dim);
+  color: #fff;
+  border: none;
+  border-radius: 0;
+  font-size: 0.875rem; /* 14px */
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primaryButton:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 /* Holds the location control (button or status text) and, once a route
