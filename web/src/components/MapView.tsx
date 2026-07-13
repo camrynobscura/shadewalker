@@ -96,11 +96,11 @@ export function MapView({ start, end, green, shortest, position, onMapClick }: M
           <>
             <Polyline
               positions={toLatLngs(shortest)}
-              pathOptions={{ color: '#d61bb0', weight: 9, opacity: 0.15 }}
+              pathOptions={{ color: '#ff2bd6', weight: 9, opacity: 0.15 }}
             />
             <Polyline
               positions={toLatLngs(shortest)}
-              pathOptions={{ color: '#d61bb0', weight: 3, dashArray: '6 8', opacity: 0.85 }}
+              pathOptions={{ color: '#ff2bd6', weight: 3, dashArray: '6 8', opacity: 0.85 }}
             />
           </>
         )}

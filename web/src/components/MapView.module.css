@@ -8,7 +8,9 @@
   position: relative; /* anchors the .scanlines overlay */
 }
 
-/* A/B markers: shape + letter + color, never color alone. */
+/* A/B markers: shape + letter + color, never color alone. Flat and
+   borderless like the Greenhouse mockup; a faint shadow keeps them
+   separable from busy tiles without reading as an outline. */
 .marker {
   display: flex;
   align-items: center;
@@ -17,19 +19,17 @@
   height: 30px;
   font-weight: 700;
   font-size: 15px;
-  border: 2px solid #ffffff;
-  box-shadow: 0 1px 4px rgba(11, 36, 24, 0.45);
+  color: #0b2418; /* ink on jade 6:1, ink on neon magenta 5.6:1 */
+  box-shadow: 0 1px 3px rgba(11, 36, 24, 0.3);
 }
 
 .markerStart {
   background: var(--green);
-  color: #0b2418; /* ink on jade: 6:1 */
   border-radius: 50%; /* circle */
 }
 
 .markerEnd {
   background: var(--magenta);
-  color: #ffffff; /* white on magenta: 5.1:1 */
   border-radius: 0; /* square */
 }
 
@@ -52,18 +52,22 @@
   background: var(--line);
 }
 
-/* The Greenhouse scanlines: faint print-texture lines over the whole map.
-   pointer-events: none means clicks pass straight through to the map, and
-   z-index 450 slots it above the route lines (Leaflet's overlay pane, 400)
-   but below the A/B markers (600) and controls (1000). */
+/* The Greenhouse scanlines: green print-texture lines over a thin jade
+   wash — together they tint CARTO's grey-white tiles toward the mockup's
+   mint map ground. pointer-events: none means clicks pass straight through
+   to the map, and z-index 450 slots it above the route lines (Leaflet's
+   overlay pane, 400) but below the A/B markers (600) and controls (1000).
+   Multiple backgrounds layer top-down: lines first, wash underneath. */
 .scanlines {
   position: absolute;
   inset: 0;
   z-index: 450;
   pointer-events: none;
-  background: repeating-linear-gradient(
-    0deg,
-    rgba(11, 36, 24, 0.06) 0 1px,
-    transparent 1px 3px
-  );
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 122, 77, 0.08) 0 1px,
+      transparent 1px 3px
+    ),
+    rgba(0, 168, 107, 0.06);
 }

@@ -115,7 +115,7 @@
    :checked and :focus-visible states reach the label the user sees. */
 .segmentInput:checked + .segmentText {
   background: var(--magenta);
-  color: #fff;
+  color: var(--text); /* ink on neon magenta: 5.6:1 — white would fail AA */
   font-weight: 600;
 }
 

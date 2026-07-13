@@ -8,23 +8,23 @@
 
 :root {
   /* Light theme tuned for AA contrast: --text on --panel is ~15:1,
-     --muted on --panel is ~4.7:1. The mockup's brighter neons are deepened
-     where they carry text (jade #00a86b → #007a4d at 5.4:1 with white;
-     cyan #0092b8 → #0077a3 at 4.8:1) — same hue, legal contrast. */
-  --bg: #f2f8f4;
-  --panel: #f7fcf8;
+     --muted on --panel is ~5:1. Where a neon carries text it pairs with a
+     color that passes: jade deepens to #007a4d (5.4:1 with white), the
+     bright glitch magenta keeps its full #ff2bd6 punch by carrying INK
+     text instead of white (5.6:1), cyan deepens to #0077a3 (4.7:1). */
+  --bg: #e6f2e9;
+  --panel: #eff8f1;
   --panel-raised: #ffffff;
-  --border: #a9ccb8;
-  --line: #d3e6da; /* hairlines between sections */
+  --border: #9dc7ac;
+  --line: #cfe5d6; /* hairlines between sections */
   --text: #0b2418;
-  --muted: #4f7a66;
+  --muted: #4a7360;
   --green: #00a86b; /* jade: route line, markers, graphics (3:1+ vs map) */
   --green-dim: #007a4d; /* button bg; 5.4:1 with white text (AA) */
-  --magenta: #c716a2; /* selected state + end marker; 5.1:1 with white */
-  --magenta-bright: #d61bb0; /* map graphics only (dashed route + glow) */
-  --cyan: #0077a3; /* tagline + small accents; 4.8:1 on --panel */
+  --magenta: #ff2bd6; /* Glitch Garden neon: selected state + end marker; pair with --text, never white */
+  --cyan: #0077a3; /* tagline + small accents; 4.7:1 on --panel */
   --focus: #0077a3;
-  --danger: #b3261e; /* 6.4:1 on --panel */
+  --danger: #b3261e; /* 6:1+ on --panel */
 }
 
 * {
