@@ -75,6 +75,15 @@ function StatsBody({ data }: { data: RouteResponse }) {
   )
 }
 
+const METERS_PER_FOOT = 0.3048
+const FEET_PER_MILE = 5280
+
 function formatDistance(meters: number): string {
-  return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`
+  const feet = meters / METERS_PER_FOOT
+  // Same idea as the old km/m split, just at imperial units: short routes
+  // read better as whole feet, longer ones as miles with one decimal —
+  // the convention US map apps use.
+  return feet >= FEET_PER_MILE * 0.1
+    ? `${(feet / FEET_PER_MILE).toFixed(1)} mi`
+    : `${Math.round(feet)} ft`
 }
