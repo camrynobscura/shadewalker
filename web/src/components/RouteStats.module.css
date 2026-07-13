@@ -8,6 +8,10 @@
   flex: 1;
   min-width: 0;
   padding: 8px 10px;
+  /* A soft green wash so these read as data readouts, distinct from the
+     panel background — a translucent tint over --green, not the solid
+     --green-dim fill the actual buttons use, so it doesn't look clickable. */
+  background: rgba(0, 168, 107, 0.08);
   border: 1px solid var(--line);
   line-height: 1.25;
 }
@@ -49,6 +53,24 @@
   color: var(--muted);
   margin: 7px 0 0;
   line-height: 1.55;
+}
+
+.directionsLabel {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 7px 0 0;
+}
+
+.directionsList {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 4px 0 0;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+
+.directionsList li {
+  margin-bottom: 2px;
 }
 
 .sparseNote {

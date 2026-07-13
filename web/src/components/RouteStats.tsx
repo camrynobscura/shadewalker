@@ -65,7 +65,26 @@ function StatsBody({ data }: { data: RouteResponse }) {
         </p>
       )}
 
-      <p className={styles.description}>&gt; {data.description}</p>
+      {green.segments.length > 0 ? (
+        <>
+          <p className={styles.directionsLabel}>&gt; directions</p>
+          {/* Ordered list, not the old one-sentence paragraph: each turn
+              gets its own line, and a screen reader announces "item 2 of 4"
+              instead of one long run-on. Built from `segments` (structured
+              data) rather than parsing `data.description` (English prose),
+              so it can use formatDistance() and stay unit-consistent with
+              the rest of the panel. */}
+          <ol className={styles.directionsList}>
+            {green.segments.map((segment, i) => (
+              <li key={i}>
+                {i === 0 ? 'Head' : 'then'} {formatDistance(segment.length_m)} along {segment.name}
+              </li>
+            ))}
+          </ol>
+        </>
+      ) : (
+        <p className={styles.description}>&gt; {data.description}</p>
+      )}
 
       <p className={styles.quiet}>
         // shortest_alt: {formatDistance(shortest.length_m)} · {Math.round(shortest.minutes)} min ·{' '}
