@@ -44,6 +44,7 @@
   font-style: italic;
   font-size: 13px;
   color: var(--cyan);
+  opacity: 0.8;
   /* text-shadow inherits, so the h1's glitch fringes must be switched off
      here — the tagline is small text and needs to stay crisp. */
   text-shadow: none;
@@ -66,7 +67,7 @@
   width: 360px; /* +20px over the old 340, so more side padding doesn't
                    also shrink the usable content width */
   overflow-y: auto;
-  padding: 16px 24px; /* was 16px all around — more breathing room on the sides */
+  padding: var(--space-lg) 24px; /* was 16px all around — more breathing room on the sides */
   background: var(--panel);
   border-left: 1px solid var(--border);
 }
@@ -74,6 +75,11 @@
 .hint {
   font-size: 14px;
   color: var(--muted);
+  /* Was unset, so it fell back to the browser's default <p> margin —
+     explicit now, matching the --space-lg gap used everywhere else in the
+     panel. Only ever rendered while Controls/RouteStats' aria-live div is
+     empty, so this is the one gap source between them, not an addition. */
+  margin: var(--space-lg) 0 0;
 }
 
 /* Mobile / narrow (and 200%-zoom reflow): stack map above panel. */

@@ -1,5 +1,19 @@
+/* The outer <section> (below) spaces every direct child with `gap` — so
+   every child here declares `margin: 0` explicitly rather than leaning on
+   whatever margin the browser happens to default that tag to. Mixing
+   gap with un-zeroed margins is exactly how spacing ends up "all over the
+   place": the two add together instead of one clearly winning. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
 .addressForm {
-  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
 }
 
 .addressForm label {
@@ -8,7 +22,7 @@
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);
-  margin-bottom: 4px;
+  margin: 0;
 }
 
 .addressRow {
@@ -52,22 +66,23 @@
 
 .addressStatus {
   min-height: 1.2em;
-  margin: 4px 0 0;
+  margin: 0;
   font-size: 13px;
   color: var(--muted);
 }
 
 .presetGroup {
-  /* Fieldsets ship with a browser-default border and padding meant for
-     old-school form sections — reset both so it lays out like a plain div. */
-  margin: 18px 0;
+  /* Fieldsets ship with a browser-default border, padding, AND margin
+     meant for old-school form sections — reset all three so it lays out
+     like a plain div and the parent's `gap` is the only spacing source. */
+  margin: 0;
   padding: 0;
   border: none;
 }
 
 .presetGroup legend {
   padding: 0;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-xs);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -130,7 +145,7 @@
 
 .presetHint {
   min-height: 1.2em;
-  margin: 6px 0 0;
+  margin: var(--space-xs) 0 0;
   font-size: 12px;
   color: var(--muted);
 }
@@ -139,7 +154,7 @@
   display: block;
   width: 100%;
   min-height: 44px;
-  margin: 6px 0;
+  margin: 0;
   padding: 8px 12px;
   background: var(--panel-raised);
   color: var(--text);

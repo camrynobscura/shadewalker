@@ -132,7 +132,7 @@ export function Controls({
   const groupName = useId()
   const selected = TREE_PRESETS.find((preset) => preset.value === treeWeight)
   return (
-    <section aria-label="Plan a route">
+    <section aria-label="Plan a route" className={styles.section}>
       <AddressField label="Origin_node" placeholder="e.g. 250 Court St" onResolve={onSetStart} />
       <AddressField label="Dest_node" placeholder="e.g. 3rd St & 3rd Ave" onResolve={onSetEnd} />
 

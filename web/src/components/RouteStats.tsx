@@ -13,10 +13,16 @@ interface RouteStatsProps {
 }
 
 export function RouteStats({ data, loading, error }: RouteStatsProps) {
+  // This div must stay mounted unconditionally — aria-live only announces
+  // *changes* to an already-present node, so swapping it in and out of the
+  // DOM (rather than just its content) risks the first update going
+  // unannounced. But an empty live region shouldn't claim the --space-lg
+  // gap above it the way a populated one does, so the margin that
+  // separates it from Controls is conditional on there being anything to
+  // show — not the div's own presence.
+  const hasContent = loading || Boolean(error) || Boolean(data)
   return (
-    /* aria-live="polite": screen readers announce whatever appears in here
-       (new route, error) after the user's current action finishes. */
-    <div aria-live="polite">
+    <div aria-live="polite" className={hasContent ? styles.liveRegion : undefined}>
       {loading && <p className={styles.quiet}>Finding your route…</p>}
       {error && <p className={styles.error}>{error}</p>}
       {data && !loading && !error && <StatsBody data={data} />}
@@ -42,7 +48,7 @@ function StatsBody({ data }: { data: RouteResponse }) {
     /* No visible heading here — the section's aria-label carries the
        accessible name instead, matching the flat terminal-readout layout
        the Greenhouse design uses in place of prose headings. */
-    <section aria-label="Route details">
+    <section aria-label="Route details" className={styles.section}>
       <div className={styles.statRow}>
         <div className={styles.stat}>
           <span className={styles.statVal}>{formatDistance(green.length_m)}</span>
