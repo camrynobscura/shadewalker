@@ -55,16 +55,75 @@
   line-height: 1.55;
 }
 
-.directionsLabel {
-  font-size: 12px;
+/* A smaller sibling of Controls.module.css's Shade-priority segmented
+   control — same recipe (hidden radio stretched over a visible label),
+   sized down since choosing whose directions to read is secondary to
+   choosing the route itself. */
+.toggleGroup {
+  margin: 11px 0 0;
+  padding: 0;
+  border: none;
+}
+
+.toggleGroup legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
   color: var(--muted);
-  margin: 7px 0 0;
+}
+
+.toggleSeg {
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  width: fit-content;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+}
+
+.toggleItem {
+  position: relative;
+}
+
+.toggleInput {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.toggleText {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.toggleInput:checked + .toggleText {
+  background: var(--magenta);
+  color: var(--text); /* ink on neon magenta: 5.6:1 — matches Shade priority */
+  font-weight: 600;
+}
+
+.toggleInput:focus-visible + .toggleText {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.toggleInput:hover:not(:checked) + .toggleText {
+  color: var(--text);
 }
 
 .directionsList {
   font-size: 12px;
   color: var(--muted);
-  margin: 4px 0 0;
+  margin: 6px 0 0;
   padding-left: 20px;
   line-height: 1.6;
 }
