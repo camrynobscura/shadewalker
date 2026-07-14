@@ -60,7 +60,7 @@
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 0;
-  font-size: 0.875rem; /* 14px */
+  font-size: var(--font-size-md);
 }
 
 .addressInput::placeholder {
@@ -75,7 +75,7 @@
    by one line instead, which reads as normal, not "weird". */
 .addressStatus {
   margin: 0;
-  font-size: 0.8125rem; /* 13px */
+  font-size: var(--font-size-sm);
   color: var(--muted);
 }
 
@@ -151,7 +151,7 @@
   justify-content: center;
   min-height: 40px;
   border-radius: 0;
-  font-size: 0.8125rem; /* 13px */
+  font-size: var(--font-size-sm);
   color: var(--muted);
 }
 
@@ -191,13 +191,13 @@
 .modeLine {
   min-height: 1.2em;
   margin: 0;
-  font-size: 0.75rem; /* 12px */
+  font-size: var(--font-size-sm);
   color: var(--muted);
 }
 
 .comparisonLine {
   margin: var(--space-xs) 0 0;
-  font-size: 0.75rem; /* 12px */
+  font-size: var(--font-size-sm);
   color: var(--muted);
 }
 
@@ -229,7 +229,7 @@
   color: #fff;
   border: none;
   border-radius: 0;
-  font-size: 0.875rem; /* 14px */
+  font-size: var(--font-size-md);
   font-weight: 600;
   cursor: pointer;
 }
@@ -263,7 +263,7 @@
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 0;
-  font-size: 0.8125rem; /* 13px */
+  font-size: var(--font-size-md);
   cursor: pointer;
 }
 

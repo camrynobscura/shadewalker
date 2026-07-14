@@ -25,7 +25,10 @@
 /* Same solid-fill treatment as Controls.module.css's .primaryButton, so a
    crash still looks like part of this app rather than a generic browser
    error page -- same padding too now (was 8px 20px, an unintentional drift
-   from .primaryButton/.secondaryButton's 8px 12px). */
+   from .primaryButton/.secondaryButton's 8px 12px), and now the same
+   font-size too (a design-token audit found this had no font-size at all,
+   silently falling back to the browser default ~16px instead of matching
+   .primaryButton's 14px like the comment already claimed). */
 .reloadButton {
   min-height: 44px;
   padding: var(--space-sm) var(--space-md);
@@ -33,5 +36,6 @@
   color: #fff;
   border: none;
   font: inherit;
+  font-size: var(--font-size-md);
   cursor: pointer;
 }

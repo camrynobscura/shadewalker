@@ -42,7 +42,7 @@
 .tagline {
   font-weight: 400;
   font-style: italic;
-  font-size: 0.8125rem; /* 13px */
+  font-size: var(--font-size-sm);
   color: var(--magenta);
   opacity: 0.8;
   /* text-shadow inherits, so the h1's glitch fringes must be switched off
@@ -73,7 +73,7 @@
 
 .instructions {
   margin: var(--space-xs) 0 0;
-  font-size: 0.75rem; /* 12px */
+  font-size: var(--font-size-sm);
   color: var(--muted);
 }
 

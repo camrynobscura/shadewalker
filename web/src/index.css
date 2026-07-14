@@ -46,6 +46,16 @@
      one token instead of repeating the literal value in every
      *.module.css file that needs it. */
   --label-font-size: 0.625rem; /* 10px */
+
+  /* Body/caption text-size scale. Distinct from --label-font-size above:
+     that one names a specific look (the small-caps field-label style),
+     these name steps on a general size scale, the same relationship
+     --space-* has to a one-off spacing value. Originally three steps
+     (12/13/14px), collapsed to two -- a 1px-apart third step wasn't
+     visually distinct enough to earn its own name, so 13px literals were
+     folded into 12px instead of kept as their own tier. */
+  --font-size-sm: 0.75rem; /* 12px */
+  --font-size-md: 0.875rem; /* 14px */
 }
 
 * {
