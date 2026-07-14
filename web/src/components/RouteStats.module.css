@@ -10,6 +10,17 @@
   gap: var(--space-md);
 }
 
+/* Same style as Controls.module.css's .addressField label and its
+   .presetGroup legend -- one consistent "field/section label" look
+   reused a third time, not a new one. */
+.sectionTitle {
+  margin: 0;
+  font-size: 0.625rem; /* 10px */
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
 /* Applied to the aria-live wrapper only once it actually has content — see
    the comment in RouteStats.tsx. The hairline marks the one conceptual
    jump in the panel: from settings you choose (Controls, above) to

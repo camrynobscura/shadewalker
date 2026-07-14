@@ -133,11 +133,33 @@
   color: var(--text);
 }
 
-.presetHint {
-  min-height: 1.2em;
+/* Wraps the mode description and (once a route exists) the actual
+   tradeoff numbers as one unit -- what a walker weighs when deciding
+   whether a shadier route is worth it. Same translucent green wash
+   RouteStats.module.css's .stat boxes use, plus the left-accent-border
+   pattern .sparseNote already established for "pay attention here" --
+   green, not magenta, since this highlights a gain from the shadier
+   choice, not a warning. Visible from first load (just the mode line)
+   so the box doesn't only appear once a route exists. */
+.comparisonHint {
   margin: var(--space-xs) 0 0;
+  padding: 6px 8px;
+  background: rgba(0, 168, 107, 0.08);
+  border-left: 3px solid var(--green);
+}
+
+.modeLine {
+  min-height: 1.2em;
+  margin: 0;
   font-size: 0.75rem; /* 12px */
   color: var(--muted);
+}
+
+.comparisonLine {
+  margin: 4px 0 0;
+  font-size: 0.75rem; /* 12px */
+  font-weight: 600;
+  color: var(--green-dim);
 }
 
 /* The one button that actually produces a route — solid fill, same

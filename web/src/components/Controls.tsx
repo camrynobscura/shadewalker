@@ -233,19 +233,24 @@ export function Controls({
             </label>
           ))}
         </div>
-        <p className={styles.presetHint}>
-          &gt; mode: {selected?.label.toLowerCase()} // {selected?.hint}
-        </p>
-        {/* The router's actual cost for this preset, once a route exists —
-            minutes leads since that's the number a walker weighs most
-            heavily when deciding whether a shadier route is worth taking. */}
-        {route && (
-          <p className={styles.presetHint}>
-            &gt; +{Math.round(route.green.properties.minutes - route.shortest.properties.minutes)} min · +
-            {route.comparison.extra_trees} trees · +{route.comparison.extra_shade_pct}% shade · +
-            {formatDistance(route.comparison.extra_length_m)}
+        {/* One box for both the mode description and (once a route exists)
+            its actual cost — a walker weighs them together when deciding
+            whether a shadier route is worth taking, so they read as one
+            unit instead of a plain label above a separately-boxed number
+            line. Visible from first load (mode line alone) so the box
+            doesn't only appear once results are in. */}
+        <div className={styles.comparisonHint}>
+          <p className={styles.modeLine}>
+            &gt; mode: {selected?.label.toLowerCase()} // {selected?.hint}
           </p>
-        )}
+          {route && (
+            <p className={styles.comparisonLine}>
+              &gt; +{Math.round(route.green.properties.minutes - route.shortest.properties.minutes)} min · +
+              {route.comparison.extra_trees} trees · +{route.comparison.extra_shade_pct}% shade · +
+              {formatDistance(route.comparison.extra_length_m)}
+            </p>
+          )}
+        </div>
       </fieldset>
     </section>
   )

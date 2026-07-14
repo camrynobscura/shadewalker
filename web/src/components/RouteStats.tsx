@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import type { RouteResponse } from '../api'
 import { formatDistance } from '../format'
 import styles from './RouteStats.module.css'
@@ -33,12 +34,18 @@ export function RouteStats({ data, loading, error }: RouteStatsProps) {
 function StatsBody({ data }: { data: RouteResponse }) {
   const green = data.green.properties
   const isSparse = green.tree_count / green.length_m < SPARSE_TREES_PER_M
+  // Same label style Start_point/End_point and the Shade_priority legend
+  // already use — marks where "settings you chose" ends and "results the
+  // router gives back" begins, right under the divider above this section.
+  // aria-labelledby (not a separate aria-label) so this visible text is
+  // the section's one accessible name, not a redundant second one.
+  const titleId = useId()
 
   return (
-    /* No visible heading here — the section's aria-label carries the
-       accessible name instead, matching the flat terminal-readout layout
-       the Greenhouse design uses in place of prose headings. */
-    <section aria-label="Route details" className={styles.section}>
+    <section aria-labelledby={titleId} className={styles.section}>
+      <p id={titleId} className={styles.sectionTitle}>
+        My_route
+      </p>
       <div className={styles.statRow}>
         <div className={styles.stat}>
           <span className={styles.statVal}>{formatDistance(green.length_m)}</span>

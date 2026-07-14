@@ -64,7 +64,7 @@
 }
 
 .panel {
-  width: 400px; /* +40px over the old 360, for the 4-way NONE/LOW/MED/MAX
+  width: 440px; /* +40px over the old 360, for the 4-way NONE/LOW/MED/MAX
                    Shade priority control's extra segment */
   overflow-y: auto;
   padding: var(--space-lg) 24px; /* was 16px all around — more breathing room on the sides */
