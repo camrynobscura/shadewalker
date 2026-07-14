@@ -36,7 +36,7 @@ test('address search with no match has no violations', async ({ page }) => {
 
 test('out-of-coverage rejection has no violations', async ({ page }) => {
   await page.goto(routeUrl(POINT_A, POINT_OUTSIDE_COVERAGE))
-  await expect(page.locator('[aria-live="polite"]')).toContainText('coverage', { ignoreCase: true })
+  await expect(page.getByText('coverage', { exact: false })).toBeVisible()
 
   const results = await new AxeBuilder({ page }).analyze()
   expect(results.violations).toEqual([])

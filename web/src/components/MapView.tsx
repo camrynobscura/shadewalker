@@ -148,7 +148,11 @@ function LocateButton({ position }: { position: GeoPosition | null }) {
       className={styles.locateButton}
       onClick={() => map.setView([position.lat, position.lon], 16, { animate: !reducedMotion() })}
     >
-      ⌖ Locate me
+      {/* Same treatment as the legend swatches and A/B markers elsewhere in
+          this file: the glyph is decoration, the real accessible name is
+          the text after it. Without aria-hidden, some screen readers
+          announce the Unicode character's own name before "Locate me". */}
+      <span aria-hidden="true">⌖</span> Locate me
     </button>
   )
 }
@@ -165,11 +169,17 @@ interface MapViewProps {
 
 export function MapView({ start, end, green, shortest, coverage, position, onMapClick }: MapViewProps) {
   return (
-    <div
-      className={styles.mapRegion}
-      role="region"
-      aria-label="Map. Click to set your start and end points; you can also type addresses in the route controls."
-    >
+    <div className={styles.mapRegion} role="region" aria-label="Map">
+      {/* A landmark's aria-label is re-read every time a screen reader user
+          navigates the landmark list, not just once -- a full instruction
+          sentence there gets repetitive fast. Real usage instructions go
+          here instead, visually hidden but still in the accessibility
+          tree: read once, in normal order, the first time someone actually
+          enters this region (e.g. via the landmarks list), not repeated on
+          every subsequent landmark-list pass the way the label would be. */}
+      <p className={styles.visuallyHidden}>
+        Click to set your start and end points; you can also type addresses in the route controls.
+      </p>
       <MapContainer center={PILOT_CENTER} zoom={15} className={styles.map}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'

@@ -4,6 +4,23 @@
   width: 100%;
 }
 
+/* The standard "visually hidden but still in the accessibility tree"
+   technique -- display:none or visibility:hidden would remove content
+   from screen readers too, which is the opposite of what this is for.
+   1x1px + clipped + nowrap, not just opacity:0, so it never takes up
+   layout space or becomes visible/interactable by any means. */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .mapRegion {
   position: relative; /* anchors the .scanlines overlay */
 }

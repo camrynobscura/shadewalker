@@ -264,8 +264,16 @@ export function Controls({
               whether a shadier route is worth taking, so they read as one
               unit instead of a plain label above a separately-boxed number
               line. Visible from first load (mode line alone) so the box
-              doesn't only appear once results are in. */}
-          <div className={styles.comparisonHint}>
+              doesn't only appear once results are in. aria-live: this
+              text changes every time Shade_priority changes (mode line) or
+              a new route resolves (comparison line), and unlike RouteStats'
+              stats it's the only place the *delta* numbers appear, so it
+              needs its own live region rather than piggybacking on that
+              one. aria-atomic re-reads the whole box on any change instead
+              of just the changed line, since the two lines are meant to be
+              read together as one unit, same as they're meant to be read
+              together visually. */}
+          <div className={styles.comparisonHint} aria-live="polite" aria-atomic="true">
             <p className={styles.modeLine}>
               <span className={styles.promptSymbol}>&gt;</span> mode: {selected?.label.toLowerCase()} // {selected?.hint}
             </p>

@@ -20,7 +20,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Shady Stroll crashed:', error, info.componentStack)
+    console.error('Shadewalker crashed:', error, info.componentStack)
   }
 
   render() {
@@ -30,8 +30,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         // aria-live="polite" -- this replaces the whole app, so it should
         // interrupt rather than wait politely.
         <div className={styles.fallback} role="alert">
-          <p className={styles.heading}>// APP_CRASHED</p>
-          <p className={styles.message}>Something went wrong and Shady Stroll can't recover on its own.</p>
+          {/* h1, not p: this fallback replaces the whole app, including its
+              normal <h1> in App.tsx, so without a real heading here a
+              crashed page would have none at all -- the one screen where
+              a screen reader user most needs something to orient on. */}
+          <h1 className={styles.heading}>// APP_CRASHED</h1>
+          <p className={styles.message}>Something went wrong and Shadewalker can't recover on its own.</p>
           <button type="button" className={styles.reloadButton} onClick={() => window.location.reload()}>
             RELOAD
           </button>
