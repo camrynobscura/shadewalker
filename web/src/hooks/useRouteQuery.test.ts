@@ -1,7 +1,7 @@
 import { cleanup, renderHook, waitFor } from '@testing-library/react'
 import { act } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RouteError, type RouteResponse } from '../api'
+import { RouteError, type RouteFeature, type RouteResponse } from '../api'
 import { useRouteQuery } from './useRouteQuery'
 
 const { fetchRoute } = vi.hoisted(() => ({ fetchRoute: vi.fn() }))
@@ -13,12 +13,26 @@ vi.mock('../api', async (importOriginal) => ({
 const START = { lat: 40.68, lon: -73.99 }
 const END = { lat: 40.686, lon: -73.984 }
 
+function feature(treeWeight: number, lengthM: number, treeCount: number, shadeFraction: number): RouteFeature {
+  return {
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: [] },
+    properties: {
+      tree_weight: treeWeight,
+      length_m: lengthM,
+      minutes: 1,
+      tree_count: treeCount,
+      shade_fraction: shadeFraction,
+      segments: [],
+    },
+  }
+}
+
 function fakeResponse(): RouteResponse {
   return {
-    green: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] }, properties: { length_m: 100, minutes: 1, tree_count: 5, shade_fraction: 0.5, segments: [] } },
-    shortest: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] }, properties: { length_m: 90, minutes: 1, tree_count: 2, shade_fraction: 0.2, segments: [] } },
+    routes: [feature(0, 90, 2, 0.2), feature(5, 95, 3, 0.3), feature(15, 100, 5, 0.5), feature(40, 110, 8, 0.7)],
     snapped: { start: START, end: END },
-    comparison: { extra_length_m: 10, extra_trees: 3, extra_shade_pct: 30, month: 7, tree_weight: 15 },
+    month: 7,
     description: 'Head 100 m along Court Street.',
   }
 }
@@ -34,15 +48,30 @@ describe('useRouteQuery', () => {
     expect(fetchRoute).not.toHaveBeenCalled()
   })
 
-  it('fetches once both points are present, and exposes the resolved route', async () => {
+  it('fetches once both points are present, and derives selected/baseline from treeWeight', async () => {
     fetchRoute.mockResolvedValue(fakeResponse())
     const { result } = renderHook(() => useRouteQuery(START, END, 15))
 
     await waitFor(() => expect(result.current.route).not.toBeNull())
     expect(result.current.route?.description).toBe('Head 100 m along Court Street.')
+    expect(result.current.selected?.properties.tree_weight).toBe(15)
+    expect(result.current.baseline?.properties.tree_weight).toBe(0)
     expect(result.current.snappedStart).toEqual(START)
     expect(result.current.loading).toBe(false)
     expect(result.current.error).toBeNull()
+  })
+
+  it('changing treeWeight does not trigger a new fetch -- it only re-selects from the already-fetched routes', async () => {
+    fetchRoute.mockResolvedValue(fakeResponse())
+    const { result } = renderHook(() => useRouteQuery(START, END, 15))
+    await waitFor(() => expect(result.current.route).not.toBeNull())
+    expect(fetchRoute).toHaveBeenCalledTimes(1)
+
+    act(() => result.current.setTreeWeight(40))
+
+    expect(fetchRoute).toHaveBeenCalledTimes(1) // still just the one fetch
+    expect(result.current.selected?.properties.tree_weight).toBe(40)
+    expect(result.current.baseline?.properties.tree_weight).toBe(0) // unchanged
   })
 
   it('surfaces a RouteError message directly, and clears any stale snap points', async () => {
@@ -73,7 +102,7 @@ describe('useRouteQuery', () => {
     expect(result.current.snappedStart).toBeNull()
   })
 
-  it('clear() resets start, end, route, and error together', async () => {
+  it('clear() resets start, end, route, selected, and error together', async () => {
     fetchRoute.mockResolvedValue(fakeResponse())
     const { result } = renderHook(() => useRouteQuery(START, END, 15))
     await waitFor(() => expect(result.current.route).not.toBeNull())
@@ -82,6 +111,7 @@ describe('useRouteQuery', () => {
     expect(result.current.start).toBeNull()
     expect(result.current.end).toBeNull()
     expect(result.current.route).toBeNull()
+    expect(result.current.selected).toBeNull()
     expect(result.current.error).toBeNull()
   })
 })

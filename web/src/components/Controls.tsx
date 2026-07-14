@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import { geocode, type Point, type RouteResponse } from '../api'
+import { geocode, type Point, type RouteFeature } from '../api'
 import { formatDistance } from '../format'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import styles from './Controls.module.css'
@@ -130,6 +130,27 @@ export function snapToPreset(weight: number): number {
   return nearest
 }
 
+export interface RouteComparison {
+  extraMinutes: number
+  extraTrees: number
+  extraShadePct: number
+  extraLengthM: number
+}
+
+/** How much more time/trees/shade the selected preset costs relative to
+ * the plain-shortest baseline. Computed client-side -- /route returns
+ * every preset's full properties in one response now, so there's no need
+ * for the server to precompute just one preset's delta against NONE
+ * anymore; this is a pure subtraction over data the client already has. */
+export function compareRoutes(selected: RouteFeature, baseline: RouteFeature): RouteComparison {
+  return {
+    extraMinutes: Math.round(selected.properties.minutes - baseline.properties.minutes),
+    extraTrees: selected.properties.tree_count - baseline.properties.tree_count,
+    extraShadePct: Math.round((selected.properties.shade_fraction - baseline.properties.shade_fraction) * 100),
+    extraLengthM: Math.round((selected.properties.length_m - baseline.properties.length_m) * 10) / 10,
+  }
+}
+
 interface ControlsProps {
   treeWeight: number
   onTreeWeightChange: (w: number) => void
@@ -140,7 +161,11 @@ interface ControlsProps {
   locationEnabled: boolean
   onEnableLocation: () => void
   hasRoute: boolean
-  route: RouteResponse | null
+  /** The currently selected Shade_priority preset's route. */
+  selected: RouteFeature | null
+  /** The NONE (tree_weight=0) route -- the baseline `selected` is compared
+   * against in the comparison line below. */
+  baseline: RouteFeature | null
 }
 
 export function Controls({
@@ -153,13 +178,15 @@ export function Controls({
   locationEnabled,
   onEnableLocation,
   hasRoute,
-  route,
+  selected,
+  baseline,
 }: ControlsProps) {
   // Radios become one group (arrow keys move between them, only one can be
   // checked) by sharing a `name` — useId gives us one that's unique even if
   // this component ever renders twice.
   const groupName = useId()
-  const selected = TREE_PRESETS.find((preset) => preset.value === treeWeight)
+  const selectedPreset = TREE_PRESETS.find((preset) => preset.value === treeWeight)
+  const comparison = selected && baseline ? compareRoutes(selected, baseline) : null
 
   const start = useAddressField(onSetStart)
   const end = useAddressField(onSetEnd)
@@ -275,17 +302,16 @@ export function Controls({
               together visually. */}
           <div className={styles.comparisonHint} aria-live="polite" aria-atomic="true">
             <p className={styles.modeLine}>
-              <span className={styles.promptSymbol}>&gt;</span> mode: {selected?.label.toLowerCase()} // {selected?.hint}
+              <span className={styles.promptSymbol}>&gt;</span> mode: {selectedPreset?.label.toLowerCase()} //{' '}
+              {selectedPreset?.hint}
             </p>
-            {route && (
+            {comparison && (
               <p className={styles.comparisonLine}>
                 <span className={styles.promptSymbol}>&gt;</span> +
-                <span className={styles.numberHighlight}>
-                  {Math.round(route.green.properties.minutes - route.shortest.properties.minutes)}
-                </span>{' '}
-                min · +<span className={styles.numberHighlight}>{route.comparison.extra_trees}</span> trees · +
-                <span className={styles.numberHighlight}>{route.comparison.extra_shade_pct}</span>% shade · +
-                {highlightNumber(formatDistance(route.comparison.extra_length_m))}
+                <span className={styles.numberHighlight}>{comparison.extraMinutes}</span>{' '}
+                min · +<span className={styles.numberHighlight}>{comparison.extraTrees}</span> trees · +
+                <span className={styles.numberHighlight}>{comparison.extraShadePct}</span>% shade · +
+                {highlightNumber(formatDistance(comparison.extraLengthM))}
               </p>
             )}
           </div>

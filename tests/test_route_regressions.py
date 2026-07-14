@@ -20,14 +20,14 @@ def test_click_near_a_plaza_snaps_to_the_real_street_not_its_path_network(client
         params={
             "from_lat": 40.67363, "from_lon": -73.98425,
             "to_lat": 40.67460, "to_lon": -73.98714,
-            "tree_weight": 0,
+            "tree_weights": [0],
         },
     )
     assert res.status_code == 200
-    segments = res.json()["green"]["properties"]["segments"]
+    segments = res.json()["routes"][0]["properties"]["segments"]
     assert segments[0]["name"] == "3rd Street"
     assert all(s["name"] not in ("unnamed path", "4th Street Plaza") for s in segments)
-    assert res.json()["green"]["properties"]["length_m"] < 350  # was 619m before the fix
+    assert res.json()["routes"][0]["properties"]["length_m"] < 350  # was 619m before the fix
 
 
 def test_click_near_2nd_street_actually_reaches_2nd_street(client):
@@ -39,13 +39,13 @@ def test_click_near_2nd_street_actually_reaches_2nd_street(client):
         params={
             "from_lat": 40.67333, "from_lon": -73.98631,
             "to_lat": 40.67409, "to_lon": -73.98410,
-            "tree_weight": 0,
+            "tree_weights": [0],
         },
     )
     assert res.status_code == 200
-    segments = res.json()["green"]["properties"]["segments"]
+    segments = res.json()["routes"][0]["properties"]["segments"]
     assert segments[-1]["name"] == "2nd Street"
-    assert res.json()["green"]["properties"]["length_m"] < 350  # was 571.5m before the fix
+    assert res.json()["routes"][0]["properties"]["length_m"] < 350  # was 571.5m before the fix
 
 
 def test_a_heavily_shaded_route_never_reads_as_exactly_full_shade(client):
@@ -55,16 +55,16 @@ def test_a_heavily_shaded_route_never_reads_as_exactly_full_shade(client):
     every tree_weight above 0, which overstates real coverage: a walker
     is still exposed at each of the corners along the way, regardless of
     how tree-lined the blocks bordering them are."""
-    for tree_weight in (5, 15, 40):
-        res = client.get(
-            "/route",
-            params={
-                "from_lat": 40.68627, "from_lon": -73.99906,
-                "to_lat": 40.68595, "to_lon": -73.98429,
-                "tree_weight": tree_weight,
-            },
-        )
-        assert res.json()["green"]["properties"]["shade_fraction"] < 1.0
+    res = client.get(
+        "/route",
+        params={
+            "from_lat": 40.68627, "from_lon": -73.99906,
+            "to_lat": 40.68595, "to_lon": -73.98429,
+            "tree_weights": [5, 15, 40],
+        },
+    )
+    for feature in res.json()["routes"]:
+        assert feature["properties"]["shade_fraction"] < 1.0
 
 
 def test_destination_outside_coverage_is_rejected_not_silently_mis_snapped(client):
@@ -76,7 +76,7 @@ def test_destination_outside_coverage_is_rejected_not_silently_mis_snapped(clien
         params={
             "from_lat": 40.67621, "from_lon": -74.00279,
             "to_lat": 40.67550, "to_lon": -73.97575,
-            "tree_weight": 0,
+            "tree_weights": [0],
         },
     )
     assert res.status_code == 422

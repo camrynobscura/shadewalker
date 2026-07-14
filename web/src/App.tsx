@@ -36,6 +36,8 @@ export default function App() {
     end,
     treeWeight,
     route,
+    selected,
+    baseline,
     loading,
     error,
     snappedStart,
@@ -98,10 +100,17 @@ export default function App() {
             before the map in DOM order, so it survives the mobile layout's
             stack-map-above-panel reflow (the old copy of this text lived at
             the bottom of the control panel, past the address fields and
-            Shade_priority slider, invisible without scrolling on mobile). */}
-        {!start && !end && (
-          <p className={styles.instructions}>Tap the map (A, then B), or type two addresses below.</p>
-        )}
+            Shade_priority slider, invisible without scrolling on mobile).
+            Always rendered, never conditionally hidden -- it was originally
+            tied to "no route yet" and toggled off once a route existed, but
+            that meant re-picking a point on an existing route (e.g. a new
+            start while the old route is still showing) made it flicker back
+            in and out, visibly shifting the whole layout on every click.
+            Always-on trades a little permanent header height for a header
+            that never jumps around mid-interaction. */}
+        <p className={styles.instructions}>
+          Tap the map to set a start and end point, or search two addresses below.
+        </p>
       </header>
 
       <div className={styles.layout}>
@@ -109,8 +118,8 @@ export default function App() {
           <MapView
             start={snappedStart ?? start}
             end={snappedEnd ?? end}
-            green={route?.green ?? null}
-            shortest={route?.shortest ?? null}
+            selected={selected}
+            baseline={baseline}
             coverage={coverage}
             position={position}
             onMapClick={handleMapClick}
@@ -128,9 +137,10 @@ export default function App() {
             locationEnabled={locationEnabled}
             onEnableLocation={() => setLocationEnabled(true)}
             hasRoute={route !== null}
-            route={route}
+            selected={selected}
+            baseline={baseline}
           />
-          <RouteStats data={route} loading={loading} error={error} />
+          <RouteStats route={selected} description={route?.description ?? ''} loading={loading} error={error} />
         </aside>
       </div>
     </div>

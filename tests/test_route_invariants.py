@@ -50,24 +50,24 @@ def _nearest_real_node_coordinate(approx_lat: float, approx_lon: float) -> tuple
     return best_lat, best_lon
 
 
-def test_tree_weight_zero_reproduces_the_shortest_path(client):
-    """The project plan's own definition of done for the routing server:
-    tree_weight=0 must reproduce the plain shortest path exactly, since
-    "shortest" is always computed the same way internally regardless of
-    what tree_weight was requested."""
-    res = client.get(
-        "/route",
-        params={
-            "from_lat": FROM["lat"], "from_lon": FROM["lon"],
-            "to_lat": TO["lat"], "to_lon": TO["lon"],
-            "tree_weight": 0,
-        },
-    )
-    body = res.json()
-    green, shortest = body["green"]["properties"], body["shortest"]["properties"]
-    assert green["length_m"] == shortest["length_m"]
-    assert green["tree_count"] == shortest["tree_count"]
-    assert green["segments"] == shortest["segments"]
+def test_batching_multiple_weights_matches_requesting_them_individually(client):
+    """/route computes every requested tree_weight in one call now (so the
+    frontend can cache all four Shade_priority presets from a single
+    request instead of re-fetching per click) -- this pins that batching
+    many weights together in one request can't accidentally cross-
+    contaminate between loop iterations (e.g. shared mutable state) by
+    checking it against the same weights requested one at a time."""
+    coords = {
+        "from_lat": FROM["lat"], "from_lon": FROM["lon"],
+        "to_lat": TO["lat"], "to_lon": TO["lon"],
+    }
+    batched = client.get("/route", params={**coords, "tree_weights": [0, 15]}).json()["routes"]
+
+    solo_0 = client.get("/route", params={**coords, "tree_weights": [0]}).json()["routes"][0]
+    solo_15 = client.get("/route", params={**coords, "tree_weights": [15]}).json()["routes"][0]
+
+    assert batched[0]["properties"] == solo_0["properties"]
+    assert batched[1]["properties"] == solo_15["properties"]
 
 
 def test_no_duplicate_consecutive_points_in_route_geometry(graph_store):
@@ -86,17 +86,15 @@ def test_more_shade_priority_never_finds_fewer_trees(client):
     """A higher shade priority should never do worse than a lower one for
     the same walk -- the router is strictly seeking more trees as the
     weight increases, so tree_count should only go up or stay flat."""
-    counts = []
-    for tree_weight in (0, 5, 15, 40):
-        res = client.get(
-            "/route",
-            params={
-                "from_lat": FROM["lat"], "from_lon": FROM["lon"],
-                "to_lat": TO["lat"], "to_lon": TO["lon"],
-                "tree_weight": tree_weight,
-            },
-        )
-        counts.append(res.json()["green"]["properties"]["tree_count"])
+    res = client.get(
+        "/route",
+        params={
+            "from_lat": FROM["lat"], "from_lon": FROM["lon"],
+            "to_lat": TO["lat"], "to_lon": TO["lon"],
+            "tree_weights": [0, 5, 15, 40],
+        },
+    )
+    counts = [feature["properties"]["tree_count"] for feature in res.json()["routes"]]
     assert counts == sorted(counts)
 
 
@@ -106,11 +104,11 @@ def test_route_length_is_never_shorter_than_the_straight_line_distance(client):
         params={
             "from_lat": FROM["lat"], "from_lon": FROM["lon"],
             "to_lat": TO["lat"], "to_lon": TO["lon"],
-            "tree_weight": 15,
+            "tree_weights": [15],
         },
     )
     airline_m = _haversine_m(FROM["lat"], FROM["lon"], TO["lat"], TO["lon"])
-    assert res.json()["green"]["properties"]["length_m"] >= airline_m
+    assert res.json()["routes"][0]["properties"]["length_m"] >= airline_m
 
 
 def test_snapping_onto_a_real_intersection_is_essentially_exact(graph_store):
@@ -127,14 +125,15 @@ def test_tree_weight_out_of_range_is_rejected(client):
     """A negative tree_weight can push cost = length / (1 + tree_weight *
     density) toward or below zero on dense edges -- breaking Dijkstra's
     non-negative-edge-weight assumption instead of just erroring. The
-    server rejects anything outside the frontend's own 0-40 range."""
+    server rejects anything outside the frontend's own 0-40 range -- for
+    any weight in the batch, not just the first one checked."""
     for tree_weight in (-5, 1000):
         res = client.get(
             "/route",
             params={
                 "from_lat": FROM["lat"], "from_lon": FROM["lon"],
                 "to_lat": TO["lat"], "to_lon": TO["lon"],
-                "tree_weight": tree_weight,
+                "tree_weights": [15, tree_weight],
             },
         )
         assert res.status_code == 400
@@ -181,14 +180,14 @@ def test_route_spans_the_full_pilot_tile_between_real_corners(client):
         params={
             "from_lat": lat_a, "from_lon": lon_a,
             "to_lat": lat_b, "to_lon": lon_b,
-            "tree_weight": 15,
+            "tree_weights": [15],
         },
     )
     assert res.status_code == 200
-    body = res.json()
+    feature = res.json()["routes"][0]
     airline_m = _haversine_m(lat_a, lon_a, lat_b, lon_b)
-    assert body["green"]["properties"]["length_m"] >= airline_m
-    assert not _has_duplicate_consecutive_points(body["green"]["geometry"]["coordinates"])
+    assert feature["properties"]["length_m"] >= airline_m
+    assert not _has_duplicate_consecutive_points(feature["geometry"]["coordinates"])
 
 
 def test_two_points_a_few_meters_apart_still_route_successfully(client):
@@ -203,13 +202,13 @@ def test_two_points_a_few_meters_apart_still_route_successfully(client):
         params={
             "from_lat": lat_a, "from_lon": lon_a,
             "to_lat": lat_b, "to_lon": lon_b,
-            "tree_weight": 15,
+            "tree_weights": [15],
         },
     )
     assert res.status_code == 200
     # Nowhere near the cost of a real detour -- a block is 80-100 m, so
     # even one bad corner-and-back shouldn't reach this.
-    assert res.json()["green"]["properties"]["length_m"] < 300
+    assert res.json()["routes"][0]["properties"]["length_m"] < 300
 
 
 def test_a_point_near_the_coverage_boundary_still_routes(client):
@@ -225,7 +224,7 @@ def test_a_point_near_the_coverage_boundary_still_routes(client):
         params={
             "from_lat": lat_edge, "from_lon": lon_edge,
             "to_lat": FROM["lat"], "to_lon": FROM["lon"],
-            "tree_weight": 15,
+            "tree_weights": [15],
         },
     )
     assert res.status_code == 200
@@ -272,10 +271,10 @@ def test_shade_fraction_is_always_between_zero_and_one(client, tree_weight):
         params={
             "from_lat": FROM["lat"], "from_lon": FROM["lon"],
             "to_lat": TO["lat"], "to_lon": TO["lon"],
-            "tree_weight": tree_weight,
+            "tree_weights": [tree_weight],
         },
     )
-    assert 0.0 <= res.json()["green"]["properties"]["shade_fraction"] <= 1.0
+    assert 0.0 <= res.json()["routes"][0]["properties"]["shade_fraction"] <= 1.0
 
 
 def test_shade_fraction_can_rise_even_when_tree_count_plateaus(client):
@@ -292,22 +291,15 @@ def test_shade_fraction_can_rise_even_when_tree_count_plateaus(client):
     from_lat, from_lon = 40.68354, -74.00009
     to_lat, to_lon = 40.66674, -73.98442
 
-    med = client.get(
+    routes = client.get(
         "/route",
         params={
             "from_lat": from_lat, "from_lon": from_lon,
             "to_lat": to_lat, "to_lon": to_lon,
-            "tree_weight": 15,
+            "tree_weights": [15, 40],
         },
-    ).json()["green"]["properties"]
-    max_ = client.get(
-        "/route",
-        params={
-            "from_lat": from_lat, "from_lon": from_lon,
-            "to_lat": to_lat, "to_lon": to_lon,
-            "tree_weight": 40,
-        },
-    ).json()["green"]["properties"]
+    ).json()["routes"]
+    med, max_ = routes[0]["properties"], routes[1]["properties"]
 
     assert med["tree_count"] == max_["tree_count"]  # the original plateau
     assert max_["shade_fraction"] > med["shade_fraction"] + 0.03  # but a real shade gain
@@ -329,7 +321,7 @@ def test_shade_fraction_crossing_deduction_leaves_a_low_shade_route_alone(client
         params={
             "from_lat": FROM["lat"], "from_lon": FROM["lon"],
             "to_lat": TO["lat"], "to_lon": TO["lon"],
-            "tree_weight": 15,
+            "tree_weights": [15],
         },
     )
-    assert res.json()["green"]["properties"]["shade_fraction"] == 0.23
+    assert res.json()["routes"][0]["properties"]["shade_fraction"] == 0.23

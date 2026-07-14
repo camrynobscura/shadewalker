@@ -1,11 +1,21 @@
 import { useEffect, useState } from 'react'
-import { fetchRoute, RouteError, type Point, type RouteResponse } from '../api'
+import { fetchRoute, RouteError, type Point, type RouteFeature, type RouteResponse } from '../api'
+import { TREE_PRESETS } from '../components/Controls'
+
+const TREE_WEIGHTS = TREE_PRESETS.map((preset) => preset.value)
 
 export interface UseRouteQueryResult {
   start: Point | null
   end: Point | null
   treeWeight: number
   route: RouteResponse | null
+  /** The Feature matching the currently selected treeWeight -- what
+   * RouteStats displays, and one of the two lines MapView draws. */
+  selected: RouteFeature | null
+  /** The Feature for tree_weight=0 (NONE) -- always fetched alongside
+   * whatever's selected, since it's the baseline every comparison and the
+   * map's "fastest route" line is measured against. */
+  baseline: RouteFeature | null
   loading: boolean
   error: string | null
   /** Where the route actually starts/ends once the server resolves it onto
@@ -25,7 +35,17 @@ export interface UseRouteQueryResult {
  * points the server returns alongside a route. Deliberately doesn't touch
  * the URL — App.tsx mirrors the returned start/end/treeWeight to the query
  * string itself, a separate concern that doesn't need to know how the
- * fetch works. */
+ * fetch works.
+ *
+ * Fetches every Shade_priority preset (TREE_WEIGHTS) in one request per
+ * start/end pair, not one request per preset -- changing `treeWeight`
+ * alone never triggers a new fetch, it's a pure lookup into whatever the
+ * last fetch already returned. This exists because comparing presets by
+ * flipping Shade_priority back and forth is a real, expected usage
+ * pattern (see the comparison line under it), and re-fetching over the
+ * network on every click made that feel laggy for no real benefit --
+ * computing all four presets server-side costs microseconds more than
+ * computing one. */
 export function useRouteQuery(
   initialStart: Point | null,
   initialEnd: Point | null,
@@ -63,10 +83,12 @@ export function useRouteQuery(
     setError(null)
   }
 
-  // Fetch whenever the request changes. The AbortController in the cleanup
-  // cancels the in-flight request each time a newer one supersedes it (e.g.
-  // dragging the slider) — otherwise slow responses could arrive out of
-  // order and paint a stale route over a fresh one.
+  // Fetch whenever start/end changes -- deliberately NOT treeWeight, see
+  // this hook's own doc comment above. The AbortController in the cleanup
+  // cancels the in-flight request each time a newer one supersedes it
+  // (e.g. picking a new start before the previous fetch resolves) —
+  // otherwise slow responses could arrive out of order and paint a stale
+  // route over a fresh one.
   useEffect(() => {
     if (!start || !end) {
       setRoute(null)
@@ -77,7 +99,7 @@ export function useRouteQuery(
     const controller = new AbortController()
     setLoading(true)
     setError(null)
-    fetchRoute(start, end, treeWeight, controller.signal)
+    fetchRoute(start, end, TREE_WEIGHTS, controller.signal)
       .then((data) => {
         setRoute(data)
         setSnappedStart(data.snapped.start)
@@ -95,13 +117,18 @@ export function useRouteQuery(
         setLoading(false)
       })
     return () => controller.abort()
-  }, [start, end, treeWeight])
+  }, [start, end])
+
+  const selected = route?.routes.find((r) => r.properties.tree_weight === treeWeight) ?? null
+  const baseline = route?.routes.find((r) => r.properties.tree_weight === 0) ?? null
 
   return {
     start,
     end,
     treeWeight,
     route,
+    selected,
+    baseline,
     loading,
     error,
     snappedStart,

@@ -1,4 +1,4 @@
-import type { RouteResponse } from '../api'
+import type { RouteFeature } from '../api'
 import { formatDistance } from '../format'
 import styles from './RouteStats.module.css'
 
@@ -7,12 +7,18 @@ import styles from './RouteStats.module.css'
 const SPARSE_TREES_PER_M = 0.02
 
 interface RouteStatsProps {
-  data: RouteResponse | null
+  /** The currently selected Shade_priority preset's route -- /route
+   * computes all four presets in one request, App.tsx picks this one out
+   * by treeWeight. */
+  route: RouteFeature | null
+  /** Only actually used when `route.properties.segments` is empty (start
+   * == end) -- see the fallback below. */
+  description: string
   loading: boolean
   error: string | null
 }
 
-export function RouteStats({ data, loading, error }: RouteStatsProps) {
+export function RouteStats({ route, description, loading, error }: RouteStatsProps) {
   // This div must stay mounted unconditionally — aria-live only announces
   // *changes* to an already-present node, so swapping it in and out of the
   // DOM (rather than just its content) risks the first update going
@@ -20,7 +26,7 @@ export function RouteStats({ data, loading, error }: RouteStatsProps) {
   // gap above it the way a populated one does, so the margin that
   // separates it from Controls is conditional on there being anything to
   // show — not the div's own presence.
-  const hasContent = loading || Boolean(error) || Boolean(data)
+  const hasContent = loading || Boolean(error) || Boolean(route)
   return (
     // Third of the panel's three top-level sections -- a plain div, not a
     // <section> (see Controls.module.css's .sectionDivider comment for
@@ -44,14 +50,14 @@ export function RouteStats({ data, loading, error }: RouteStatsProps) {
           {error}
         </p>
       )}
-      {data && !loading && !error && <StatsBody data={data} />}
+      {route && !loading && !error && <StatsBody route={route} description={description} />}
     </div>
   )
 }
 
-function StatsBody({ data }: { data: RouteResponse }) {
-  const green = data.green.properties
-  const isSparse = green.tree_count / green.length_m < SPARSE_TREES_PER_M
+function StatsBody({ route, description }: { route: RouteFeature; description: string }) {
+  const stats = route.properties
+  const isSparse = stats.tree_count / stats.length_m < SPARSE_TREES_PER_M
 
   return (
     <>
@@ -74,44 +80,44 @@ function StatsBody({ data }: { data: RouteResponse }) {
       <div className={styles.section}>
         <div className={styles.statRow}>
           <div className={styles.stat}>
-            <span className={styles.statVal}>{formatDistance(green.length_m)}</span>
+            <span className={styles.statVal}>{formatDistance(stats.length_m)}</span>
             <span className={styles.statLabel}>dist</span>
           </div>
           <div className={styles.stat}>
             <span className={styles.statVal}>
-              {Math.round(green.minutes)}
+              {Math.round(stats.minutes)}
               <small> min</small>
             </span>
             <span className={styles.statLabel}>eta</span>
           </div>
           <div className={styles.stat}>
-            <span className={styles.statVal}>{green.tree_count}</span>
+            <span className={styles.statVal}>{stats.tree_count}</span>
             <span className={styles.statLabel}>trees</span>
           </div>
           <div className={styles.stat}>
-            <span className={styles.statVal}>{Math.round(green.shade_fraction * 100)}%</span>
+            <span className={styles.statVal}>{Math.round(stats.shade_fraction * 100)}%</span>
             <span className={styles.statLabel}>shaded</span>
           </div>
         </div>
 
         {isSparse && (
           <p className={styles.sparseNote}>
-            // LOW_TREE_DENSITY: {green.tree_count} over {formatDistance(green.length_m)} — expect
+            // LOW_TREE_DENSITY: {stats.tree_count} over {formatDistance(stats.length_m)} — expect
             limited shade
           </p>
         )}
 
-        {green.segments.length > 0 ? (
+        {stats.segments.length > 0 ? (
           /* Ordered list, not the old one-sentence paragraph: each turn gets
              its own line, and a screen reader announces "item 2 of 4" instead
              of one long run-on. Built from `segments` (structured data)
-             rather than parsing `data.description` (English prose), so it
+             rather than parsing `description` (English prose), so it
              can use formatDistance() and stay unit-consistent with the rest
-             of the panel. Always the shadiest route's directions — Shade
+             of the panel. Always the selected preset's directions -- Shade
              priority's NONE option gives the plain shortest route directly
              (same segments), so there's no separate route to switch to here. */
           <ol className={styles.directionsList}>
-            {green.segments.map((segment, i) => (
+            {stats.segments.map((segment, i) => (
               <li key={i}>
                 {i === 0 ? 'Head' : 'then'} {formatDistance(segment.length_m)} along {segment.name}
               </li>
@@ -120,7 +126,7 @@ function StatsBody({ data }: { data: RouteResponse }) {
         ) : (
           // Empty segments means start == end, so the server's generic
           // "already there" text is accurate.
-          <p className={styles.description}>&gt; {data.description}</p>
+          <p className={styles.description}>&gt; {description}</p>
         )}
       </div>
     </>

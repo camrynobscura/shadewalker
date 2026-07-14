@@ -16,8 +16,9 @@ export interface RouteSegment {
   length_m: number
 }
 
-/** GeoJSON Feature for one route. Coordinates are [lon, lat] pairs
- * (GeoJSON order) — Leaflet wants [lat, lon], so flip when drawing. */
+/** GeoJSON Feature for one route at one tree_weight. Coordinates are
+ * [lon, lat] pairs (GeoJSON order) — Leaflet wants [lat, lon], so flip
+ * when drawing. */
 export interface RouteFeature {
   type: 'Feature'
   geometry: {
@@ -25,6 +26,10 @@ export interface RouteFeature {
     coordinates: [number, number][]
   }
   properties: {
+    /** Which Shade_priority weight this particular route was computed
+     * for -- /route returns one Feature per requested weight, so this is
+     * what tells them apart. */
+    tree_weight: number
     length_m: number
     minutes: number
     tree_count: number
@@ -37,20 +42,16 @@ export interface RouteFeature {
 }
 
 export interface RouteResponse {
-  green: RouteFeature
-  shortest: RouteFeature
+  /** One Feature per requested tree_weight, in the same order they were
+   * requested in -- /route computes every Shade_priority preset in one
+   * call so switching between them client-side never needs a re-fetch. */
+  routes: RouteFeature[]
   /** Where the request actually starts/ends once resolved onto the street
    * network — can differ from what was clicked/geocoded, since that point
    * may sit mid-block. One shared pair (not per-route): the snap itself
    * doesn't depend on tree_weight. */
   snapped: { start: Point; end: Point }
-  comparison: {
-    extra_length_m: number
-    extra_trees: number
-    extra_shade_pct: number
-    month: number
-    tree_weight: number
-  }
+  month: number
   description: string
 }
 
@@ -62,7 +63,7 @@ export class RouteError extends Error {}
 export async function fetchRoute(
   from: Point,
   to: Point,
-  treeWeight: number,
+  treeWeights: number[],
   signal: AbortSignal,
 ): Promise<RouteResponse> {
   const params = new URLSearchParams({
@@ -70,8 +71,8 @@ export async function fetchRoute(
     from_lon: String(from.lon),
     to_lat: String(to.lat),
     to_lon: String(to.lon),
-    tree_weight: String(treeWeight),
   })
+  for (const weight of treeWeights) params.append('tree_weights', String(weight))
   const res = await fetch(`/route?${params}`, { signal })
   if (!res.ok) {
     const body: { detail?: string } = await res.json().catch(() => ({}))

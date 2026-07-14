@@ -1,5 +1,51 @@
 import { describe, expect, it } from 'vitest'
-import { snapToPreset } from './Controls'
+import type { RouteFeature } from '../api'
+import { compareRoutes, snapToPreset } from './Controls'
+
+function feature(lengthM: number, minutes: number, treeCount: number, shadeFraction: number): RouteFeature {
+  return {
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: [] },
+    properties: { tree_weight: 0, length_m: lengthM, minutes, tree_count: treeCount, shade_fraction: shadeFraction, segments: [] },
+  }
+}
+
+describe('compareRoutes', () => {
+  it('reports a shadier route costing more time/distance for more trees/shade as positive deltas', () => {
+    const baseline = feature(1634.4, 19.5, 211, 0.745)
+    const selected = feature(1693.3, 20.2, 290, 0.95)
+
+    expect(compareRoutes(selected, baseline)).toEqual({
+      extraMinutes: 1, // 20.2 - 19.5 = 0.7, rounds to 1
+      extraTrees: 79,
+      // (0.95 - 0.745) * 100 = 20.499999999999996 in IEEE754 floating point,
+      // not exactly 20.5 -- rounds down to 20, not up to 21.
+      extraShadePct: 20,
+      extraLengthM: 58.9,
+    })
+  })
+
+  it('reports all-zero deltas when selected and baseline are the same route (NONE selected)', () => {
+    const route = feature(1634.4, 19.5, 211, 0.745)
+    expect(compareRoutes(route, route)).toEqual({
+      extraMinutes: 0,
+      extraTrees: 0,
+      extraShadePct: 0,
+      extraLengthM: 0,
+    })
+  })
+
+  it('reports negative deltas when selected is cheaper than baseline', () => {
+    const baseline = feature(200, 3, 10, 0.5)
+    const selected = feature(150, 2, 5, 0.3)
+    expect(compareRoutes(selected, baseline)).toEqual({
+      extraMinutes: -1,
+      extraTrees: -5,
+      extraShadePct: -20,
+      extraLengthM: -50,
+    })
+  })
+})
 
 describe('snapToPreset', () => {
   it.each([0, 5, 15, 40])('leaves an exact preset value %i unchanged', (value) => {

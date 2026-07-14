@@ -105,14 +105,6 @@ EVERGREEN_GENERA = {
 
 # ── Routing ───────────────────────────────────────────────────────────────────
 
-# How many meters of leafy street a walker would trade for one bare meter.
-# Density (tree value per meter) is typically 0–0.1, so this must be order-10
-# to matter. M3 calibration (4 pilot walks × weights 5/10/20/40): in leafy
-# areas routes barely change between 5–20 (shortest is often already green);
-# 40 buys big tree gains at ~20%+ detours. 10 = takes every cheap win without
-# forced detours; UI slider should span 0–40.
-TREE_WEIGHT = 10.0
-
 # The frontend's Shade_priority presets top out at 40 (MAX). The server
 # enforces the same ceiling on /route's tree_weight param — a value far
 # outside this range can push an edge's cost toward/below zero on dense

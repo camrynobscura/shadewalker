@@ -160,14 +160,18 @@ function LocateButton({ position }: { position: GeoPosition | null }) {
 interface MapViewProps {
   start: Point | null
   end: Point | null
-  green: RouteFeature | null
-  shortest: RouteFeature | null
+  /** The currently selected Shade_priority preset's route. */
+  selected: RouteFeature | null
+  /** The NONE (tree_weight=0) route, drawn alongside `selected` for
+   * comparison -- identical to `selected` when NONE itself is the
+   * selected preset, same as before this was named `green`/`shortest`. */
+  baseline: RouteFeature | null
   coverage: CoverageFeature | null
   position: GeoPosition | null
   onMapClick: (p: Point) => void
 }
 
-export function MapView({ start, end, green, shortest, coverage, position, onMapClick }: MapViewProps) {
+export function MapView({ start, end, selected, baseline, coverage, position, onMapClick }: MapViewProps) {
   return (
     <div className={styles.mapRegion} role="region" aria-label="Map">
       {/* A landmark's aria-label is re-read every time a screen reader user
@@ -198,31 +202,31 @@ export function MapView({ start, end, green, shortest, coverage, position, onMap
             always sit visually on top of it, never the other way round. */}
         {coverage && <CoverageOverlay coverage={coverage} />}
 
-        {/* Shortest first so the green route draws on top of it. Routes are
-            told apart by pattern (dashed vs solid), not color alone.
+        {/* Baseline first so the selected route draws on top of it. Routes
+            are told apart by pattern (dashed vs solid), not color alone.
             Each route is two Polylines on the same coords: a wide translucent
             "casing" underneath plus the crisp line on top — the cheap way to
             fake the Greenhouse glow (SVG strokes can't blur). */}
-        {shortest && (
+        {baseline && (
           <>
             <Polyline
-              positions={toLatLngs(shortest)}
+              positions={toLatLngs(baseline)}
               pathOptions={{ color: '#ff2bd6', weight: 9, opacity: 0.15 }}
             />
             <Polyline
-              positions={toLatLngs(shortest)}
+              positions={toLatLngs(baseline)}
               pathOptions={{ color: '#ff2bd6', weight: 3, dashArray: '6 8', opacity: 0.85 }}
             />
           </>
         )}
-        {green && (
+        {selected && (
           <>
             <Polyline
-              positions={toLatLngs(green)}
+              positions={toLatLngs(selected)}
               pathOptions={{ color: '#00a86b', weight: 11, opacity: 0.2 }}
             />
             <Polyline
-              positions={toLatLngs(green)}
+              positions={toLatLngs(selected)}
               pathOptions={{ color: '#00a86b', weight: 4.5, opacity: 0.95 }}
             />
           </>
@@ -260,7 +264,7 @@ export function MapView({ start, end, green, shortest, coverage, position, onMap
       {/* Purely decorative texture; aria-hidden keeps it out of the
           accessibility tree entirely. */}
       <div className={styles.scanlines} aria-hidden="true" />
-      <Legend hasRoute={Boolean(green || shortest)} hasCoverage={Boolean(coverage)} />
+      <Legend hasRoute={Boolean(selected || baseline)} hasCoverage={Boolean(coverage)} />
     </div>
   )
 }
