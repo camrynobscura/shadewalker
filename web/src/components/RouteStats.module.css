@@ -1,9 +1,8 @@
-/* The <section> below (StatsBody) spaces every direct child with `gap` —
-   so each of those children declares `margin: 0` explicitly here rather
-   than leaning on a tag's default margin. See Controls.module.css's
-   .section for the fuller explanation; same convention, tighter tier
-   (--space-md, not --space-lg) since these are compact readout lines
-   rather than whole form fields. */
+/* The div below (StatsBody) spaces every direct child with `gap` — so
+   each of those children declares `margin: 0` explicitly here rather
+   than leaning on a tag's default margin. Tighter tier (--space-md, not
+   --space-lg) since these are compact readout lines rather than whole
+   form fields. */
 .section {
   display: flex;
   flex-direction: column;
@@ -24,9 +23,11 @@
 /* Applied to the aria-live wrapper only once it actually has content — see
    the comment in RouteStats.tsx. The hairline marks the one conceptual
    jump in the panel: from settings you choose (Controls, above) to
-   results the router gives back (this). */
-.liveRegion {
-  margin-top: var(--space-lg);
+   results the router gives back (this). Identical rule to
+   Controls.module.css's .sectionDivider (duplicated, not shared, since
+   CSS Modules are per-file -- keep both in sync if this changes). */
+.sectionDivider {
+  margin-top: var(--space-xl);
   padding-top: var(--space-md);
   border-top: 1px solid var(--line);
 }

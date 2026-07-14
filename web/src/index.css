@@ -27,11 +27,15 @@
   --danger: #b3261e; /* 6:1+ on --panel */
 
   /* Vertical rhythm scale for the control panel. Every gap between blocks
-     should be one of these three, via a flex container's `gap` — not a
+     should be one of these four, via a flex container's `gap` — not a
      one-off margin on whichever element happened to need spacing that day. */
   --space-xs: 4px; /* a caption/label bound tightly to its own control */
   --space-md: 12px; /* between related lines within one info block */
-  --space-lg: 16px; /* between distinct field groups / sections */
+  --space-lg: 16px; /* between distinct field groups within one section */
+  --space-xl: 24px; /* between the panel's three top-level sections
+                        (address entry / shade priority / results), and
+                        the panel's own top/bottom edge -- matches the
+                        panel's existing 24px side padding */
 }
 
 * {

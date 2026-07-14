@@ -4,6 +4,22 @@ import { formatDistance } from '../format'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import styles from './Controls.module.css'
 
+/** Splits a formatted distance ("0.2 mi", "524 ft") into its leading
+ * number, highlighted, and its trailing unit, left plain — only the
+ * comparison line's actual values get the bold/green treatment, not
+ * their units. formatDistance() itself stays a single string everywhere
+ * else it's used; this split is local to that one line. */
+function highlightNumber(text: string) {
+  const match = text.match(/^(-?[\d.]+)(.*)$/)
+  if (!match) return text
+  return (
+    <>
+      <span className={styles.numberHighlight}>{match[1]}</span>
+      {match[2]}
+    </>
+  )
+}
+
 type FieldStatus = 'idle' | 'searching' | 'notfound' | 'found'
 
 /** Owns one address field's query/status and how to resolve it. A hook,
@@ -150,108 +166,123 @@ export function Controls({
   const isSearching = start.status === 'searching' || end.status === 'searching'
 
   return (
-    <section aria-label="Plan a route" className={styles.section}>
-      {/* One form for both fields, so Enter in either one — or the button —
-          resolves whichever isn't already resolved. Each field's own
-          resolve() no-ops on an empty or already-resolved query, so this
-          is safe to fire even if only one field changed. */}
-      <form
-        className={styles.routeForm}
-        onSubmit={(e) => {
-          e.preventDefault()
-          start.resolve()
-          end.resolve()
-        }}
-      >
-        <AddressField
-          label="Start_point"
-          placeholder="e.g. 250 Court St"
-          query={start.query}
-          status={start.status}
-          onChange={start.onChange}
-        />
-        <AddressField
-          label="End_point"
-          placeholder="e.g. 3rd St & 3rd Ave"
-          query={end.query}
-          status={end.status}
-          onChange={end.onChange}
-        />
-        <button type="submit" className={styles.primaryButton} disabled={isSearching}>
-          {isSearching ? 'FINDING…' : 'FIND_ROUTE'}
-        </button>
-      </form>
-
-      {/* Location and Clear share a row — both are secondary, one-off
-          actions, as opposed to Start/End (always needed) and Shade
-          priority (a standing preference). Location is opt-in: first a
-          button that *requests* it (triggering the browser permission
-          prompt on a user gesture, never on load), which then becomes
-          "use it" once a fix arrives. */}
-      <div className={styles.buttonRow}>
-        {!locationEnabled ? (
-          <button type="button" className={styles.secondaryButton} onClick={onEnableLocation}>
-            USE_LOCATION
+    <>
+      {/* First of the panel's three top-level sections -- no divider above
+          it (nothing to divide from but the panel's own top edge), unlike
+          the two below. */}
+      <div className={styles.addressGroup}>
+        {/* One form for both fields, so Enter in either one — or the button —
+            resolves whichever isn't already resolved. Each field's own
+            resolve() no-ops on an empty or already-resolved query, so this
+            is safe to fire even if only one field changed. */}
+        <form
+          className={styles.routeForm}
+          onSubmit={(e) => {
+            e.preventDefault()
+            start.resolve()
+            end.resolve()
+          }}
+        >
+          <AddressField
+            label="Start_point"
+            placeholder="e.g. 250 Court St"
+            query={start.query}
+            status={start.status}
+            onChange={start.onChange}
+          />
+          <AddressField
+            label="End_point"
+            placeholder="e.g. 3rd St & 3rd Ave"
+            query={end.query}
+            status={end.status}
+            onChange={end.onChange}
+          />
+          <button type="submit" className={styles.primaryButton} disabled={isSearching}>
+            {isSearching ? 'FINDING…' : 'FIND_ROUTE'}
           </button>
-        ) : position ? (
-          <button type="button" className={styles.secondaryButton} onClick={() => onSetStart(position)}>
-            SET_START_POINT
-          </button>
-        ) : (
-          <p className={styles.addressStatus} role="status">
-            ACQUIRING…
-          </p>
-        )}
+        </form>
 
-        {hasRoute && (
-          <button type="button" className={styles.secondaryButton} onClick={onClear}>
-            CLEAR_ROUTE
-          </button>
-        )}
-      </div>
-
-      {/* <fieldset> + <legend> is the native way to give a radio group its
-          label: screen readers announce "Shade priority" alongside whichever
-          option is focused (the underscore in the visible text is read
-          aloud too — a deliberate terminal-copy choice, traded off against
-          a slightly odd screen-reader pronunciation). No ARIA needed — the
-          built-in semantics do it. */}
-      <fieldset className={styles.presetGroup}>
-        <legend>Shade_priority</legend>
-        <div className={styles.segmented}>
-          {TREE_PRESETS.map((preset) => (
-            <label key={preset.value} className={styles.segment}>
-              <input
-                type="radio"
-                name={groupName}
-                value={preset.value}
-                checked={treeWeight === preset.value}
-                onChange={() => onTreeWeightChange(preset.value)}
-                className={styles.segmentInput}
-              />
-              <span className={styles.segmentText}>{preset.label}</span>
-            </label>
-          ))}
-        </div>
-        {/* One box for both the mode description and (once a route exists)
-            its actual cost — a walker weighs them together when deciding
-            whether a shadier route is worth taking, so they read as one
-            unit instead of a plain label above a separately-boxed number
-            line. Visible from first load (mode line alone) so the box
-            doesn't only appear once results are in. */}
-        <div className={styles.comparisonHint}>
-          <p className={styles.modeLine}>
-            &gt; mode: {selected?.label.toLowerCase()} // {selected?.hint}
-          </p>
-          {route && (
-            <p className={styles.comparisonLine}>
-              &gt; +{Math.round(route.green.properties.minutes - route.shortest.properties.minutes)} min · +
-              {route.comparison.extra_trees} trees · +{route.comparison.extra_shade_pct}% shade · +
-              {formatDistance(route.comparison.extra_length_m)}
+        {/* Location and Clear share a row — both are secondary, one-off
+            actions, as opposed to Start/End (always needed) and Shade
+            priority (a standing preference). Location is opt-in: first a
+            button that *requests* it (triggering the browser permission
+            prompt on a user gesture, never on load), which then becomes
+            "use it" once a fix arrives. */}
+        <div className={styles.buttonRow}>
+          {!locationEnabled ? (
+            <button type="button" className={styles.secondaryButton} onClick={onEnableLocation}>
+              USE_LOCATION
+            </button>
+          ) : position ? (
+            <button type="button" className={styles.secondaryButton} onClick={() => onSetStart(position)}>
+              SET_START_POINT
+            </button>
+          ) : (
+            <p className={styles.addressStatus} role="status">
+              ACQUIRING…
             </p>
           )}
+
+          {hasRoute && (
+            <button type="button" className={styles.secondaryButton} onClick={onClear}>
+              CLEAR_ROUTE
+            </button>
+          )}
         </div>
-      </fieldset>
-    </section>
+      </div>
+
+      {/* Second of the panel's three sections. Divider lives on this
+          wrapper, not the fieldset below -- a fieldset with its own border
+          makes browsers render <legend> straddling that border instead of
+          sitting below it. */}
+      <div className={styles.sectionDivider}>
+        {/* <fieldset> + <legend> is the native way to give a radio group its
+            label: screen readers announce "Shade priority" alongside whichever
+            option is focused (the underscore in the visible text is read
+            aloud too — a deliberate terminal-copy choice, traded off against
+            a slightly odd screen-reader pronunciation). No ARIA needed — the
+            built-in semantics do it. */}
+        <fieldset className={styles.presetGroup}>
+          <legend>Shade_priority</legend>
+          <div className={styles.segmented}>
+            {TREE_PRESETS.map((preset) => (
+              <label key={preset.value} className={styles.segment}>
+                <input
+                  type="radio"
+                  name={groupName}
+                  value={preset.value}
+                  checked={treeWeight === preset.value}
+                  onChange={() => onTreeWeightChange(preset.value)}
+                  className={styles.segmentInput}
+                />
+                <span className={styles.segmentText}>{preset.label}</span>
+              </label>
+            ))}
+          </div>
+          {/* One box for both the mode description and (once a route exists)
+              its actual cost — a walker weighs them together when deciding
+              whether a shadier route is worth taking, so they read as one
+              unit instead of a plain label above a separately-boxed number
+              line. Visible from first load (mode line alone) so the box
+              doesn't only appear once results are in. */}
+          <div className={styles.comparisonHint}>
+            <p className={styles.modeLine}>
+              <span className={styles.promptSymbol}>&gt;</span> mode: {selected?.label.toLowerCase()} // {selected?.hint}
+            </p>
+            {route && (
+              <p className={styles.comparisonLine}>
+                <span className={styles.promptSymbol}>&gt;</span> +
+                <span className={styles.numberHighlight}>
+                  {Math.round(route.green.properties.minutes - route.shortest.properties.minutes)}
+                </span>{' '}
+                min · +<span className={styles.numberHighlight}>{route.comparison.extra_trees}</span> trees · +
+                <span className={styles.numberHighlight}>{route.comparison.extra_shade_pct}</span>% shade · +
+                {highlightNumber(formatDistance(route.comparison.extra_length_m))}
+              </p>
+            )}
+          </div>
+        </fieldset>
+      </div>
+    </>
   )
 }

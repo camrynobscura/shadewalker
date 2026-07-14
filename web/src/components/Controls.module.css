@@ -1,21 +1,25 @@
-/* The outer <section> (below) spaces every direct child with `gap` — so
-   every child here declares `margin: 0` explicitly rather than leaning on
-   whatever margin the browser happens to default that tag to. Mixing
-   gap with un-zeroed margins is exactly how spacing ends up "all over the
-   place": the two add together instead of one clearly winning. */
-.section {
+/* First of the panel's three top-level sections (a plain div, not a
+   <section> -- see .sectionDivider below for why, and for the other two).
+   Groups the address fields, Find_route, and the location/clear row at
+   the tighter --space-md tier: they're all one step (pick your
+   addresses), so they should read as more closely bound to each other
+   than to the divider before the next section. Every child here declares
+   `margin: 0` explicitly rather than leaning on whatever margin the
+   browser happens to default that tag to -- mixing gap with un-zeroed
+   margins is exactly how spacing ends up "all over the place". */
+.addressGroup {
   display: flex;
   flex-direction: column;
-  gap: var(--space-lg);
+  gap: var(--space-md);
 }
 
-/* One form wraps both address fields plus the Find_route button (below),
-   at the same --space-lg tier as .section — visually it's still just one
-   flat list, this is purely so Enter in either field submits both. */
+/* One form wraps both address fields plus the Find_route button (below) —
+   visually it's still just one flat list, this is purely so Enter in
+   either field submits both. */
 .routeForm {
   display: flex;
   flex-direction: column;
-  gap: var(--space-lg);
+  gap: var(--space-md);
 }
 
 .addressField {
@@ -64,10 +68,31 @@
 .presetGroup {
   /* Fieldsets ship with a browser-default border, padding, AND margin
      meant for old-school form sections — reset all three so it lays out
-     like a plain div and the parent's `gap` is the only spacing source. */
+     like a plain div instead. */
   margin: 0;
   padding: 0;
   border: none;
+}
+
+/* Second and third of the panel's three top-level sections (a plain div,
+   not a <section> -- this component's whole content used to be one
+   <section aria-label="Plan a route">, but that labeled the address
+   fields and Shade_priority as one thing when they're really two, and
+   duplicated the <aside> landmark one level up in App.tsx that already
+   covers "the whole controls panel". Three consistent divs instead, no
+   extra wrapping element -- the <aside> is already the one semantic
+   container this content needs).
+   Wraps .presetGroup so the divider's border-top lives on a plain div, not
+   the fieldset itself -- a fieldset with any border makes browsers render
+   its <legend> straddling that border line instead of sitting cleanly
+   below it, which put this line right through "Shade_priority" instead of
+   above it. Identical rule to RouteStats.module.css's .sectionDivider
+   (duplicated, not shared, since CSS Modules are per-file -- keep both in
+   sync if this changes). */
+.sectionDivider {
+  margin-top: var(--space-xl);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--line);
 }
 
 .presetGroup legend {
@@ -142,7 +167,7 @@
    choice, not a warning. Visible from first load (just the mode line)
    so the box doesn't only appear once a route exists. */
 .comparisonHint {
-  margin: var(--space-xs) 0 0;
+  margin: var(--space-md) 0 0;
   padding: 6px 8px;
   background: rgba(0, 168, 107, 0.08);
   border-left: 3px solid var(--green);
@@ -158,8 +183,22 @@
 .comparisonLine {
   margin: 4px 0 0;
   font-size: 0.75rem; /* 12px */
-  font-weight: 600;
+  color: var(--muted);
+}
+
+/* The leading "&gt;" prompt marker -- colored on both lines so they read
+   as one unit, even though only the comparison line's actual numbers (not
+   its words/units) get the bold treatment below. */
+.promptSymbol {
   color: var(--green-dim);
+}
+
+/* Only the numbers themselves stand out -- "min"/"trees"/"shade"/"mi" and
+   the +/· separators around them stay plain, so the values are what jump
+   out at a glance, not the whole line. */
+.numberHighlight {
+  color: var(--green-dim);
+  font-weight: 600;
 }
 
 /* The one button that actually produces a route — solid fill, same

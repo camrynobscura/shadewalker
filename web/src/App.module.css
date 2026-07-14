@@ -67,7 +67,8 @@
   width: 440px; /* +40px over the old 360, for the 4-way NONE/LOW/MED/MAX
                    Shade priority control's extra segment */
   overflow-y: auto;
-  padding: var(--space-lg) 24px; /* was 16px all around — more breathing room on the sides */
+  padding: var(--space-xl) 24px; /* even 24px all around, top/bottom matching
+                                     the gap between the panel's own sections */
   background: var(--panel);
   border-left: 1px solid var(--border);
 }
@@ -76,10 +77,11 @@
   font-size: 0.875rem; /* 14px */
   color: var(--muted);
   /* Was unset, so it fell back to the browser's default <p> margin —
-     explicit now, matching the --space-lg gap used everywhere else in the
-     panel. Only ever rendered while Controls/RouteStats' aria-live div is
-     empty, so this is the one gap source between them, not an addition. */
-  margin: var(--space-lg) 0 0;
+     explicit now, matching the --space-xl gap used between the panel's
+     top-level sections. Only ever rendered while Controls/RouteStats'
+     aria-live div is empty, so this is the one gap source between them,
+     not an addition. */
+  margin: var(--space-xl) 0 0;
 }
 
 /* Mobile / narrow (and 200%-zoom reflow): stack map above panel. */

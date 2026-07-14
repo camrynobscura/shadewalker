@@ -1,4 +1,3 @@
-import { useId } from 'react'
 import type { RouteResponse } from '../api'
 import { formatDistance } from '../format'
 import styles from './RouteStats.module.css'
@@ -23,7 +22,12 @@ export function RouteStats({ data, loading, error }: RouteStatsProps) {
   // show — not the div's own presence.
   const hasContent = loading || Boolean(error) || Boolean(data)
   return (
-    <div aria-live="polite" className={hasContent ? styles.liveRegion : undefined}>
+    // Third of the panel's three top-level sections -- a plain div, not a
+    // <section> (see Controls.module.css's .sectionDivider comment for
+    // why), kept as the aria-live host since that attribute works on any
+    // element and needs to stay mounted for screen readers to catch the
+    // first update.
+    <div aria-live="polite" className={hasContent ? styles.sectionDivider : undefined}>
       {loading && <p className={styles.quiet}>Finding your route…</p>}
       {error && <p className={styles.error}>{error}</p>}
       {data && !loading && !error && <StatsBody data={data} />}
@@ -34,18 +38,17 @@ export function RouteStats({ data, loading, error }: RouteStatsProps) {
 function StatsBody({ data }: { data: RouteResponse }) {
   const green = data.green.properties
   const isSparse = green.tree_count / green.length_m < SPARSE_TREES_PER_M
-  // Same label style Start_point/End_point and the Shade_priority legend
-  // already use — marks where "settings you chose" ends and "results the
-  // router gives back" begins, right under the divider above this section.
-  // aria-labelledby (not a separate aria-label) so this visible text is
-  // the section's one accessible name, not a redundant second one.
-  const titleId = useId()
 
   return (
-    <section aria-labelledby={titleId} className={styles.section}>
-      <p id={titleId} className={styles.sectionTitle}>
-        My_route
-      </p>
+    <div className={styles.section}>
+      {/* Same label style Start_point/End_point and the Shade_priority
+          legend already use -- marks where "settings you chose" ends and
+          "results the router gives back" begins, right under the divider
+          above. Plain text now, not an aria-labelledby target: this div
+          carries no landmark role, so the id/attribute pairing would have
+          been inert -- the visible text alone already reaches screen
+          readers in normal reading order. */}
+      <p className={styles.sectionTitle}>My_route</p>
       <div className={styles.statRow}>
         <div className={styles.stat}>
           <span className={styles.statVal}>{formatDistance(green.length_m)}</span>
@@ -96,6 +99,6 @@ function StatsBody({ data }: { data: RouteResponse }) {
         // "already there" text is accurate.
         <p className={styles.description}>&gt; {data.description}</p>
       )}
-    </section>
+    </div>
   )
 }
