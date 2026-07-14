@@ -15,10 +15,9 @@ interface RouteStatsProps {
    * == end) -- see the fallback below. */
   description: string
   loading: boolean
-  error: string | null
 }
 
-export function RouteStats({ route, description, loading, error }: RouteStatsProps) {
+export function RouteStats({ route, description, loading }: RouteStatsProps) {
   // This div must stay mounted unconditionally — aria-live only announces
   // *changes* to an already-present node, so swapping it in and out of the
   // DOM (rather than just its content) risks the first update going
@@ -26,7 +25,7 @@ export function RouteStats({ route, description, loading, error }: RouteStatsPro
   // gap above it the way a populated one does, so the margin that
   // separates it from Controls is conditional on there being anything to
   // show — not the div's own presence.
-  const hasContent = loading || Boolean(error) || Boolean(route)
+  const hasContent = loading || Boolean(route)
   return (
     // Third of the panel's three top-level sections -- a plain div, not a
     // <section> (see Controls.module.css's .sectionDivider comment for
@@ -35,22 +34,11 @@ export function RouteStats({ route, description, loading, error }: RouteStatsPro
     // first update.
     <div aria-live="polite" className={hasContent ? styles.sectionDivider : undefined}>
       {loading && <p className={styles.quiet}>Finding your route…</p>}
-      {/* role="alert" (assertive), not just the parent's aria-live="polite"
-          -- a rejected route (e.g. outside coverage) is exactly the kind of
-          "you need to know this now" feedback ErrorBoundary already treats
-          as assertive elsewhere in this app; this is the same call for the
-          same reason, not a separate pattern. Safe to nest inside the
-          outer polite region: role="alert" is specifically designed to
-          announce reliably on its own fresh insertion (this <p> only
-          exists in the DOM when `error` is truthy), independent of
-          whatever politeness level its ancestor uses for its other
-          children. */}
-      {error && (
-        <p className={styles.error} role="alert">
-          {error}
-        </p>
-      )}
-      {route && !loading && !error && <StatsBody route={route} description={description} />}
+      {/* A rejected route's error message lives in App.tsx's header now,
+          not here -- see the comment there. This component only ever
+          rendered it when a route successfully loaded anyway, so there's
+          nothing route-specific left for this component to say about it. */}
+      {route && !loading && <StatsBody route={route} description={description} />}
     </div>
   )
 }

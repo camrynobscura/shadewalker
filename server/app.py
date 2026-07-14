@@ -100,12 +100,12 @@ def route(
     if not store.in_coverage(from_lat, from_lon):
         raise HTTPException(
             status_code=422,
-            detail="Start point is outside our current coverage area — pick a point inside the shaded area on the map.",
+            detail="Start point is outside our current coverage area — pick a point inside the dashed boundary shown on the map.",
         )
     if not store.in_coverage(to_lat, to_lon):
         raise HTTPException(
             status_code=422,
-            detail="End point is outside our current coverage area — pick a point inside the shaded area on the map.",
+            detail="End point is outside our current coverage area — pick a point inside the dashed boundary shown on the map.",
         )
 
     start = store.snap_to_edge(from_lat, from_lon)

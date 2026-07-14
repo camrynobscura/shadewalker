@@ -77,6 +77,14 @@
   color: var(--muted);
 }
 
+.error {
+  margin: 4px 0 0;
+  font-size: 0.75rem; /* 12px, matches .instructions -- same visual weight,
+                          the --danger color is what signals urgency */
+  font-weight: 600;
+  color: var(--danger);
+}
+
 /* Mobile / narrow (and 200%-zoom reflow): stack map above panel. */
 @media (max-width: 720px) {
   .layout {

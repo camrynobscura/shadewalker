@@ -118,8 +118,3 @@
      over the place". Now the parent's `gap` is the only source. */
   margin: 0;
 }
-
-.error {
-  color: var(--danger);
-  font-size: 0.875rem; /* 14px */
-}
