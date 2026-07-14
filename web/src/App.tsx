@@ -93,6 +93,15 @@ export default function App() {
         <h1 className={styles.title}>
           Shadewalker <span className={styles.tagline}>- find the shadiest walking route in NYC</span>
         </h1>
+        {/* The one piece of visible instruction guaranteed to be on screen
+            before any scrolling, on every viewport size -- it's rendered
+            before the map in DOM order, so it survives the mobile layout's
+            stack-map-above-panel reflow (the old copy of this text lived at
+            the bottom of the control panel, past the address fields and
+            Shade_priority slider, invisible without scrolling on mobile). */}
+        {!start && !end && (
+          <p className={styles.instructions}>Tap the map (A, then B), or type two addresses below.</p>
+        )}
       </header>
 
       <div className={styles.layout}>
@@ -122,11 +131,6 @@ export default function App() {
             route={route}
           />
           <RouteStats data={route} loading={loading} error={error} />
-          {!start && !end && (
-            <p className={styles.hint}>
-              Click the map (A, then B) or type two addresses to find your shadiest walk.
-            </p>
-          )}
         </aside>
       </div>
     </div>

@@ -9,7 +9,7 @@ import { mockGeocode, POINT_A, POINT_B, POINT_OUTSIDE_COVERAGE, routeUrl } from 
 
 test('initial load has no violations', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByText('Click the map', { exact: false })).toBeVisible()
+  await expect(page.getByText('Tap the map', { exact: false })).toBeVisible()
 
   const results = await new AxeBuilder({ page }).analyze()
   expect(results.violations).toEqual([])
@@ -36,7 +36,11 @@ test('address search with no match has no violations', async ({ page }) => {
 
 test('out-of-coverage rejection has no violations', async ({ page }) => {
   await page.goto(routeUrl(POINT_A, POINT_OUTSIDE_COVERAGE))
-  await expect(page.getByText('coverage', { exact: false })).toBeVisible()
+  // Plain getByText('coverage') is ambiguous once the map's own coverage-
+  // area legend entry is loaded (same word, unrelated element) -- role="alert"
+  // is unique to RouteStats' error message, so it's both the more specific
+  // locator and the one that actually proves the right state loaded.
+  await expect(page.getByRole('alert')).toContainText('coverage', { ignoreCase: true })
 
   const results = await new AxeBuilder({ page }).analyze()
   expect(results.violations).toEqual([])

@@ -71,15 +71,10 @@
   border-left: 1px solid var(--border);
 }
 
-.hint {
-  font-size: 0.875rem; /* 14px */
+.instructions {
+  margin: 4px 0 0;
+  font-size: 0.75rem; /* 12px */
   color: var(--muted);
-  /* Was unset, so it fell back to the browser's default <p> margin —
-     explicit now, matching the --space-xl gap used between the panel's
-     top-level sections. Only ever rendered while Controls/RouteStats'
-     aria-live div is empty, so this is the one gap source between them,
-     not an addition. */
-  margin: var(--space-xl) 0 0;
 }
 
 /* Mobile / narrow (and 200%-zoom reflow): stack map above panel. */
