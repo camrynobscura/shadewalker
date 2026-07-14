@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { fetchCoverage, fetchRoute, RouteError, type CoverageFeature, type Point, type RouteResponse } from './api'
+import { fetchCoverage, type CoverageFeature, type Point } from './api'
 import { Controls, DEFAULT_TREE_WEIGHT, snapToPreset } from './components/Controls'
 import { MapView } from './components/MapView'
 import { RouteStats } from './components/RouteStats'
 import { useGeolocation } from './hooks/useGeolocation'
+import { useRouteQuery } from './hooks/useRouteQuery'
 import styles from './App.module.css'
 
 /* ── URL state ────────────────────────────────────────────────────────────
@@ -21,44 +22,33 @@ function formatPoint(p: Point): string {
   return `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`
 }
 
+// Old bookmarks may carry any slider value 0–40; snap it to a preset.
+function initialTreeWeight(params: URLSearchParams): number {
+  const w = Number(params.get('w'))
+  return params.has('w') && Number.isFinite(w) ? snapToPreset(w) : DEFAULT_TREE_WEIGHT
+}
+
 const initialParams = new URLSearchParams(window.location.search)
 
 export default function App() {
-  // Lazy initializers (the () => form) run once, on first render only —
-  // afterwards the URL follows the state, not the other way around.
-  const [start, setStart] = useState<Point | null>(() => parsePoint(initialParams.get('from')))
-  const [end, setEnd] = useState<Point | null>(() => parsePoint(initialParams.get('to')))
-  const [treeWeight, setTreeWeight] = useState<number>(() => {
-    // Old bookmarks may carry any slider value 0–40; snap it to a preset.
-    const w = Number(initialParams.get('w'))
-    return initialParams.has('w') && Number.isFinite(w) ? snapToPreset(w) : DEFAULT_TREE_WEIGHT
-  })
-
-  const [route, setRoute] = useState<RouteResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  // Where the route actually starts/ends once the server resolves it onto
-  // the street network — can differ from `start`/`end` (what was clicked or
-  // geocoded), since that point may sit mid-block. Display-only: MapView
-  // draws markers here (falling back to the raw point until a route
-  // resolves), but nothing about the fetch itself depends on this state.
-  const [snappedStart, setSnappedStart] = useState<Point | null>(null)
-  const [snappedEnd, setSnappedEnd] = useState<Point | null>(null)
-
-  // Wrap the raw setters so picking a new point immediately drops its own
-  // stale snapped marker — without this, setting a new `start` while `end`
-  // stays put (e.g. searching a different start address) wouldn't clear
-  // `snappedStart`, and the old marker would sit in the wrong place until
-  // the next fetch resolves.
-  function updateStart(p: Point | null) {
-    setSnappedStart(null)
-    setStart(p)
-  }
-  function updateEnd(p: Point | null) {
-    setSnappedEnd(null)
-    setEnd(p)
-  }
+  const {
+    start,
+    end,
+    treeWeight,
+    route,
+    loading,
+    error,
+    snappedStart,
+    snappedEnd,
+    setTreeWeight,
+    setStart: updateStart,
+    setEnd: updateEnd,
+    clear: handleClear,
+  } = useRouteQuery(
+    parsePoint(initialParams.get('from')),
+    parsePoint(initialParams.get('to')),
+    initialTreeWeight(initialParams),
+  )
 
   const [locationEnabled, setLocationEnabled] = useState(false)
   const position = useGeolocation(locationEnabled)
@@ -72,40 +62,6 @@ export default function App() {
       .then(setCoverage)
       .catch(() => {})
   }, [])
-
-  // Fetch whenever the request changes. The AbortController in the cleanup
-  // cancels the in-flight request each time a newer one supersedes it (e.g.
-  // dragging the slider) — otherwise slow responses could arrive out of
-  // order and paint a stale route over a fresh one.
-  useEffect(() => {
-    if (!start || !end) {
-      setRoute(null)
-      setSnappedStart(null)
-      setSnappedEnd(null)
-      return
-    }
-    const controller = new AbortController()
-    setLoading(true)
-    setError(null)
-    fetchRoute(start, end, treeWeight, controller.signal)
-      .then((data) => {
-        setRoute(data)
-        setSnappedStart(data.snapped.start)
-        setSnappedEnd(data.snapped.end)
-        setLoading(false)
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return // superseded, not an error
-        // RouteError = the server responded with a specific, useful reason
-        // (e.g. outside coverage) — show that. Anything else (dead server,
-        // no network) gets the generic fallback instead of a raw fetch error.
-        setError(err instanceof RouteError ? err.message : 'Could not find a route — is the server running?')
-        setSnappedStart(null)
-        setSnappedEnd(null)
-        setLoading(false)
-      })
-    return () => controller.abort()
-  }, [start, end, treeWeight])
 
   // Mirror state → URL.
   useEffect(() => {
@@ -124,13 +80,6 @@ export default function App() {
     } else {
       updateEnd(p)
     }
-  }
-
-  function handleClear() {
-    updateStart(null)
-    updateEnd(null)
-    setRoute(null)
-    setError(null)
   }
 
   return (
