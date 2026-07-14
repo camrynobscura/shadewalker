@@ -1,4 +1,4 @@
-# Shady Stroll
+# Shadewalker
 
 Find the shadiest walking route between two points in NYC, powered by the live
 [NYC Tree Map](https://data.cityofnewyork.us/Environment/Forestry-Tree-Points/hn5i-inap)
@@ -6,8 +6,7 @@ and OpenStreetMap.
 
 **Status:** Stage 1 is done — a working, WCAG 2.2 AA–accessible app routing
 trees-only on the Carroll Gardens + Gowanus pilot tile. Stage 2 (expand the
-same trees-only routing citywide) hasn't started yet. See the full plan in
-`~/.claude/plans/jiggly-stirring-milner.md`.
+same trees-only routing citywide) hasn't started yet.
 
 ## Layout
 

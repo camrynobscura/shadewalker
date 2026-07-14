@@ -142,7 +142,7 @@ export default function App() {
 
       <header className={styles.header}>
         <h1 className={styles.title}>
-          Shady Stroll <span className={styles.tagline}>- find the shadiest path for your route</span>
+          Shadewalker <span className={styles.tagline}>- find the shadiest walking route in NYC</span>
         </h1>
       </header>
 
