@@ -98,4 +98,14 @@
   .header {
     padding: var(--space-xl);
   }
+
+  /* Inline by default, so the browser wraps wherever it runs out of room
+     mid-phrase (e.g. orphaning "route in NYC" alone on line 2). Block here
+     instead, so the whole "> find..." tagline -- greater-than sign
+     included, since it's the span's first character -- moves to its own
+     line as one unit. */
+  .tagline {
+    display: block;
+    margin-top: var(--space-xs);
+  }
 }
