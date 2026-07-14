@@ -1,5 +1,11 @@
-# Data is regenerable from the pipeline — never committed (can be 100s of MB citywide)
-data/
+# Data is regenerable from the pipeline — never committed (can be 100s of MB
+# citywide), except the small pilot tile below: pytest and Playwright's
+# webServer both load it at test time, and CI has no pipeline/live-API
+# access to regenerate it, so a committed copy is its test fixture.
+data/*
+!data/tiles/
+data/tiles/*
+!data/tiles/pilot.json.gz
 
 # Python
 .venv/
