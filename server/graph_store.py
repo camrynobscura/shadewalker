@@ -399,6 +399,23 @@ class GraphStore:
                 + float(self._length[edge_path][shaded[edge_path]].sum())
                 + (e_dist_m if shaded[end.edge] else 0.0)
             )
+            # Reconstruct the full ordered sequence of edges actually
+            # walked (partial lead-in/lead-out edges only included if
+            # genuinely walked, i.e. their partial distance is nonzero) so
+            # consecutive pairs can be checked for whether they cross a
+            # real intersection while both sides read "shaded" -- see
+            # config.SHADE_CROSSING_GAP_M for why only that case counts.
+            walked_edges = (
+                ([start.edge] if s_dist_m > 0 else [])
+                + list(edge_path)
+                + ([end.edge] if e_dist_m > 0 else [])
+            )
+            crossings_within_shade = sum(
+                1 for a, b in zip(walked_edges, walked_edges[1:]) if shaded[a] and shaded[b]
+            )
+            shaded_length_m = max(
+                shaded_length_m - crossings_within_shade * config.SHADE_CROSSING_GAP_M, 0.0
+            )
 
         if len(coords) < 2:
             coords = coords * 2  # start and end snapped to the same point

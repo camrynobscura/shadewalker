@@ -48,6 +48,25 @@ def test_click_near_2nd_street_actually_reaches_2nd_street(client):
     assert res.json()["green"]["properties"]["length_m"] < 350  # was 571.5m before the fix
 
 
+def test_a_heavily_shaded_route_never_reads_as_exactly_full_shade(client):
+    """A route from 40.68627,-73.99906 to 40.68595,-73.98429 crosses 10
+    different Cobble Hill blocks, each of which independently clears
+    SHADE_DENSITY_THRESHOLD -- shade_fraction read exactly 1.0 (100%) at
+    every tree_weight above 0, which overstates real coverage: a walker
+    is still exposed at each of the corners along the way, regardless of
+    how tree-lined the blocks bordering them are."""
+    for tree_weight in (5, 15, 40):
+        res = client.get(
+            "/route",
+            params={
+                "from_lat": 40.68627, "from_lon": -73.99906,
+                "to_lat": 40.68595, "to_lon": -73.98429,
+                "tree_weight": tree_weight,
+            },
+        )
+        assert res.json()["green"]["properties"]["shade_fraction"] < 1.0
+
+
 def test_destination_outside_coverage_is_rejected_not_silently_mis_snapped(client):
     """A destination just past the pilot tile's edge was silently snapping
     ~235m short of where it was actually asked for, instead of telling the

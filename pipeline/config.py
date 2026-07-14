@@ -142,6 +142,23 @@ DENSITY_LENGTH_FLOOR_M = 20.0
 # as "more shaded," which defeats the point of the stat.
 SHADE_DENSITY_THRESHOLD = 0.025
 
+# A pedestrian is briefly exposed at every real street intersection a
+# route crosses, no matter how tree-lined the blocks on either side are --
+# shade_fraction's per-edge average can't see this on its own (the bug
+# this constant fixes: a route over 10 different tree-lined Cobble Hill
+# blocks read as exactly 100% shaded, because each block cleared
+# SHADE_DENSITY_THRESHOLD in isolation). Applied once per intersection
+# where *both* neighboring edges are themselves shaded -- a crossing next
+# to an already-unshaded block doesn't need a separate deduction, since
+# that block's own classification already accounts for the exposure
+# there; only double-subtracting where the model would otherwise report
+# an unbroken (and unrealistic) stretch of continuous cover.
+#
+# Not calibrated against real data the way SHADE_DENSITY_THRESHOLD was --
+# there's no crosswalk-width dataset in this pipeline. 6m is a plain
+# physical estimate (roughly one corner's curb-to-building clearance).
+SHADE_CROSSING_GAP_M = 6.0
+
 # How far a requested point may sit from the nearest graph node and still be
 # considered "in coverage". Intersections along a real block are already
 # 80-100 m apart, so this has to be generous enough not to reject a

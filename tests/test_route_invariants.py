@@ -283,11 +283,12 @@ def test_shade_fraction_can_rise_even_when_tree_count_plateaus(client):
     MED (w=15) and MAX (w=40) land on the same tree_count (397) -- raising
     tree_weight bought no extra trees at all -- yet MAX spends noticeably
     more of the walk actually under cover (verified directly against the
-    server at SHADE_DENSITY_THRESHOLD=0.025: 73.6% shaded at w=15 vs 78.2%
-    at w=40). tree_count alone can't show that difference; shade_fraction
-    should. The margin below is intentionally looser than the measured
-    4.6-point gap -- tight enough to catch a real regression, loose enough
-    to not break every time the threshold gets recalibrated."""
+    server with SHADE_DENSITY_THRESHOLD=0.025 and SHADE_CROSSING_GAP_M=6.0:
+    70.1% shaded at w=15 vs 75.4% at w=40). tree_count alone can't show
+    that difference; shade_fraction should. The margin below is
+    intentionally looser than the measured 5.3-point gap -- tight enough
+    to catch a real regression, loose enough to not break every time the
+    threshold or crossing gap get recalibrated."""
     from_lat, from_lon = 40.68354, -74.00009
     to_lat, to_lon = 40.66674, -73.98442
 
@@ -310,3 +311,25 @@ def test_shade_fraction_can_rise_even_when_tree_count_plateaus(client):
 
     assert med["tree_count"] == max_["tree_count"]  # the original plateau
     assert max_["shade_fraction"] > med["shade_fraction"] + 0.03  # but a real shade gain
+
+
+def test_shade_fraction_crossing_deduction_leaves_a_low_shade_route_alone(client):
+    """SHADE_CROSSING_GAP_M only fires between two edges that are BOTH
+    already classified shaded (see graph_store.route()) -- a mostly-
+    unshaded route has few or no such crossings, so its shade_fraction
+    should come out unchanged by the deduction. Pins the FROM/TO pair's
+    known low-shade value so a future change that starts applying the
+    deduction unconditionally (not gated on both neighbors) gets caught
+    here -- test_a_heavily_shaded_route_never_reads_as_exactly_full_shade
+    in test_route_regressions.py wouldn't catch that, since it only checks
+    that a *heavily* shaded route drops below 100%, not that a lightly
+    shaded one is left alone."""
+    res = client.get(
+        "/route",
+        params={
+            "from_lat": FROM["lat"], "from_lon": FROM["lon"],
+            "to_lat": TO["lat"], "to_lon": TO["lon"],
+            "tree_weight": 15,
+        },
+    )
+    assert res.json()["green"]["properties"]["shade_fraction"] == 0.23
