@@ -5,6 +5,8 @@ import gzip
 import json
 import math
 
+import pytest
+
 from pipeline import config
 
 # A real, well-connected pair of points inside the pilot tile -- used
@@ -261,3 +263,50 @@ def test_a_self_loop_edge_routes_without_error(graph_store):
     # A quarter-to-three-quarters hop along one loop shouldn't blow up to
     # anywhere near the full loop length.
     assert result["length_m"] < graph_store._length[edge]
+
+
+@pytest.mark.parametrize("tree_weight", [0, 5, 15, 40])
+def test_shade_fraction_is_always_between_zero_and_one(client, tree_weight):
+    res = client.get(
+        "/route",
+        params={
+            "from_lat": FROM["lat"], "from_lon": FROM["lon"],
+            "to_lat": TO["lat"], "to_lon": TO["lon"],
+            "tree_weight": tree_weight,
+        },
+    )
+    assert 0.0 <= res.json()["green"]["properties"]["shade_fraction"] <= 1.0
+
+
+def test_shade_fraction_can_rise_even_when_tree_count_plateaus(client):
+    """The exact real case that motivated shade_fraction: for this walk,
+    MED (w=15) and MAX (w=40) land on the same tree_count (397) -- raising
+    tree_weight bought no extra trees at all -- yet MAX spends noticeably
+    more of the walk actually under cover (verified directly against the
+    server at SHADE_DENSITY_THRESHOLD=0.025: 73.6% shaded at w=15 vs 78.2%
+    at w=40). tree_count alone can't show that difference; shade_fraction
+    should. The margin below is intentionally looser than the measured
+    4.6-point gap -- tight enough to catch a real regression, loose enough
+    to not break every time the threshold gets recalibrated."""
+    from_lat, from_lon = 40.68354, -74.00009
+    to_lat, to_lon = 40.66674, -73.98442
+
+    med = client.get(
+        "/route",
+        params={
+            "from_lat": from_lat, "from_lon": from_lon,
+            "to_lat": to_lat, "to_lon": to_lon,
+            "tree_weight": 15,
+        },
+    ).json()["green"]["properties"]
+    max_ = client.get(
+        "/route",
+        params={
+            "from_lat": from_lat, "from_lon": from_lon,
+            "to_lat": to_lat, "to_lon": to_lon,
+            "tree_weight": 40,
+        },
+    ).json()["green"]["properties"]
+
+    assert med["tree_count"] == max_["tree_count"]  # the original plateau
+    assert max_["shade_fraction"] > med["shade_fraction"] + 0.03  # but a real shade gain

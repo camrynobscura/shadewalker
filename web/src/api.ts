@@ -28,6 +28,10 @@ export interface RouteFeature {
     length_m: number
     minutes: number
     tree_count: number
+    /** Fraction (0-1) of the route classified as shaded -- tree canopy
+     * only today, but a general "shade" field so building-shadow scoring
+     * (an optional future stretch goal) can feed the same one later. */
+    shade_fraction: number
     segments: RouteSegment[]
   }
 }
@@ -43,6 +47,7 @@ export interface RouteResponse {
   comparison: {
     extra_length_m: number
     extra_trees: number
+    extra_shade_pct: number
     month: number
     tree_weight: number
   }

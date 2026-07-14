@@ -125,6 +125,23 @@ MAX_TREE_WEIGHT = 40.0
 # densities (0.8+ vs a leafy block's 0.05).
 DENSITY_LENGTH_FLOOR_M = 20.0
 
+# Below this per-meter tree density, an edge counts as "not shaded" for
+# the /route response's shade_fraction stat. Distinct from the cost
+# formula's *degree* of density above -- this is a yes/no cutoff, more
+# lenient than RouteStats.tsx's SPARSE_TREES_PER_M (a whole-route warning
+# threshold, not a per-edge one). Named for *shade* generally, not trees
+# specifically -- Stage 4's building-shadow scoring (optional stretch
+# goal) would feed the same field later without a schema change.
+#
+# 0.025, not the pilot tile's ~0.011 median: an initial 0.01 pick turned
+# out to sit almost exactly at the citywide-tile median density, so it
+# barely filtered anything (97% shade on one real test route). Checked
+# the real distribution and several candidate values before landing here
+# -- push this much past ~0.035 and the classification gets sensitive
+# enough to individual edges that it can invert which of two routes reads
+# as "more shaded," which defeats the point of the stat.
+SHADE_DENSITY_THRESHOLD = 0.025
+
 # How far a requested point may sit from the nearest graph node and still be
 # considered "in coverage". Intersections along a real block are already
 # 80-100 m apart, so this has to be generous enough not to reject a

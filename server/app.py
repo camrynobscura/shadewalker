@@ -127,6 +127,7 @@ def route(
             # alongside percentages, so sparse areas aren't oversold).
             "extra_length_m": round(green["length_m"] - shortest["length_m"], 1),
             "extra_trees": green["tree_count"] - shortest["tree_count"],
+            "extra_shade_pct": round((green["shade_fraction"] - shortest["shade_fraction"]) * 100),
             "month": month,
             "tree_weight": tree_weight,
         },
@@ -144,6 +145,7 @@ def _to_feature(route: dict) -> dict:
             "length_m": route["length_m"],
             "minutes": route["minutes"],
             "tree_count": route["tree_count"],
+            "shade_fraction": route["shade_fraction"],
             "segments": route["segments"],
         },
     }

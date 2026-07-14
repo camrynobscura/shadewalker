@@ -242,7 +242,8 @@ export function Controls({
         {route && (
           <p className={styles.presetHint}>
             &gt; +{Math.round(route.green.properties.minutes - route.shortest.properties.minutes)} min · +
-            {route.comparison.extra_trees} trees · +{formatDistance(route.comparison.extra_length_m)}
+            {route.comparison.extra_trees} trees · +{route.comparison.extra_shade_pct}% shade · +
+            {formatDistance(route.comparison.extra_length_m)}
           </p>
         )}
       </fieldset>

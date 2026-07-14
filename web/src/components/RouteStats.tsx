@@ -55,6 +55,10 @@ function StatsBody({ data }: { data: RouteResponse }) {
           <span className={styles.statVal}>{green.tree_count}</span>
           <span className={styles.statLabel}>trees</span>
         </div>
+        <div className={styles.stat}>
+          <span className={styles.statVal}>{Math.round(green.shade_fraction * 100)}%</span>
+          <span className={styles.statLabel}>shade</span>
+        </div>
       </div>
 
       {isSparse && (

@@ -270,11 +270,17 @@ class GraphStore:
         _, dist_m = self._nearest_edge(lat, lon)
         return dist_m <= config.MAX_SNAP_DISTANCE_M
 
-    def edge_costs(self, tree_weight: float, month: int) -> np.ndarray:
-        """The plan's trees-only cost formula, vectorized over every edge."""
+    def _edge_density(self, month: int) -> np.ndarray:
+        """Month-adjusted tree density (score per meter), vectorized over
+        every edge. Shared by edge_costs() (degree of density matters) and
+        route()'s shade_fraction (a yes/no threshold on the same number)."""
         canopy = config.CANOPY_BY_MONTH[month - 1]  # month is 1-12; lists index from 0
         tree_score = self._tree_evergreen + self._tree_deciduous * canopy
-        density = tree_score / np.maximum(self._length, config.DENSITY_LENGTH_FLOOR_M)
+        return tree_score / np.maximum(self._length, config.DENSITY_LENGTH_FLOOR_M)
+
+    def edge_costs(self, tree_weight: float, month: int) -> np.ndarray:
+        """The plan's trees-only cost formula, vectorized over every edge."""
+        density = self._edge_density(month)
         return self._length / (1.0 + tree_weight * density)
 
     def route(self, start: SnapPoint, end: SnapPoint, tree_weight: float, month: int) -> dict | None:
@@ -298,6 +304,7 @@ class GraphStore:
         at a high tree_weight.
         """
         costs = self.edge_costs(tree_weight, month)
+        shaded = self._edge_density(month) >= config.SHADE_DENSITY_THRESHOLD
 
         start_options = [(start.node_u, start.dist_to_u_m), (start.node_v, start.dist_to_v_m)]
         end_options = [(end.node_u, end.dist_to_u_m), (end.node_v, end.dist_to_v_m)]
@@ -338,6 +345,10 @@ class GraphStore:
             coords = self._edge_substring(start.edge, start.point, end.point)
             length_m = direct_dist_m
             tree_count = direct_dist_m / self._length[start.edge] * self._tree_count[start.edge]
+            # Unlike tree_count's proportional split, shade is all-or-
+            # nothing per edge -- the edge either clears the threshold or
+            # it doesn't, so a partial edge inherits its whole edge's status.
+            shaded_length_m = direct_dist_m if shaded[start.edge] else 0.0
             _add_segment(segments, self._names[start.edge] or "unnamed path", length_m)
         else:
             _, s_node, s_dist_m, e_node, e_dist_m, edge_path = best_plan
@@ -383,6 +394,11 @@ class GraphStore:
                 + float(self._tree_count[edge_path].sum())
                 + e_dist_m / self._length[end.edge] * self._tree_count[end.edge]
             )
+            shaded_length_m = (
+                (s_dist_m if shaded[start.edge] else 0.0)
+                + float(self._length[edge_path][shaded[edge_path]].sum())
+                + (e_dist_m if shaded[end.edge] else 0.0)
+            )
 
         if len(coords) < 2:
             coords = coords * 2  # start and end snapped to the same point
@@ -394,6 +410,7 @@ class GraphStore:
             # Round the total once, not each partial piece, so rounding
             # error from the fractional lead-in/lead-out doesn't compound.
             "tree_count": int(round(tree_count)),
+            "shade_fraction": round(shaded_length_m / length_m, 3) if length_m else 0.0,
             "segments": [
                 {"name": s["name"], "length_m": round(s["length_m"], 1)} for s in segments
             ],
