@@ -21,7 +21,7 @@
 }
 
 .header {
-  padding: 10px 16px;
+  padding: var(--space-xl) var(--space-2xl);
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
@@ -72,7 +72,7 @@
 }
 
 .instructions {
-  margin: 4px 0 0;
+  margin: var(--space-xs) 0 0;
   font-size: 0.75rem; /* 12px */
   color: var(--muted);
 }
@@ -90,7 +90,12 @@
   .panel {
     width: auto;
     flex: 1;
+    padding: var(--space-xl);
     border-left: none;
     border-top: 1px solid var(--border);
+  }
+
+  .header {
+    padding: var(--space-xl);
   }
 }

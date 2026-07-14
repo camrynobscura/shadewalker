@@ -4,7 +4,7 @@
   align-items: flex-start;
   gap: var(--space-md);
   height: 100%;
-  padding: var(--space-lg) 24px;
+  padding: var(--space-lg) var(--space-xl);
   background: var(--bg);
 }
 
@@ -24,10 +24,11 @@
 
 /* Same solid-fill treatment as Controls.module.css's .primaryButton, so a
    crash still looks like part of this app rather than a generic browser
-   error page. */
+   error page -- same padding too now (was 8px 20px, an unintentional drift
+   from .primaryButton/.secondaryButton's 8px 12px). */
 .reloadButton {
   min-height: 44px;
-  padding: 8px 20px;
+  padding: var(--space-sm) var(--space-md);
   background: var(--green-dim);
   color: #fff;
   border: none;

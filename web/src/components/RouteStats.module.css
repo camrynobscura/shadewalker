@@ -39,14 +39,14 @@
 
 .statRow {
   display: flex;
-  gap: 8px;
+  gap: var(--space-sm);
   margin: 0;
 }
 
 .stat {
   flex: 1;
   min-width: 0;
-  padding: 8px 10px;
+  padding: var(--space-sm) 10px;
   /* A soft green wash so these read as data readouts, distinct from the
      panel background — a translucent tint over --green, not the solid
      --green-dim fill the actual buttons use, so it doesn't look clickable. */

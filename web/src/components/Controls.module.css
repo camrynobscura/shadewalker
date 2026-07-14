@@ -48,7 +48,7 @@
 .addressInput {
   width: 100%;
   min-height: 44px;
-  padding: 8px 10px;
+  padding: var(--space-sm) 10px;
   background: var(--panel-raised);
   color: var(--text);
   border: 1px solid var(--border);
@@ -176,7 +176,7 @@
    so the box doesn't only appear once a route exists. */
 .comparisonHint {
   margin: var(--space-md) 0 0;
-  padding: 6px 8px;
+  padding: 6px var(--space-sm);
   background: rgba(0, 168, 107, 0.08);
   border-left: 3px solid var(--green);
 }
@@ -189,7 +189,7 @@
 }
 
 .comparisonLine {
-  margin: 4px 0 0;
+  margin: var(--space-xs) 0 0;
   font-size: 0.75rem; /* 12px */
   color: var(--muted);
 }
@@ -217,7 +217,7 @@
   width: 100%;
   min-height: 44px;
   margin: 0;
-  padding: 8px 12px;
+  padding: var(--space-sm) var(--space-md);
   background: var(--green-dim);
   color: #fff;
   border: none;
@@ -238,7 +238,7 @@
 .buttonRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-sm);
 }
 
 .buttonRow > * {
@@ -251,7 +251,7 @@
   width: 100%;
   min-height: 44px;
   margin: 0;
-  padding: 8px 12px;
+  padding: var(--space-sm) var(--space-md);
   background: var(--panel-raised);
   color: var(--text);
   border: 1px solid var(--border);
