@@ -24,7 +24,7 @@
   --magenta: #ff2bd6; /* Glitch Garden neon: selected state + end marker; pair with --text, never white */
   --cyan: #0077a3; /* tagline + small accents; 4.7:1 on --panel */
   --focus: #0077a3;
-  --danger: #b3261e; /* 6:1+ on --panel */
+  --danger: #a70e06; /* 6:1+ on --panel */
 
   /* Vertical rhythm scale for the control panel. Every gap between blocks
      should be one of these five, via a flex container's `gap` — not a
