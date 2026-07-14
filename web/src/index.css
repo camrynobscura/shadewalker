@@ -34,8 +34,10 @@
   --space-lg: 16px; /* between distinct field groups within one section */
   --space-xl: 24px; /* between the panel's three top-level sections
                         (address entry / shade priority / results), and
-                        the panel's own top/bottom edge -- matches the
-                        panel's existing 24px side padding */
+                        the panel's own top/bottom edge */
+  --space-2xl: 30px; /* one step past --space-xl, for a gap that needs to
+                         read as more generous than the top-level section
+                         spacing itself */
 }
 
 * {
