@@ -93,7 +93,7 @@ export default function App() {
 
       <header className={styles.header}>
         <h1 className={styles.title}>
-          Shadewalker <span className={styles.tagline}>- find the shadiest walking route in NYC</span>
+          Shadewalker <span className={styles.tagline}>&#62; find the shadiest walking route in NYC</span>
         </h1>
         {/* The one piece of visible instruction guaranteed to be on screen
             before any scrolling, on every viewport size -- it's rendered
