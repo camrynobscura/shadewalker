@@ -22,10 +22,17 @@
   gap: var(--space-md);
 }
 
+/* Same translucent-wash + left-accent-border treatment as .comparisonHint
+   below, in red instead of green -- reuses this app's existing "callout"
+   pattern rather than inventing a new one, and a left accent (not a full
+   border box) avoids looking like an interactive control the way
+   .segmented's boxed style would. */
 .error {
   margin: 0;
-  font-size: 0.8125rem; /* 13px, matches .addressStatus */
-  font-weight: 600;
+  padding: var(--space-md);
+  background: rgba(179, 38, 30, 0.1); /* --danger wash */
+  border-left: 3px solid var(--danger);
+  font-size: var(--font-size-sm); /* matches .addressStatus */
   color: var(--danger);
 }
 
