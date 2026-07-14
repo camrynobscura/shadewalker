@@ -25,31 +25,31 @@
   position: relative; /* anchors the .scanlines overlay */
 }
 
-/* A/B markers: both neon magenta so neither blends into the jade route —
-   they're told apart by shape + letter (circle-A vs square-B), which is
-   what WCAG's use-of-color rule actually asks for. Flat and borderless
-   like the Greenhouse mockup; a faint shadow keeps them separable from
-   busy tiles without reading as an outline. */
+/* A/B markers: both neon magenta, both circles -- told apart by their
+   letter, which is what WCAG's use-of-color rule actually requires (color
+   must not be the ONLY differentiator; it isn't, since the letter is
+   always legible on its own). Used to also differ by shape (circle vs
+   square) for an at-a-glance distinction beyond reading the letter, but
+   the square fought the app's otherwise zero-corner-radius rule and read
+   as arbitrary rather than intentional -- dropped in favor of just the
+   letter. Flat and borderless like the Greenhouse mockup; a faint shadow
+   keeps them separable from busy tiles without reading as an outline. */
 .marker {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 30px;
   height: 30px;
+  border-radius: 50%;
   font-weight: 700;
   font-size: 0.9375rem; /* 15px */
   color: #0b2418; /* ink on neon magenta: 5.6:1 */
   box-shadow: 0 1px 3px rgba(11, 36, 24, 0.3);
 }
 
-.markerStart {
-  background: var(--magenta);
-  border-radius: 50%; /* circle */
-}
-
+.markerStart,
 .markerEnd {
   background: var(--magenta);
-  border-radius: 0; /* square */
 }
 
 /* Bottom-left, mirroring the locate button's bottom-right slot so neither

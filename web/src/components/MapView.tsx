@@ -16,9 +16,10 @@ import styles from './MapView.module.css'
 
 const PILOT_CENTER: [number, number] = [40.677, -73.993]
 
-/* Markers as labeled divIcons: start and end differ by letter AND shape AND
-   color (circle vs square), so color-blind users aren't relying on hue alone
-   (WCAG 1.4.1 "use of color"). */
+/* Markers as labeled divIcons: start and end are told apart by their letter,
+   not color -- both render the same magenta (see MapView.module.css), so
+   color-blind users aren't relying on hue alone (WCAG 1.4.1 "use of
+   color"). */
 const startIcon = divIcon({
   className: '', // suppress Leaflet's default white-box styling
   html: `<span class="${styles.marker} ${styles.markerStart}" aria-hidden="true">A</span>`,
