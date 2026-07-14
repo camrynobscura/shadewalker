@@ -84,19 +84,19 @@
   }
 
   .mapArea {
-    min-height: 52vh;
+    min-height: 45vh;
   }
 
   .panel {
     width: auto;
     flex: 1;
-    padding: var(--space-xl);
+    padding: var(--space-lg);
     border-left: none;
     border-top: 1px solid var(--border);
   }
 
   .header {
-    padding: var(--space-xl);
+    padding: var(--space-lg);
   }
 
   /* Inline by default, so the browser wraps wherever it runs out of room
