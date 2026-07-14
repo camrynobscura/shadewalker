@@ -35,6 +35,19 @@ def _a_real_node_coordinate() -> tuple[float, float]:
     return lat, lon
 
 
+def _nearest_real_node_coordinate(approx_lat: float, approx_lon: float) -> tuple[float, float]:
+    """The real node closest to an approximate point, read straight from
+    the tile file -- lets a test target "near this corner" without
+    assuming any specific node happens to sit exactly there."""
+    tile_path = next(config.TILES_DIR.glob("*.json.gz"))
+    tile = json.loads(gzip.open(tile_path, "rt").read())
+    best_lon, best_lat = min(
+        tile["nodes"].values(),
+        key=lambda lonlat: _haversine_m(approx_lat, approx_lon, lonlat[1], lonlat[0]),
+    )
+    return best_lat, best_lon
+
+
 def test_tree_weight_zero_reproduces_the_shortest_path(client):
     """The project plan's own definition of done for the routing server:
     tree_weight=0 must reproduce the plain shortest path exactly, since
@@ -146,3 +159,105 @@ def test_two_points_on_the_same_block_route_directly_not_via_a_corner(graph_stor
     # A direct hop along one edge should be short -- nowhere near the cost
     # of detouring out to an intersection and back.
     assert result["length_m"] < airline_m * 3
+
+
+# Every test above this point routes between one of a small handful of
+# fixed, hand-picked points. The tests below cover geometry shapes those
+# fixed points never touch -- diverse real coordinates, not just the ones
+# that happened to come from a bug report.
+
+
+def test_route_spans_the_full_pilot_tile_between_real_corners(client):
+    """The longest realistic route in this tile -- stresses multi-edge
+    stitching across many blocks, unlike every other test's one reused
+    nearby pair."""
+    lat_a, lon_a = _nearest_real_node_coordinate(config.PILOT_BBOX.lat_min, config.PILOT_BBOX.lon_min)
+    lat_b, lon_b = _nearest_real_node_coordinate(config.PILOT_BBOX.lat_max, config.PILOT_BBOX.lon_max)
+
+    res = client.get(
+        "/route",
+        params={
+            "from_lat": lat_a, "from_lon": lon_a,
+            "to_lat": lat_b, "to_lon": lon_b,
+            "tree_weight": 15,
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    airline_m = _haversine_m(lat_a, lon_a, lat_b, lon_b)
+    assert body["green"]["properties"]["length_m"] >= airline_m
+    assert not _has_duplicate_consecutive_points(body["green"]["geometry"]["coordinates"])
+
+
+def test_two_points_a_few_meters_apart_still_route_successfully(client):
+    """A near-degenerate request -- two clicks close enough together that
+    they might snap to the same edge or to adjacent ones. Should still
+    return a short, sane route rather than erroring or looping."""
+    lat_a, lon_a = FROM["lat"], FROM["lon"]
+    lat_b, lon_b = lat_a + 0.000045, lon_a  # ~5 m north
+
+    res = client.get(
+        "/route",
+        params={
+            "from_lat": lat_a, "from_lon": lon_a,
+            "to_lat": lat_b, "to_lon": lon_b,
+            "tree_weight": 15,
+        },
+    )
+    assert res.status_code == 200
+    # Nowhere near the cost of a real detour -- a block is 80-100 m, so
+    # even one bad corner-and-back shouldn't reach this.
+    assert res.json()["green"]["properties"]["length_m"] < 300
+
+
+def test_a_point_near_the_coverage_boundary_still_routes(client):
+    """Distinct from the existing far-outside rejection test: a point near
+    the *edge* of real coverage, not deep inside it, should still resolve
+    to a real route instead of being (wrongly) rejected."""
+    lat_edge, lon_edge = _nearest_real_node_coordinate(
+        config.PILOT_BBOX.lat_min, (config.PILOT_BBOX.lon_min + config.PILOT_BBOX.lon_max) / 2
+    )
+
+    res = client.get(
+        "/route",
+        params={
+            "from_lat": lat_edge, "from_lon": lon_edge,
+            "to_lat": FROM["lat"], "to_lon": FROM["lon"],
+            "tree_weight": 15,
+        },
+    )
+    assert res.status_code == 200
+
+
+def test_a_self_loop_edge_routes_without_error(graph_store):
+    """Some real streets in this tile loop back to their own start node
+    (u == v for that edge) -- confirmed 6 such edges exist in the pilot
+    tile. SnapPoint's dist_to_u_m/dist_to_v_m are deliberately derived
+    from the projection fraction rather than by re-projecting node
+    coordinates, specifically so this case isn't ambiguous about "which
+    way around the loop" -- this is the one test that actually exercises
+    it, using the same fractional-point technique as the same-block test
+    above."""
+    self_loop_edges = [
+        e
+        for e in range(len(graph_store._coords))
+        if graph_store._graph.es[e].tuple[0] == graph_store._graph.es[e].tuple[1]
+    ]
+    assert self_loop_edges, "expected at least one self-loop edge in the pilot tile"
+
+    edge = self_loop_edges[0]
+    coords = graph_store._coords[edge]
+    lon_a, lat_a = coords[len(coords) // 4]
+    lon_b, lat_b = coords[3 * len(coords) // 4]
+
+    start = graph_store.snap_to_edge(lat_a, lon_a)
+    end = graph_store.snap_to_edge(lat_b, lon_b)
+    assert start.edge == edge  # sanity check on the test's own setup
+    assert end.edge == edge
+
+    result = graph_store.route(start, end, tree_weight=0, month=7)
+    assert result is not None
+    assert not _has_duplicate_consecutive_points(result["coords"])
+    # A quarter-to-three-quarters hop along one loop shouldn't blow up to
+    # anywhere near the full loop length.
+    assert result["length_m"] < graph_store._length[edge]
