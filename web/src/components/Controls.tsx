@@ -166,6 +166,12 @@ interface ControlsProps {
   /** The NONE (tree_weight=0) route -- the baseline `selected` is compared
    * against in the comparison line below. */
   baseline: RouteFeature | null
+  /** A rejected route (out of coverage, no path found, server down) --
+   * shown right above the address fields since that's what it's actually
+   * about, and it's where a user's attention already is right after
+   * submitting Find_route or tapping the map (the map sits directly above
+   * this panel, not down near RouteStats where this used to live). */
+  error: string | null
 }
 
 export function Controls({
@@ -180,6 +186,7 @@ export function Controls({
   hasRoute,
   selected,
   baseline,
+  error,
 }: ControlsProps) {
   // Radios become one group (arrow keys move between them, only one can be
   // checked) by sharing a `name` — useId gives us one that's unique even if
@@ -198,6 +205,11 @@ export function Controls({
           it (nothing to divide from but the panel's own top edge), unlike
           the two below. */}
       <div className={styles.addressGroup}>
+        {error && (
+          <p className={styles.error} role="alert">
+            {error}
+          </p>
+        )}
         {/* One form for both fields, so Enter in either one — or the button —
             resolves whichever isn't already resolved. Each field's own
             resolve() no-ops on an empty or already-resolved query, so this

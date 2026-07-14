@@ -111,26 +111,6 @@ export default function App() {
         <p className={styles.instructions}>
           Tap the map to set a start and end point, or search two addresses below.
         </p>
-        {/* Same "must be visible pre-scroll on mobile" reasoning as the
-            instructions line above, for the same reason: this used to only
-            render inside RouteStats, the last section of the control panel
-            — on mobile (panel stacked below a 52vh-tall map, itself below
-            Controls' address fields and Shade_priority radios) that put a
-            rejected-route error so far down a real user would never
-            scroll to it. role="alert" (not just visually present) matters
-            here too, same as before the move: this is exactly the kind of
-            "you need to know this now" feedback that shouldn't depend on
-            the user having scrolled anywhere. Conditionally mounted rather
-            than always-present like .instructions above -- unlike that
-            line's routine on/off toggling (which the always-on fix was
-            for), an error appearing is itself a genuinely exceptional,
-            attention-worthy event, so the small layout shift when it
-            mounts is the point, not a problem to engineer around. */}
-        {error && (
-          <p className={styles.error} role="alert">
-            {error}
-          </p>
-        )}
       </header>
 
       <div className={styles.layout}>
@@ -157,6 +137,7 @@ export default function App() {
             locationEnabled={locationEnabled}
             onEnableLocation={() => setLocationEnabled(true)}
             hasRoute={route !== null}
+            error={error}
             selected={selected}
             baseline={baseline}
           />
