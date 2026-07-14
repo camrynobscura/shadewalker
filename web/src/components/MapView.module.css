@@ -118,17 +118,34 @@
    mint map ground. pointer-events: none means clicks pass straight through
    to the map, and z-index 450 slots it above the route lines (Leaflet's
    overlay pane, 400) but below the A/B markers (600) and controls (1000).
-   Multiple backgrounds layer top-down: lines first, wash underneath. */
+   The line pattern is a small tile, repeated via background-size +
+   background-repeat rather than one repeating-linear-gradient stretched
+   across the whole map height -- a single huge repeating gradient has to
+   rasterize every one of its (possibly 200+) cycles in one pass, and at
+   non-100% browser zoom the per-cycle rounding doesn't land the same way
+   twice, producing visible seams. Tiling a small pre-rasterized cycle
+   fixes the worst of that. Two further attempts at fixing the remaining,
+   more subtle zoom seam both caused real regressions instead of
+   improvements -- widening the tile to 2px/6px didn't meaningfully help,
+   and swapping to an inline SVG bitmap tile (in place of this
+   repeating-linear-gradient) fixed the seam but broke rendering in real
+   Safari entirely for reasons never pinned down. Reverted to this
+   version -- the original 1px/3px spacing, plain CSS gradient, no SVG --
+   as the one confirmed to render correctly everywhere; the residual
+   zoom-seam artifact is a known, accepted browser-rendering quirk, not
+   worth chasing further given how faint this effect already is (0.08
+   opacity) and how low-stakes it is decoratively. */
 .scanlines {
   position: absolute;
   inset: 0;
   z-index: 450;
   pointer-events: none;
-  background:
-    repeating-linear-gradient(
-      0deg,
-      rgba(0, 122, 77, 0.08) 0 1px,
-      transparent 1px 3px
-    ),
-    rgba(0, 168, 107, 0.06);
+  background-color: rgba(0, 168, 107, 0.06);
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(0, 122, 77, 0.08) 0 1px,
+    transparent 1px 3px
+  );
+  background-size: 100% 3px;
+  background-repeat: repeat;
 }
