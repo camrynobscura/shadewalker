@@ -91,5 +91,16 @@ def _build_tree_table(tree_rows: list[dict]) -> gpd.GeoDataFrame:
             "geometry": Point(lon, lat),
         })
 
+    if not records:
+        # Every row got filtered out above (all Dead, or none with a usable
+        # dbh) -- gpd.GeoDataFrame([], crs=...) has no "geometry" column at
+        # all in that case and raises, so build the empty table explicitly
+        # instead of letting score_and_join crash on a tile/edge with zero
+        # scoreable trees.
+        return gpd.GeoDataFrame(
+            {"value_deciduous": [], "value_evergreen": [], "geometry": []},
+            crs=METRIC_CRS,
+        )
+
     trees = gpd.GeoDataFrame(records, crs="EPSG:4326")  # raw coords are lat/lon
     return trees.to_crs(METRIC_CRS)  # → meters, to match the buffered corridors
