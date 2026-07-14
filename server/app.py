@@ -80,6 +80,11 @@ def route(
         month = datetime.now().month
     if not 1 <= month <= 12:
         raise HTTPException(status_code=400, detail="month must be 1-12")
+    if not 0 <= tree_weight <= config.MAX_TREE_WEIGHT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"tree_weight must be between 0 and {config.MAX_TREE_WEIGHT}",
+        )
 
     # Snapping alone can't tell "outside our data" from "a real address" —
     # it always returns the nearest node, however far away. Without this,

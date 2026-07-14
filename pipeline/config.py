@@ -113,6 +113,12 @@ EVERGREEN_GENERA = {
 # forced detours; UI slider should span 0–40.
 TREE_WEIGHT = 10.0
 
+# The frontend's Shade_priority presets top out at 40 (MAX). The server
+# enforces the same ceiling on /route's tree_weight param — a value far
+# outside this range can push an edge's cost toward/below zero on dense
+# blocks, breaking Dijkstra's non-negative-edge-weight assumption.
+MAX_TREE_WEIGHT = 40.0
+
 # When computing tree density (score ÷ length), treat very short edges as at
 # least this long. Tiny intersection stubs (2 m edges) inherit the cross
 # street's trees in their buffer corridor and would otherwise post absurd

@@ -108,6 +108,24 @@ def test_snapping_onto_a_real_intersection_is_essentially_exact(graph_store):
     assert abs(snap.point[1] - lat) < 1e-6
 
 
+def test_tree_weight_out_of_range_is_rejected(client):
+    """A negative tree_weight can push cost = length / (1 + tree_weight *
+    density) toward or below zero on dense edges -- breaking Dijkstra's
+    non-negative-edge-weight assumption instead of just erroring. The
+    server rejects anything outside the frontend's own 0-40 range."""
+    for tree_weight in (-5, 1000):
+        res = client.get(
+            "/route",
+            params={
+                "from_lat": FROM["lat"], "from_lon": FROM["lon"],
+                "to_lat": TO["lat"], "to_lon": TO["lon"],
+                "tree_weight": tree_weight,
+            },
+        )
+        assert res.status_code == 400
+        assert "tree_weight" in res.json()["detail"]
+
+
 def test_two_points_on_the_same_block_route_directly_not_via_a_corner(graph_store):
     """Without the same-edge "direct" candidate in route(), two nearby
     clicks on one block would be forced through a real intersection and

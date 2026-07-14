@@ -1,0 +1,36 @@
+.fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-md);
+  height: 100%;
+  padding: var(--space-lg) 24px;
+  background: var(--bg);
+}
+
+.heading {
+  margin: 0;
+  font-size: 1rem; /* 16px */
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--danger);
+}
+
+.message {
+  margin: 0;
+  color: var(--text);
+  max-width: 40ch;
+}
+
+/* Same solid-fill treatment as Controls.module.css's .primaryButton, so a
+   crash still looks like part of this app rather than a generic browser
+   error page. */
+.reloadButton {
+  min-height: 44px;
+  padding: 8px 20px;
+  background: var(--green-dim);
+  color: #fff;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+}
