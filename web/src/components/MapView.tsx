@@ -185,6 +185,12 @@ export function MapView({ start, end, green, shortest, coverage, position, onMap
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           subdomains={['a', 'b']} /* only the two hosts we preconnect in index.html */
+          // detectRetina is what actually makes Leaflet fill the URL's {r}
+          // token with @2x -- without it, {r} always resolves to empty and
+          // every display gets the same base-resolution tile regardless of
+          // its real pixel density, softer than it needs to be on any
+          // physically high-DPI screen (most modern laptops/phones).
+          detectRetina
         />
         <ClickHandler onMapClick={onMapClick} />
 
