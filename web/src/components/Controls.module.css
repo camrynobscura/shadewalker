@@ -31,7 +31,7 @@
 
 .addressField label {
   display: block;
-  font-size: 0.625rem; /* 10px */
+  font-size: var(--label-font-size);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);
@@ -99,7 +99,7 @@
 .presetGroup legend {
   padding: 0;
   margin-bottom: var(--space-xs);
-  font-size: 0.625rem; /* 10px */
+  font-size: var(--label-font-size);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);

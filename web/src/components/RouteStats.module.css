@@ -11,10 +11,16 @@
 
 /* Same style as Controls.module.css's .addressField label and its
    .presetGroup legend -- one consistent "field/section label" look
-   reused a third time, not a new one. */
+   reused a third time, not a new one. font-weight is explicit here even
+   though the other two never needed it: <h2> carries a bold browser
+   default that <label>/<legend> don't, so without this the title alone
+   would render bolder than the other two. margin-bottom, not the
+   .section flex container's gap, sets the tight title-to-content
+   spacing -- see the comment in RouteStats.tsx for why. */
 .sectionTitle {
-  margin: 0;
-  font-size: 0.625rem; /* 10px */
+  margin: 0 0 var(--space-xs);
+  font-size: var(--label-font-size);
+  font-weight: normal;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);

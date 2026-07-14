@@ -38,6 +38,12 @@
   --space-2xl: 30px; /* one step past --space-xl, for a gap that needs to
                          read as more generous than the top-level section
                          spacing itself */
+
+  /* The small-caps-style "field/section label" look (Start_point,
+     Shade_priority, My_route) is the same size everywhere it's used --
+     one token instead of repeating the literal value in every
+     *.module.css file that needs it. */
+  --label-font-size: 0.625rem; /* 10px */
 }
 
 * {
