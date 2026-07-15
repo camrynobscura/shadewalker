@@ -90,7 +90,7 @@ textarea {
 /* One loud, consistent focus indicator everywhere. :focus-visible fires for
    keyboard focus but not mouse clicks — exactly what WCAG wants. */
 :focus-visible {
-  outline: 3px solid var(--focus);
+  outline: 3px solid var(--cyan);
   outline-offset: 2px;
 }
 

@@ -93,7 +93,10 @@ export default function App() {
 
       <header className={styles.header}>
         <h1 className={styles.title}>
-          Shadewalker <span className={styles.tagline}>&#62; find the shadiest walking route in NYC</span>
+          Shade_walker
+          {/* Decorative terminal cursor — never announced. */}
+          <span className={styles.cursor} aria-hidden="true" />
+          <span className={styles.tagline}>&#62; find the shadiest walking route in NYC</span>
         </h1>
         {/* The one piece of visible instruction guaranteed to be on screen
             before any scrolling, on every viewport size -- it's rendered
@@ -109,7 +112,7 @@ export default function App() {
             Always-on trades a little permanent header height for a header
             that never jumps around mid-interaction. */}
         <p className={styles.instructions}>
-          Tap the map to set a start and end point, or search two addresses below.
+          &#62; tap the map to set a start and end point, or search two addresses below
         </p>
       </header>
 
