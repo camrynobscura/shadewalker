@@ -325,3 +325,38 @@ def test_shade_fraction_crossing_deduction_leaves_a_low_shade_route_alone(client
         },
     )
     assert res.json()["routes"][0]["properties"]["shade_fraction"] == 0.23
+
+
+def test_every_edge_geometry_starts_and_ends_at_its_own_nodes(graph_store):
+    """Pins the packed-geometry alignment (graph_store._coord_buf /
+    _coord_offsets, read via _edge_coords): every edge's slice of the
+    flat coordinate buffer must begin and end at that edge's own two
+    endpoint nodes -- in either order, since stored geometry direction
+    isn't guaranteed to run u->v. An off-by-one in the packing (edge 7's
+    offsets pointing at edge 8's points) would otherwise only surface as
+    confusing downstream failures (weird route shapes, snap mismatches);
+    this names the actual problem. Iterates every loaded edge, so once
+    Stage 2 adds more tiles it also validates the packing across the
+    multi-tile merge + dedupe path, which no test exercises today.
+
+    Tolerance: nodes and geometry are both exported rounded to 6
+    decimals (pipeline/export.py), so matching endpoints agree to ~1e-6
+    degrees; a misaligned edge's endpoints would be whole intersections
+    (>>0.1m) away."""
+
+    def _matches(point, node) -> bool:
+        return abs(point[0] - node[0]) <= 1e-6 and abs(point[1] - node[1]) <= 1e-6
+
+    for edge in range(len(graph_store._length)):
+        coords = graph_store._edge_coords(edge)
+        assert len(coords) >= 2, f"edge {edge}: fewer than 2 geometry points"
+
+        u, v = graph_store._graph.es[edge].tuple
+        node_u = graph_store._node_lonlat[u]
+        node_v = graph_store._node_lonlat[v]
+        runs_u_to_v = _matches(coords[0], node_u) and _matches(coords[-1], node_v)
+        runs_v_to_u = _matches(coords[0], node_v) and _matches(coords[-1], node_u)
+        assert runs_u_to_v or runs_v_to_u, (
+            f"edge {edge}: geometry endpoints {coords[0]}..{coords[-1]} don't "
+            f"land on its nodes {node_u} / {node_v} -- packed buffer misaligned?"
+        )
