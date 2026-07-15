@@ -146,8 +146,8 @@ def test_two_points_on_the_same_block_route_directly_not_via_a_corner(graph_stor
     back instead of routing straight between them."""
     # The longest edge in the tile, so there's plenty of room to pick two
     # clearly-separated points that both still snap back to it.
-    edge = max(range(len(graph_store._coords)), key=lambda e: graph_store._length[e])
-    coords = graph_store._coords[edge]
+    edge = max(range(len(graph_store._length)), key=lambda e: graph_store._length[e])
+    coords = graph_store._edge_coords(edge)
     lon_a, lat_a = coords[len(coords) // 4]
     lon_b, lat_b = coords[3 * len(coords) // 4]
 
@@ -241,13 +241,13 @@ def test_a_self_loop_edge_routes_without_error(graph_store):
     above."""
     self_loop_edges = [
         e
-        for e in range(len(graph_store._coords))
+        for e in range(len(graph_store._length))
         if graph_store._graph.es[e].tuple[0] == graph_store._graph.es[e].tuple[1]
     ]
     assert self_loop_edges, "expected at least one self-loop edge in the pilot tile"
 
     edge = self_loop_edges[0]
-    coords = graph_store._coords[edge]
+    coords = graph_store._edge_coords(edge)
     lon_a, lat_a = coords[len(coords) // 4]
     lon_b, lat_b = coords[3 * len(coords) // 4]
 

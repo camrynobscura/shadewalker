@@ -5,8 +5,13 @@ Design (the memory-conscious layout from the plan):
   attribute, indexed by edge position. This is what keeps the citywide
   graph in the hundreds-of-MB range instead of gigabytes (a Python list
   of dicts carries ~10× overhead per value).
-- Per-edge geometry and names stay as plain Python lists (only touched for
-  the handful of edges on a returned route, never in bulk math).
+- Per-edge geometry ("shapes") is packed the same way: every edge's
+  [lon, lat] points concatenated into one flat (total_points, 2) buffer,
+  with an offsets array saying where each edge's slice starts — nested
+  Python lists cost ~6x more (each coordinate becomes a boxed float object
+  behind a pointer), which is the difference between ~950MB and ~150MB of
+  geometry at citywide scale. Names stay a plain Python list (small,
+  non-numeric, only touched for the handful of edges on a returned route).
 - igraph (a C graph library with Python bindings) holds the topology and
   runs Dijkstra; a Shapely STRtree snaps clicked coordinates to the
   nearest point on the nearest STREET (not the nearest intersection —
@@ -24,14 +29,15 @@ from dataclasses import dataclass
 
 import igraph
 import numpy as np
-from shapely.geometry import LineString, Point
+import shapely
+from shapely.geometry import Point
 from shapely.ops import substring
 from shapely.strtree import STRtree
 
 from pipeline import config
 
 
-def _dist2(p: list[float], q: np.ndarray) -> float:
+def _dist2(p: list[float] | np.ndarray, q: np.ndarray) -> float:
     """Squared distance between a [lon, lat] point and a node's [lon, lat]
     array. Squared because we only ever compare two distances — skipping
     the square root doesn't change which one is smaller."""
@@ -83,7 +89,7 @@ class GraphStore:
         # OSM node ids (strings) exist only at the boundary.
         self._id_to_idx: dict[str, int] = {}
         self._node_lonlat: np.ndarray | None = None  # (N, 2) float64
-        self._edge_lines_scaled: list[LineString] = []  # see _build_edge_index
+        self._edge_lines_scaled: np.ndarray | None = None  # see _build_edge_index
         self._strtree: STRtree | None = None
         self._lat_scale = 1.0  # see _build_edge_index
         self._bounds: tuple[float, float, float, float] | None = None  # lon_min, lat_min, lon_max, lat_max
@@ -94,7 +100,13 @@ class GraphStore:
         self._tree_evergreen = np.empty(0, dtype=np.float32)
         self._tree_count = np.empty(0, dtype=np.int32)
         self._names: list[str] = []
-        self._coords: list[list[list[float]]] = []  # per edge: [[lon,lat], ...]
+        # Edge shapes, packed: all edges' [lon, lat] points concatenated
+        # into one flat block. float64, not float32 — at NYC longitudes
+        # float32's resolution is ~0.5m, too coarse for snapping/drawing.
+        # Edge e's points are _coord_buf[offsets[e]:offsets[e+1]]; use
+        # _edge_coords(e) rather than slicing by hand.
+        self._coord_buf = np.empty((0, 2), dtype=np.float64)
+        self._coord_offsets = np.zeros(1, dtype=np.int64)
 
         self._graph: igraph.Graph | None = None
 
@@ -112,6 +124,7 @@ class GraphStore:
         node_lonlat: list[list[float]] = []
         edge_pairs: list[tuple[int, int]] = []  # (u_idx, v_idx) for igraph
         length, deciduous, evergreen, counts = [], [], [], []
+        coords_per_edge: list[list[list[float]]] = []  # packed into _coord_buf after the loop
         seen_edges: set[tuple] = set()  # cross-tile dedupe on (u, v, key, side)
 
         for path in tile_paths:
@@ -136,7 +149,7 @@ class GraphStore:
                 evergreen.append(edge["tree_evergreen"])
                 counts.append(edge["tree_count"])
                 self._names.append(edge["name"])
-                self._coords.append(edge["coords"])
+                coords_per_edge.append(edge["coords"])
 
         self._node_lonlat = np.array(node_lonlat)
         # The data's actual extent — whatever tiles happen to be loaded —
@@ -150,11 +163,26 @@ class GraphStore:
         self._tree_evergreen = np.array(evergreen, dtype=np.float32)
         self._tree_count = np.array(counts, dtype=np.int32)
 
+        # Pack the edge shapes: one flat buffer + an offsets array (see
+        # __init__). cumsum turns per-edge point counts into slice
+        # boundaries — offsets[e] is where edge e's points start.
+        point_counts = [len(edge_coords) for edge_coords in coords_per_edge]
+        self._coord_offsets = np.concatenate(([0], np.cumsum(point_counts))).astype(np.int64)
+        self._coord_buf = np.concatenate(
+            [np.asarray(edge_coords, dtype=np.float64) for edge_coords in coords_per_edge]
+        )
+
         self._graph = igraph.Graph(n=len(node_lonlat), edges=edge_pairs, directed=False)
         self._build_edge_index()
 
         print(f"[graph_store] {len(tile_paths)} tile(s): "
               f"{len(node_lonlat)} nodes, {len(edge_pairs)} edges loaded")
+
+    def _edge_coords(self, edge: int) -> np.ndarray:
+        """Edge `edge`'s [lon, lat] points — a zero-copy view into the
+        packed coordinate buffer. A row indexes like a little [lon, lat]
+        list, so callers can treat it exactly like the old nested lists."""
+        return self._coord_buf[self._coord_offsets[edge]:self._coord_offsets[edge + 1]]
 
     def _build_edge_index(self) -> None:
         """Index edges for nearest-street snapping (see snap_to_edge).
@@ -166,18 +194,18 @@ class GraphStore:
         rather than warped east-west. Same approximation the old node
         KDTree used; fine at city scale.
 
-        This is a per-edge Python object, which this file's own header
-        comment generally warns against for edge data — acceptable at
-        pilot/city scale (a few thousand edges); citywide (Stage 2, ~1M
-        edges) would be worth rebuilding with a batched construction
-        instead (shapely.linestrings(coords, indices=...)).
+        Built with one batched shapely.linestrings() call over the packed
+        coordinate buffer — `indices` maps each coordinate row to the edge
+        it belongs to, so all LineStrings materialize in a single C-level
+        pass instead of a per-edge Python loop. That keeps this cheap at
+        citywide scale (Stage 2, ~1M edges), not just pilot scale.
         """
         mean_lat = float(np.mean(self._node_lonlat[:, 1]))
         self._lat_scale = math.cos(math.radians(mean_lat))
-        self._edge_lines_scaled = [
-            LineString([(lon * self._lat_scale, lat) for lon, lat in coords])
-            for coords in self._coords
-        ]
+        scaled = self._coord_buf * np.array([self._lat_scale, 1.0])
+        point_counts = np.diff(self._coord_offsets)
+        edge_of_each_point = np.repeat(np.arange(len(point_counts)), point_counts)
+        self._edge_lines_scaled = shapely.linestrings(scaled, indices=edge_of_each_point)
         self._strtree = STRtree(self._edge_lines_scaled)
 
     # ── Routing ───────────────────────────────────────────────────────────────
@@ -211,7 +239,7 @@ class GraphStore:
         dist_from_geom_start_m = frac * self._length[edge]
         dist_from_geom_end_m = (1.0 - frac) * self._length[edge]
 
-        # self._coords[e] doesn't always run u→v (see route()'s stitching
+        # An edge's geometry doesn't always run u→v (see route()'s stitching
         # loop below for the full explanation — to_undirected() can store
         # an edge's geometry backwards relative to its (u,v) index). Decide
         # which real distance belongs to u vs v by checking which end of
@@ -221,7 +249,7 @@ class GraphStore:
         # from "the long way" around the loop. Deriving both distances from
         # one projection fraction sidesteps that entirely.
         u, v = self._graph.es[edge].tuple
-        geom_start = self._coords[edge][0]
+        geom_start = self._edge_coords(edge)[0]
         if _dist2(geom_start, self._node_lonlat[u]) <= _dist2(geom_start, self._node_lonlat[v]):
             dist_to_u_m, dist_to_v_m = dist_from_geom_start_m, dist_from_geom_end_m
         else:
@@ -360,7 +388,7 @@ class GraphStore:
             for e in edge_path:
                 u, v = self._graph.es[e].tuple
                 next_node = v if u == current else u
-                step = self._coords[e]
+                step = self._edge_coords(e)
 
                 # An edge's stored geometry doesn't always run u→v: osmnx's
                 # to_undirected() collapses each one-way pair into a single
@@ -374,9 +402,11 @@ class GraphStore:
                 # correct regardless of storage direction.
                 here = self._node_lonlat[current]
                 if _dist2(step[0], here) > _dist2(step[-1], here):
-                    step = step[::-1]  # [::-1] = reversed copy (JS: [...a].reverse())
+                    step = step[::-1]  # [::-1] = reversed view (JS: [...a].reverse())
 
-                coords.extend(step[1:])  # skip duplicated joint
+                # tolist() → plain [lon, lat] lists; numpy rows aren't
+                # JSON-serializable and coords feeds the response directly.
+                coords.extend(step[1:].tolist())  # skip duplicated joint
                 current = next_node
                 _add_segment(segments, self._names[e] or "unnamed path", float(self._length[e]))
 
