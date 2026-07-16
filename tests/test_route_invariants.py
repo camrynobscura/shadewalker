@@ -39,9 +39,18 @@ def _a_real_node_coordinate() -> tuple[float, float]:
 
 def _nearest_real_node_coordinate(approx_lat: float, approx_lon: float) -> tuple[float, float]:
     """The real node closest to an approximate point, read straight from
-    the tile file -- lets a test target "near this corner" without
-    assuming any specific node happens to sit exactly there."""
-    tile_path = next(config.TILES_DIR.glob("*.json.gz"))
+    the pilot tile file -- lets a test target "near this corner" without
+    assuming any specific node happens to sit exactly there.
+
+    Pinned to pilot.json.gz specifically, not "whichever tile file exists" --
+    every caller passes a PILOT_BBOX-derived point and wants the pilot
+    tile's own nearest node, not the nearest node in some arbitrary other
+    tile that happens to also be sitting in data/tiles/ locally (which is
+    exactly what `next(config.TILES_DIR.glob("*.json.gz"))` silently broke
+    into the moment real Brooklyn data existed alongside it -- it only ever
+    "worked" because pilot.json.gz used to be the only file present).
+    """
+    tile_path = config.TILES_DIR / "pilot.json.gz"
     tile = json.loads(gzip.open(tile_path, "rt").read())
     best_lon, best_lat = min(
         tile["nodes"].values(),
