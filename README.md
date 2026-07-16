@@ -30,6 +30,11 @@ uv run python -m pipeline.run_tile pilot # fetch + process the pilot tile
 
 `--refresh-trees` re-downloads tree data only (street network stays cached).
 
+Optionally set `SOCRATA_APP_TOKEN` (a free token from
+[data.cityofnewyork.us](https://data.cityofnewyork.us)) to raise the NYC
+Open Data rate limit above the anonymous default — helpful once fetching
+more than a tile or two at a time.
+
 **2. Start the routing server**, which loads that tile into memory:
 
 ```bash

@@ -5,6 +5,7 @@ ALL_CAPS by Python convention (meaning: set by a person, never computed), and
 names carry their units (`_M` = meters, `_IN` = inches, `_DEG` = degrees).
 """
 
+import os
 from pathlib import Path
 from typing import NamedTuple
 
@@ -164,3 +165,8 @@ MAX_SNAP_DISTANCE_M = 200.0
 SOCRATA_BASE_URL = "https://data.cityofnewyork.us/resource"
 TREES_DATASET_ID = "hn5i-inap"   # Forestry Tree Points — the live NYC Tree Map data
 SOCRATA_PAGE_SIZE = 50_000       # rows per request (underscores are just digit separators)
+
+# Optional — unset means anonymous requests (fine at pilot-tile scale, risks
+# throttling at borough+ scale). Set as a real env var, never committed;
+# get one from data.cityofnewyork.us (see README).
+SOCRATA_APP_TOKEN = os.environ.get("SOCRATA_APP_TOKEN")
