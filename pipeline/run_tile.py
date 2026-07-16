@@ -24,9 +24,15 @@ def run(tile_id: str, refresh_trees: bool = False) -> None:
     bbox = config.get_tile_bbox(tile_id)
     print(f"[{tile_id}] lat {bbox.lat_min}–{bbox.lat_max}, lon {bbox.lon_min}–{bbox.lon_max}")
 
-    # fetch (cached)
-    tree_rows = trees.fetch_trees(bbox, tile_id, refresh=refresh_trees)
+    # fetch (cached). Streets first: a tile with no matching streets (open
+    # water) needs no tree data either, so checking this first skips a
+    # pointless Socrata call on top of the Overpass one.
     street_graph = streets.fetch_streets(bbox, tile_id)
+    if street_graph is None:
+        print(f"[{tile_id}] skipped -- no walkable streets in this area")
+        return
+
+    tree_rows = trees.fetch_trees(bbox, tile_id, refresh=refresh_trees)
 
     # graph → scoring → export
     nodes, edges = centerline.build_edge_table(street_graph)
