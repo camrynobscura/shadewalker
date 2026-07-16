@@ -1,5 +1,5 @@
 import type { RouteFeature } from '../api'
-import { formatDistance } from '../format'
+import { formatDistance, formatDistanceParts } from '../format'
 import styles from './RouteStats.module.css'
 
 /** Below ~0.02 trees-per-meter along the route, even the "greenest" option
@@ -46,6 +46,7 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
 function StatsBody({ route, description }: { route: RouteFeature; description: string }) {
   const stats = route.properties
   const isSparse = stats.tree_count / stats.length_m < SPARSE_TREES_PER_M
+  const dist = formatDistanceParts(stats.length_m)
 
   return (
     <>
@@ -68,7 +69,12 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
       <div className={styles.section}>
         <div className={styles.statRow}>
           <div className={styles.stat}>
-            <span className={styles.statVal}>{formatDistance(stats.length_m)}</span>
+            {/* Unit in the same lighter <small> the eta box's "min" gets --
+                the value is the datum, the unit is context. */}
+            <span className={styles.statVal}>
+              {dist.value}
+              <small> {dist.unit}</small>
+            </span>
             <span className={styles.statLabel}>dist</span>
           </div>
           <div className={styles.stat}>
