@@ -52,21 +52,18 @@ def health() -> dict:
 
 @app.get("/coverage")
 def coverage() -> dict:
-    """The loaded data's extent as a GeoJSON polygon, so the frontend can
-    draw it on the map — pilot tile today, whatever's loaded once Stage 2
-    adds more tiles, with no server code change needed either time."""
-    lon_min, lat_min, lon_max, lat_max = store.coverage_bounds()
+    """The loaded data's actual outline as a GeoJSON polygon, so the
+    frontend can draw it on the map — computed from whatever tiles are
+    loaded, no server code change needed as Stage 2 adds more. A concave
+    hull of the street network, not a bounding box: with Brooklyn-sized
+    coverage, the box claimed water and Lower Manhattan as clickable area
+    that /route would then reject — the drawn line should be one users
+    can trust."""
     return {
         "type": "Feature",
         "geometry": {
             "type": "Polygon",
-            "coordinates": [[
-                [lon_min, lat_min],
-                [lon_max, lat_min],
-                [lon_max, lat_max],
-                [lon_min, lat_max],
-                [lon_min, lat_min],
-            ]],
+            "coordinates": [store.coverage_ring()],
         },
     }
 

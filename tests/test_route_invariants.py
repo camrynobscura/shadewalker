@@ -188,6 +188,32 @@ def test_loaded_graph_is_one_connected_component(graph_store):
     assert len(components) == 1
 
 
+def test_coverage_polygon_traces_the_street_network_not_its_bounding_box(client):
+    """/coverage serves a concave hull of the loaded nodes, not a min/max
+    rectangle -- with Brooklyn-sized data the rectangle claimed water and
+    Lower Manhattan as clickable area that /route would then reject. The
+    drawn boundary must be one users can trust."""
+    from shapely.geometry import LinearRing, Point as ShapelyPoint, Polygon
+
+    ring = client.get("/coverage").json()["geometry"]["coordinates"][0]
+
+    assert ring[0] == ring[-1]  # closed GeoJSON ring
+    assert len(ring) >= 5
+
+    poly = Polygon(ring)
+    assert poly.is_valid
+    # Winding is part of the frontend contract: MapView punches its
+    # map-dimming hole by reversing this ring, which assumes CCW.
+    assert LinearRing(ring).is_ccw
+    # Known-routable points must be inside the drawn boundary.
+    assert poly.contains(ShapelyPoint(FROM["lon"], FROM["lat"]))
+    assert poly.contains(ShapelyPoint(TO["lon"], TO["lat"]))
+    # A genuinely traced outline is strictly smaller than its own bbox
+    # (equality would mean it IS the rectangle).
+    lon_min, lat_min, lon_max, lat_max = poly.bounds
+    assert poly.area < (lon_max - lon_min) * (lat_max - lat_min)
+
+
 # Every test above this point routes between one of a small handful of
 # fixed, hand-picked points. The tests below cover geometry shapes those
 # fixed points never touch -- diverse real coordinates, not just the ones

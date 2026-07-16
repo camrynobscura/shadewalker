@@ -118,6 +118,13 @@ def test_coverage_shrinks_to_the_kept_component(pruned_store):
     f_lon, f_lat = FRAGMENT_NODES["f1"]
     assert not (lon_min <= f_lon <= lon_max and lat_min <= f_lat <= lat_max)
 
+    # Same promise for the drawn boundary ring /coverage serves.
+    from shapely.geometry import Point, Polygon
+
+    ring = pruned_store.coverage_ring()
+    assert ring[0] == ring[-1]
+    assert not Polygon(ring).contains(Point(f_lon, f_lat))
+
 
 def test_routing_still_works_on_the_kept_component(pruned_store):
     lon_a, lat_a = MAIN_NODES["m1"]
