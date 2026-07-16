@@ -30,8 +30,14 @@ def _has_duplicate_consecutive_points(coords: list[list[float]]) -> bool:
 
 def _a_real_node_coordinate() -> tuple[float, float]:
     """One real intersection's exact (lat, lon), read straight from the
-    tile file -- independent of GraphStore's internal node ordering."""
-    tile_path = next(config.TILES_DIR.glob("*.json.gz"))
+    pilot tile file -- independent of GraphStore's internal node ordering.
+
+    Pinned to pilot.json.gz (same reasoning as _nearest_real_node_coordinate
+    below): "whichever tile file globs first" broke twice once real borough
+    tiles existed locally -- first by reading an arbitrary Brooklyn tile,
+    then by picking a node from a tile whose whole area gets pruned at load
+    time (Rockaway fragments, unreachable from the main network)."""
+    tile_path = config.TILES_DIR / "pilot.json.gz"
     tile = json.loads(gzip.open(tile_path, "rt").read())
     lon, lat = next(iter(tile["nodes"].values()))
     return lat, lon
@@ -39,9 +45,18 @@ def _a_real_node_coordinate() -> tuple[float, float]:
 
 def _nearest_real_node_coordinate(approx_lat: float, approx_lon: float) -> tuple[float, float]:
     """The real node closest to an approximate point, read straight from
-    the tile file -- lets a test target "near this corner" without
-    assuming any specific node happens to sit exactly there."""
-    tile_path = next(config.TILES_DIR.glob("*.json.gz"))
+    the pilot tile file -- lets a test target "near this corner" without
+    assuming any specific node happens to sit exactly there.
+
+    Pinned to pilot.json.gz specifically, not "whichever tile file exists" --
+    every caller passes a PILOT_BBOX-derived point and wants the pilot
+    tile's own nearest node, not the nearest node in some arbitrary other
+    tile that happens to also be sitting in data/tiles/ locally (which is
+    exactly what `next(config.TILES_DIR.glob("*.json.gz"))` silently broke
+    into the moment real Brooklyn data existed alongside it -- it only ever
+    "worked" because pilot.json.gz used to be the only file present).
+    """
+    tile_path = config.TILES_DIR / "pilot.json.gz"
     tile = json.loads(gzip.open(tile_path, "rt").read())
     best_lon, best_lat = min(
         tile["nodes"].values(),
@@ -160,6 +175,43 @@ def test_two_points_on_the_same_block_route_directly_not_via_a_corner(graph_stor
     # A direct hop along one edge should be short -- nowhere near the cost
     # of detouring out to an intersection and back.
     assert result["length_m"] < airline_m * 3
+
+
+def test_loaded_graph_is_one_connected_component(graph_store):
+    """Load-time pruning keeps only the largest connected component, so
+    whatever tiles are loaded, every routable point can reach every other
+    routable point. Guards the real Stage 2 failure this prevents: border
+    tiles' rectangular overreach swept in street fragments from across the
+    water (Jersey City, a Manhattan sliver, the Rockaways) that nothing
+    could route to -- coverage the router couldn't honor."""
+    components = graph_store._graph.connected_components(mode="weak")
+    assert len(components) == 1
+
+
+def test_coverage_polygon_traces_the_street_network_not_its_bounding_box(client):
+    """/coverage serves a concave hull of the loaded nodes, not a min/max
+    rectangle -- with Brooklyn-sized data the rectangle claimed water and
+    Lower Manhattan as clickable area that /route would then reject. The
+    drawn boundary must be one users can trust."""
+    from shapely.geometry import LinearRing, Point as ShapelyPoint, Polygon
+
+    ring = client.get("/coverage").json()["geometry"]["coordinates"][0]
+
+    assert ring[0] == ring[-1]  # closed GeoJSON ring
+    assert len(ring) >= 5
+
+    poly = Polygon(ring)
+    assert poly.is_valid
+    # Winding is part of the frontend contract: MapView punches its
+    # map-dimming hole by reversing this ring, which assumes CCW.
+    assert LinearRing(ring).is_ccw
+    # Known-routable points must be inside the drawn boundary.
+    assert poly.contains(ShapelyPoint(FROM["lon"], FROM["lat"]))
+    assert poly.contains(ShapelyPoint(TO["lon"], TO["lat"]))
+    # A genuinely traced outline is strictly smaller than its own bbox
+    # (equality would mean it IS the rectangle).
+    lon_min, lat_min, lon_max, lat_max = poly.bounds
+    assert poly.area < (lon_max - lon_min) * (lat_max - lat_min)
 
 
 # Every test above this point routes between one of a small handful of

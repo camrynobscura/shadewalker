@@ -31,6 +31,7 @@ import igraph
 import numpy as np
 import shapely
 from shapely.geometry import Point
+from shapely.geometry.polygon import orient
 from shapely.ops import substring
 from shapely.strtree import STRtree
 
@@ -62,6 +63,14 @@ def _add_segment(segments: list[dict], name: str, length_m: float) -> None:
 # longitude gets scaled) back into real meters.
 METERS_PER_DEGREE_LAT = 111_320.0
 
+# Simplification tolerance for the drawn coverage boundary, in
+# degrees-of-latitude units (~22m) — trims the served ring's vertex count.
+# Small on purpose: the boundary is drawn at exactly MAX_SNAP_DISTANCE_M
+# from the streets, so simplification is the only thing that can make the
+# drawn line disagree with the acceptance rule, and this bounds that
+# disagreement to a sliver nobody can click precisely enough to notice.
+COVERAGE_SIMPLIFY_DEG = 0.0002
+
 
 @dataclass(frozen=True)
 class SnapPoint:
@@ -89,6 +98,7 @@ class GraphStore:
         # OSM node ids (strings) exist only at the boundary.
         self._id_to_idx: dict[str, int] = {}
         self._node_lonlat: np.ndarray | None = None  # (N, 2) float64
+        self._coverage_ring: list[list[float]] = []  # closed [lon, lat] ring, CCW
         self._edge_lines_scaled: np.ndarray | None = None  # see _build_edge_index
         self._strtree: STRtree | None = None
         self._lat_scale = 1.0  # see _build_edge_index
@@ -124,6 +134,7 @@ class GraphStore:
         node_lonlat: list[list[float]] = []
         edge_pairs: list[tuple[int, int]] = []  # (u_idx, v_idx) for igraph
         length, deciduous, evergreen, counts = [], [], [], []
+        names: list[str] = []
         coords_per_edge: list[list[list[float]]] = []  # packed into _coord_buf after the loop
         seen_edges: set[tuple] = set()  # cross-tile dedupe on (u, v, key, side)
 
@@ -148,9 +159,69 @@ class GraphStore:
                 deciduous.append(edge["tree_deciduous"])
                 evergreen.append(edge["tree_evergreen"])
                 counts.append(edge["tree_count"])
-                self._names.append(edge["name"])
+                names.append(edge["name"])
                 coords_per_edge.append(edge["coords"])
 
+        # Prune anything not connected to the main street network. Rectangular
+        # borough bboxes deliberately overreach past the real coastline (see
+        # BROOKLYN_BBOX), which sweeps in street fragments from across the
+        # water -- Jersey City, a Lower Manhattan sliver, the Rockaways --
+        # that no walkable street connects to the rest of the data. Keeping
+        # them would advertise coverage the router can't honor (a click in
+        # Jersey City would get a route around Jersey City, isolated from
+        # everything). Dropping them also shrinks the served coverage area,
+        # so those clicks get a clean out-of-coverage rejection instead.
+        # Self-healing by construction: once a later borough's tiles connect
+        # a pruned area for real (e.g. Queens reconnecting the Rockaways),
+        # it lands in the main component and stops being pruned. Known
+        # collateral: genuinely isolated walkable places with no street
+        # connection at all (Governors Island) are pruned too.
+        provisional = igraph.Graph(n=len(node_lonlat), edges=edge_pairs, directed=False)
+        components = provisional.connected_components(mode="weak")
+        if len(components) > 1:
+            sizes = [len(component) for component in components]
+            main = sizes.index(max(sizes))
+            membership = components.membership
+
+            # Invert id->idx so kept nodes can be re-keyed to new indices.
+            ids_by_idx: list[str] = [""] * len(node_lonlat)
+            for node_id, idx in self._id_to_idx.items():
+                ids_by_idx[idx] = node_id
+
+            new_idx_by_old: dict[int, int] = {}
+            kept_lonlat: list[list[float]] = []
+            kept_id_to_idx: dict[str, int] = {}
+            for old_idx, lonlat in enumerate(node_lonlat):
+                if membership[old_idx] == main:
+                    new_idx_by_old[old_idx] = len(kept_lonlat)
+                    kept_id_to_idx[ids_by_idx[old_idx]] = len(kept_lonlat)
+                    kept_lonlat.append(lonlat)
+
+            # An edge's two endpoints always share a component, so checking
+            # u alone decides the whole edge. All per-edge lists filter in
+            # lockstep to stay position-aligned.
+            kept_pairs, kept_length, kept_deciduous = [], [], []
+            kept_evergreen, kept_counts, kept_names, kept_coords = [], [], [], []
+            for i, (u, v) in enumerate(edge_pairs):
+                if membership[u] != main:
+                    continue
+                kept_pairs.append((new_idx_by_old[u], new_idx_by_old[v]))
+                kept_length.append(length[i])
+                kept_deciduous.append(deciduous[i])
+                kept_evergreen.append(evergreen[i])
+                kept_counts.append(counts[i])
+                kept_names.append(names[i])
+                kept_coords.append(coords_per_edge[i])
+
+            print(f"[graph_store] pruned {len(components) - 1} unreachable component(s): "
+                  f"-{len(node_lonlat) - len(kept_lonlat)} nodes, "
+                  f"-{len(edge_pairs) - len(kept_pairs)} edges")
+            node_lonlat, edge_pairs = kept_lonlat, kept_pairs
+            length, deciduous, evergreen = kept_length, kept_deciduous, kept_evergreen
+            counts, names, coords_per_edge = kept_counts, kept_names, kept_coords
+            self._id_to_idx = kept_id_to_idx
+
+        self._names = names
         self._node_lonlat = np.array(node_lonlat)
         # The data's actual extent — whatever tiles happen to be loaded —
         # rather than a hardcoded bbox from pipeline/config.py, so this
@@ -174,9 +245,49 @@ class GraphStore:
 
         self._graph = igraph.Graph(n=len(node_lonlat), edges=edge_pairs, directed=False)
         self._build_edge_index()
+        self._coverage_ring = self._compute_coverage_ring()
 
         print(f"[graph_store] {len(tile_paths)} tile(s): "
               f"{len(node_lonlat)} nodes, {len(edge_pairs)} edges loaded")
+
+    def _compute_coverage_ring(self) -> list[list[float]]:
+        """The drawn coverage boundary: the union of every street edge
+        buffered by MAX_SNAP_DISTANCE_M — i.e. exactly the region the
+        server accepts clicks in ("within 200m of a loaded street"), so
+        the dashed line on the map is the acceptance rule made visible.
+
+        Chosen over a concave hull of the nodes after the hull clipped
+        Red Hook: any global "how far in should the outline carve" knob
+        shaves peninsulas, whereas a per-street footprint cannot exclude
+        a routable place by construction. Built in the same scaled space
+        the STRtree uses, so "200m" here is the same 200m the snap check
+        measures. Costs ~2s of startup on Brooklyn-sized data.
+
+        Two accepted approximations, both slivers: simplify() can move
+        the drawn line up to ~22m either way (see COVERAGE_SIMPLIFY_DEG),
+        and interior holes in the footprint (a cemetery's unwalkable
+        core) are dropped — the frontend draws one ring, and a click in
+        such a pocket still gets the honest out-of-coverage rejection."""
+        radius_deg = config.MAX_SNAP_DISTANCE_M / METERS_PER_DEGREE_LAT
+        footprint = shapely.union_all(shapely.buffer(self._edge_lines_scaled, radius_deg, quad_segs=2))
+        footprint = footprint.simplify(COVERAGE_SIMPLIFY_DEG)
+        if footprint.geom_type == "MultiPolygon":
+            # Post-prune data is one connected component, so its buffered
+            # footprint should be one polygon — but belt-and-braces for
+            # future multi-component coverage (see PLAN.md's Staten Island
+            # note): draw the biggest piece rather than crash.
+            footprint = max(footprint.geoms, key=lambda g: g.area)
+        # The frontend punches its map-dimming hole by reversing this ring,
+        # which assumes counterclockwise winding (the old rectangle's order)
+        # — orient() guarantees it regardless of what union_all produced.
+        footprint = orient(footprint)
+        return [[round(lon / self._lat_scale, 6), round(lat, 6)]
+                for lon, lat in footprint.exterior.coords]
+
+    def coverage_ring(self) -> list[list[float]]:
+        """The closed [lon, lat] ring /coverage serves — see
+        _compute_coverage_ring for shape and winding guarantees."""
+        return self._coverage_ring
 
     def _edge_coords(self, edge: int) -> np.ndarray:
         """Edge `edge`'s [lon, lat] points — a zero-copy view into the
@@ -276,10 +387,6 @@ class GraphStore:
         scaled_coords = [sub.coords[0]] if sub.geom_type == "Point" else list(sub.coords)
         return [[x / self._lat_scale, y] for x, y in scaled_coords]
 
-    def coverage_bounds(self) -> tuple[float, float, float, float]:
-        """(lon_min, lat_min, lon_max, lat_max) of the loaded graph data."""
-        return self._bounds
-
     def in_coverage(self, lat: float, lon: float) -> bool:
         """Whether a point is somewhere we actually have routable data.
 
@@ -291,9 +398,19 @@ class GraphStore:
         distance is a strictly more permissive (and more accurate) signal
         than the old nearest-NODE distance — it can only be smaller, never
         larger, so this never newly rejects a point that used to pass.
+
+        The bbox is padded by MAX_SNAP_DISTANCE_M to match the drawn
+        boundary: the coverage ring extends that far past the outermost
+        street (it IS the acceptance region drawn — see
+        _compute_coverage_ring), so a raw node-min/max box would wrongly
+        reject clicks just past the outermost street that the drawn line
+        includes and the snap check would accept.
         """
+        pad_lat = config.MAX_SNAP_DISTANCE_M / METERS_PER_DEGREE_LAT
+        pad_lon = pad_lat / self._lat_scale
         lon_min, lat_min, lon_max, lat_max = self._bounds
-        if not (lon_min <= lon <= lon_max and lat_min <= lat <= lat_max):
+        if not (lon_min - pad_lon <= lon <= lon_max + pad_lon
+                and lat_min - pad_lat <= lat <= lat_max + pad_lat):
             return False
         _, dist_m = self._nearest_edge(lat, lon)
         return dist_m <= config.MAX_SNAP_DISTANCE_M

@@ -13,6 +13,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# Secrets — uv auto-loads this at run time; never commit it (SOCRATA_APP_TOKEN)
+.env
+
 # Frontend (arrives in M4)
 node_modules/
 web/dist/

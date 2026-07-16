@@ -5,6 +5,9 @@ ALL_CAPS by Python convention (meaning: set by a person, never computed), and
 names carry their units (`_M` = meters, `_IN` = inches, `_DEG` = degrees).
 """
 
+import math
+import os
+import re
 from pathlib import Path
 from typing import NamedTuple
 
@@ -46,16 +49,116 @@ TILE_SIZE_LON_DEG = 0.024
 # Duplicated edges are deduplicated at server load time.
 FETCH_BUFFER_M = 150
 
+# For converting FETCH_BUFFER_M (meters) into degrees to pad a Bbox -- same
+# ~111km/degree-of-latitude approximation TILE_SIZE_LAT_DEG's comment above
+# already uses, good enough at this precision (a few meters of slop on a
+# 150m buffer) without pulling in a real geodesy library for it.
+METERS_PER_LAT_DEGREE = 111_320
+
+
+def buffered_bbox(bbox: Bbox, buffer_m: float) -> Bbox:
+    """Expand a bbox by buffer_m meters in every direction.
+
+    Without this, two tiles fetched with their exact, non-overlapping
+    bboxes never both capture a real intersection sitting near their shared
+    border -- so it never gets the same OSM node id in both tiles' data,
+    so GraphStore's load()-time merge (which matches on node id) has
+    nothing to actually stitch together. Confirmed empirically on the
+    first real multi-tile run: 92 Brooklyn tiles merged into 89 disconnected
+    graph components instead of one connected network. This buffer is what
+    creates the overlap the merge step depends on.
+
+    Longitude degrees shrink with latitude (a degree of longitude is a
+    shorter real distance the further from the equator you are), so the
+    buffer's own mid-latitude is used for that conversion -- the same
+    reasoning TILE_SIZE_LON_DEG's comment gives for NYC generally, just
+    computed per-bbox instead of with one fixed citywide number.
+    """
+    mid_lat = (bbox.lat_min + bbox.lat_max) / 2
+    lat_buffer_deg = buffer_m / METERS_PER_LAT_DEGREE
+    lon_buffer_deg = buffer_m / (METERS_PER_LAT_DEGREE * math.cos(math.radians(mid_lat)))
+    return Bbox(
+        lat_min=bbox.lat_min - lat_buffer_deg,
+        lat_max=bbox.lat_max + lat_buffer_deg,
+        lon_min=bbox.lon_min - lon_buffer_deg,
+        lon_max=bbox.lon_max + lon_buffer_deg,
+    )
+
+# Hand-picked rectangle, not Brooklyn's real (non-rectangular) shape --
+# chosen over a real borough-boundary polygon for now since the pipeline has
+# no geometric-filtering step today. Some overreach into water/neighboring
+# boroughs at the edges is expected and harmless: those grid tiles just fetch
+# whatever streets/trees actually exist there. Contains PILOT_BBOX (pinned by
+# a test in test_pipeline_config.py).
+BROOKLYN_BBOX = Bbox(lat_min=40.570, lat_max=40.740, lon_min=-74.045, lon_max=-73.833)
+
+# Boroughs with a defined tile-grid extent. One entry per borough as Stage 2
+# rolls out: Brooklyn -> Manhattan -> Queens -> Bronx -> Staten Island.
+BOROUGH_BBOXES = {"brooklyn": BROOKLYN_BBOX}
+
+# "r{row}c{col}" grid ids, e.g. "r12c07" -- row/column offsets from
+# CITY_BBOX's own lat_min/lon_min corner, in units of TILE_SIZE_LAT_DEG /
+# TILE_SIZE_LON_DEG.
+_GRID_ID_PATTERN = re.compile(r"r(\d+)c(\d+)")
+
 
 def get_tile_bbox(tile_id: str) -> Bbox:
     """Resolve a tile id to its bounding box.
 
-    Stage 1 only knows the pilot tile; the citywide grid ("r12c07"-style ids
-    derived from CITY_BBOX and the tile sizes) arrives in Stage 2 / M5.
+    Accepts 'pilot' (the Stage 1 pilot tile) or a citywide-grid id like
+    'r12c07'. Grid ids are computed, not looked up -- any row/col is valid
+    as long as the resulting box actually falls within CITY_BBOX.
     """
     if tile_id == "pilot":
         return PILOT_BBOX
-    raise ValueError(f"Unknown tile id {tile_id!r} — only 'pilot' exists until Stage 2 (M5)")
+
+    match = _GRID_ID_PATTERN.fullmatch(tile_id)
+    if not match:
+        raise ValueError(
+            f"Unknown tile id {tile_id!r} -- expected 'pilot', a borough name "
+            f"like 'brooklyn', or a grid id like 'r12c07'"
+        )
+
+    row, col = int(match.group(1)), int(match.group(2))
+    lat_min = CITY_BBOX.lat_min + row * TILE_SIZE_LAT_DEG
+    lon_min = CITY_BBOX.lon_min + col * TILE_SIZE_LON_DEG
+    bbox = Bbox(
+        lat_min=lat_min,
+        lat_max=lat_min + TILE_SIZE_LAT_DEG,
+        lon_min=lon_min,
+        lon_max=lon_min + TILE_SIZE_LON_DEG,
+    )
+
+    outside_lat = bbox.lat_min >= CITY_BBOX.lat_max or bbox.lat_max <= CITY_BBOX.lat_min
+    outside_lon = bbox.lon_min >= CITY_BBOX.lon_max or bbox.lon_max <= CITY_BBOX.lon_min
+    if outside_lat or outside_lon:
+        raise ValueError(f"Grid tile {tile_id!r} falls entirely outside CITY_BBOX")
+
+    return bbox
+
+
+def get_tile_ids_for_bbox(bbox: Bbox) -> list[str]:
+    """Every citywide-grid tile id whose box overlaps the given area.
+
+    Used to expand a borough's Bbox (e.g. BROOKLYN_BBOX) into the concrete
+    list of grid tiles run_tile.py needs to process to cover it.
+    """
+    # Tiles are half-open [start, start + size) -- a bbox edge that lands
+    # exactly on a tile boundary belongs to the tile below it, not the one
+    # above, so the end index uses ceil(...) - 1 rather than floor(...).
+    # round() to 6dp first: repeated float multiplication in get_tile_bbox()
+    # can put a boundary a fraction of a nanodegree past the exact tile edge
+    # (e.g. 7.000000000000266 instead of 7.0), which would otherwise ceil up
+    # to the wrong tile -- 6dp is still far finer than these coordinates need.
+    row_start = int((bbox.lat_min - CITY_BBOX.lat_min) // TILE_SIZE_LAT_DEG)
+    row_end = math.ceil(round((bbox.lat_max - CITY_BBOX.lat_min) / TILE_SIZE_LAT_DEG, 6)) - 1
+    col_start = int((bbox.lon_min - CITY_BBOX.lon_min) // TILE_SIZE_LON_DEG)
+    col_end = math.ceil(round((bbox.lon_max - CITY_BBOX.lon_min) / TILE_SIZE_LON_DEG, 6)) - 1
+    return [
+        f"r{row}c{col}"
+        for row in range(row_start, row_end + 1)
+        for col in range(col_start, col_end + 1)
+    ]
 
 
 # ── Tree scoring ──────────────────────────────────────────────────────────────
@@ -164,3 +267,8 @@ MAX_SNAP_DISTANCE_M = 200.0
 SOCRATA_BASE_URL = "https://data.cityofnewyork.us/resource"
 TREES_DATASET_ID = "hn5i-inap"   # Forestry Tree Points — the live NYC Tree Map data
 SOCRATA_PAGE_SIZE = 50_000       # rows per request (underscores are just digit separators)
+
+# Optional — unset means anonymous requests (fine at pilot-tile scale, risks
+# throttling at borough+ scale). Set as a real env var, never committed;
+# get one from data.cityofnewyork.us (see README).
+SOCRATA_APP_TOKEN = os.environ.get("SOCRATA_APP_TOKEN")

@@ -16,6 +16,15 @@ from pipeline import config
 CACHE_DIR = config.RAW_DIR / "socrata"
 
 
+def _auth_headers() -> dict[str, str]:
+    """X-App-Token raises Socrata's per-IP rate limit; omitted entirely
+    (rather than sent empty) when no token is configured, so anonymous
+    requests keep working exactly as before."""
+    if config.SOCRATA_APP_TOKEN:
+        return {"X-App-Token": config.SOCRATA_APP_TOKEN}
+    return {}
+
+
 def fetch_all_rows(
     dataset_id: str,
     where: str,
@@ -39,6 +48,7 @@ def fetch_all_rows(
         return rows
 
     url = f"{config.SOCRATA_BASE_URL}/{dataset_id}.json"
+    headers = _auth_headers()
     rows: list[dict] = []
     offset = 0
 
@@ -52,7 +62,7 @@ def fetch_all_rows(
             "$limit": config.SOCRATA_PAGE_SIZE,
             "$offset": offset,
         }
-        response = requests.get(url, params=params, timeout=120)
+        response = requests.get(url, params=params, headers=headers, timeout=120)
         response.raise_for_status()  # turn HTTP errors (4xx/5xx) into exceptions
         page = response.json()
 
