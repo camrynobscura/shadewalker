@@ -30,8 +30,14 @@ def _has_duplicate_consecutive_points(coords: list[list[float]]) -> bool:
 
 def _a_real_node_coordinate() -> tuple[float, float]:
     """One real intersection's exact (lat, lon), read straight from the
-    tile file -- independent of GraphStore's internal node ordering."""
-    tile_path = next(config.TILES_DIR.glob("*.json.gz"))
+    pilot tile file -- independent of GraphStore's internal node ordering.
+
+    Pinned to pilot.json.gz (same reasoning as _nearest_real_node_coordinate
+    below): "whichever tile file globs first" broke twice once real borough
+    tiles existed locally -- first by reading an arbitrary Brooklyn tile,
+    then by picking a node from a tile whose whole area gets pruned at load
+    time (Rockaway fragments, unreachable from the main network)."""
+    tile_path = config.TILES_DIR / "pilot.json.gz"
     tile = json.loads(gzip.open(tile_path, "rt").read())
     lon, lat = next(iter(tile["nodes"].values()))
     return lat, lon
@@ -169,6 +175,17 @@ def test_two_points_on_the_same_block_route_directly_not_via_a_corner(graph_stor
     # A direct hop along one edge should be short -- nowhere near the cost
     # of detouring out to an intersection and back.
     assert result["length_m"] < airline_m * 3
+
+
+def test_loaded_graph_is_one_connected_component(graph_store):
+    """Load-time pruning keeps only the largest connected component, so
+    whatever tiles are loaded, every routable point can reach every other
+    routable point. Guards the real Stage 2 failure this prevents: border
+    tiles' rectangular overreach swept in street fragments from across the
+    water (Jersey City, a Manhattan sliver, the Rockaways) that nothing
+    could route to -- coverage the router couldn't honor."""
+    components = graph_store._graph.connected_components(mode="weak")
+    assert len(components) == 1
 
 
 # Every test above this point routes between one of a small handful of

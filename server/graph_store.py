@@ -124,6 +124,7 @@ class GraphStore:
         node_lonlat: list[list[float]] = []
         edge_pairs: list[tuple[int, int]] = []  # (u_idx, v_idx) for igraph
         length, deciduous, evergreen, counts = [], [], [], []
+        names: list[str] = []
         coords_per_edge: list[list[list[float]]] = []  # packed into _coord_buf after the loop
         seen_edges: set[tuple] = set()  # cross-tile dedupe on (u, v, key, side)
 
@@ -148,9 +149,69 @@ class GraphStore:
                 deciduous.append(edge["tree_deciduous"])
                 evergreen.append(edge["tree_evergreen"])
                 counts.append(edge["tree_count"])
-                self._names.append(edge["name"])
+                names.append(edge["name"])
                 coords_per_edge.append(edge["coords"])
 
+        # Prune anything not connected to the main street network. Rectangular
+        # borough bboxes deliberately overreach past the real coastline (see
+        # BROOKLYN_BBOX), which sweeps in street fragments from across the
+        # water -- Jersey City, a Lower Manhattan sliver, the Rockaways --
+        # that no walkable street connects to the rest of the data. Keeping
+        # them would advertise coverage the router can't honor (a click in
+        # Jersey City would get a route around Jersey City, isolated from
+        # everything). Dropping them also shrinks the served coverage area,
+        # so those clicks get a clean out-of-coverage rejection instead.
+        # Self-healing by construction: once a later borough's tiles connect
+        # a pruned area for real (e.g. Queens reconnecting the Rockaways),
+        # it lands in the main component and stops being pruned. Known
+        # collateral: genuinely isolated walkable places with no street
+        # connection at all (Governors Island) are pruned too.
+        provisional = igraph.Graph(n=len(node_lonlat), edges=edge_pairs, directed=False)
+        components = provisional.connected_components(mode="weak")
+        if len(components) > 1:
+            sizes = [len(component) for component in components]
+            main = sizes.index(max(sizes))
+            membership = components.membership
+
+            # Invert id->idx so kept nodes can be re-keyed to new indices.
+            ids_by_idx: list[str] = [""] * len(node_lonlat)
+            for node_id, idx in self._id_to_idx.items():
+                ids_by_idx[idx] = node_id
+
+            new_idx_by_old: dict[int, int] = {}
+            kept_lonlat: list[list[float]] = []
+            kept_id_to_idx: dict[str, int] = {}
+            for old_idx, lonlat in enumerate(node_lonlat):
+                if membership[old_idx] == main:
+                    new_idx_by_old[old_idx] = len(kept_lonlat)
+                    kept_id_to_idx[ids_by_idx[old_idx]] = len(kept_lonlat)
+                    kept_lonlat.append(lonlat)
+
+            # An edge's two endpoints always share a component, so checking
+            # u alone decides the whole edge. All per-edge lists filter in
+            # lockstep to stay position-aligned.
+            kept_pairs, kept_length, kept_deciduous = [], [], []
+            kept_evergreen, kept_counts, kept_names, kept_coords = [], [], [], []
+            for i, (u, v) in enumerate(edge_pairs):
+                if membership[u] != main:
+                    continue
+                kept_pairs.append((new_idx_by_old[u], new_idx_by_old[v]))
+                kept_length.append(length[i])
+                kept_deciduous.append(deciduous[i])
+                kept_evergreen.append(evergreen[i])
+                kept_counts.append(counts[i])
+                kept_names.append(names[i])
+                kept_coords.append(coords_per_edge[i])
+
+            print(f"[graph_store] pruned {len(components) - 1} unreachable component(s): "
+                  f"-{len(node_lonlat) - len(kept_lonlat)} nodes, "
+                  f"-{len(edge_pairs) - len(kept_pairs)} edges")
+            node_lonlat, edge_pairs = kept_lonlat, kept_pairs
+            length, deciduous, evergreen = kept_length, kept_deciduous, kept_evergreen
+            counts, names, coords_per_edge = kept_counts, kept_names, kept_coords
+            self._id_to_idx = kept_id_to_idx
+
+        self._names = names
         self._node_lonlat = np.array(node_lonlat)
         # The data's actual extent — whatever tiles happen to be loaded —
         # rather than a hardcoded bbox from pipeline/config.py, so this
