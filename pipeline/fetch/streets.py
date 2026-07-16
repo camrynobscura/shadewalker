@@ -33,9 +33,10 @@ STREETS_DIR = config.RAW_DIR / "streets"
 
 # Bump this whenever WALK_FILTER changes, or the fetch bbox logic changes
 # (v3: run_tile.py started passing a FETCH_BUFFER_M-padded bbox instead of
-# the tile's exact one) -- it's baked into the cache filename, so old cached
-# graphs are ignored rather than silently reused.
-GRAPH_CACHE_VERSION = 3
+# the tile's exact one; v4: retain_all=True -- see the comment at the
+# graph_from_bbox call) -- it's baked into the cache filename, so old
+# cached graphs are ignored rather than silently reused.
+GRAPH_CACHE_VERSION = 4
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -82,9 +83,21 @@ def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph | None:
         return graph
 
     # osmnx bbox order is (left, bottom, right, top) = (west, south, east, north).
-    # retain_all=False keeps only the largest connected piece, dropping stray
-    # fragments (a courtyard path not linked to any street) that could trap
-    # the router if a click snapped onto them.
+    #
+    # retain_all=True, NOT False, and the distinction cost a real
+    # neighborhood: retain_all=False keeps only the largest connected
+    # component -- decided per tile, on an internal working graph that
+    # extends ~500m past the tile, BEFORE the final clip -- so a
+    # neighborhood that reads as "disconnected" through one tile's
+    # peephole gets deleted at fetch time even when it connects fine
+    # through a neighboring tile's streets. Red Hook (walled off by the
+    # expressway trench + water on three sides) lost that contest in
+    # every tile that saw it and vanished from the data entirely.
+    # Keeping everything per tile is safe because the server prunes
+    # globally at load time (see graph_store.load()), with the whole
+    # merged picture in view -- that's the right scope for the
+    # keep-or-drop decision, and it's also what still protects the
+    # router from stray fragments (the original reason this was False).
     #
     # "No data here" surfaces as a plain ValueError from osmnx, not one
     # consistent exception type -- observed two different real messages from
@@ -108,7 +121,7 @@ def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph | None:
             graph = ox.graph_from_bbox(
                 bbox=(bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max),
                 custom_filter=WALK_FILTER,
-                retain_all=False,
+                retain_all=True,
             )
             break
         except ValueError:
