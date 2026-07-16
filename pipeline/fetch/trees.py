@@ -15,6 +15,12 @@ from pipeline.fetch import socrata
 # Only the columns scoring needs — keeps the cache files small.
 TREE_COLUMNS = "globalid, dbh, tpcondition, genusspecies, location"
 
+# Bump whenever the query (bbox logic, columns, filters) changes -- baked
+# into the cache filename so old cached rows are ignored rather than
+# silently reused. v2: run_tile.py started passing a FETCH_BUFFER_M-padded
+# bbox instead of the tile's exact one.
+TREE_CACHE_VERSION = 2
+
 
 def fetch_trees(bbox: Bbox, tile_id: str, refresh: bool = False) -> list[dict]:
     """Return raw tree records (list of dicts) within the bbox, cached per tile."""
@@ -30,6 +36,6 @@ def fetch_trees(bbox: Bbox, tile_id: str, refresh: bool = False) -> list[dict]:
         where=where,
         select=TREE_COLUMNS,
         order="globalid",  # any unique column works; needed for stable paging
-        cache_name=f"trees_{tile_id}",
+        cache_name=f"trees_{tile_id}_v{TREE_CACHE_VERSION}",
         refresh=refresh,
     )

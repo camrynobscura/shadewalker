@@ -24,15 +24,24 @@ def run(tile_id: str, refresh_trees: bool = False) -> None:
     bbox = config.get_tile_bbox(tile_id)
     print(f"[{tile_id}] lat {bbox.lat_min}–{bbox.lat_max}, lon {bbox.lon_min}–{bbox.lon_max}")
 
+    # Fetch bbox is padded past the tile's true edges (FETCH_BUFFER_M) so
+    # neighboring tiles' data genuinely overlaps at their shared border --
+    # required for GraphStore's load()-time merge to have a matching OSM
+    # node id to stitch on. The exported tile still covers this whole
+    # padded area (not clipped back to `bbox`); the overlap is deliberate,
+    # and duplicate nodes/edges between adjacent tiles get deduplicated at
+    # server load time, not here.
+    fetch_bbox = config.buffered_bbox(bbox, config.FETCH_BUFFER_M)
+
     # fetch (cached). Streets first: a tile with no matching streets (open
     # water) needs no tree data either, so checking this first skips a
     # pointless Socrata call on top of the Overpass one.
-    street_graph = streets.fetch_streets(bbox, tile_id)
+    street_graph = streets.fetch_streets(fetch_bbox, tile_id)
     if street_graph is None:
         print(f"[{tile_id}] skipped -- no walkable streets in this area")
         return
 
-    tree_rows = trees.fetch_trees(bbox, tile_id, refresh=refresh_trees)
+    tree_rows = trees.fetch_trees(fetch_bbox, tile_id, refresh=refresh_trees)
 
     # graph → scoring → export
     nodes, edges = centerline.build_edge_table(street_graph)

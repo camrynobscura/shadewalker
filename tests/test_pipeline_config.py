@@ -59,6 +59,33 @@ def test_get_tile_ids_for_bbox_spans_adjacent_tiles():
     assert config.get_tile_ids_for_bbox(combined) == ["r5c5", "r5c6"]
 
 
+def test_buffered_bbox_expands_in_every_direction():
+    bbox = config.Bbox(lat_min=40.0, lat_max=40.02, lon_min=-74.0, lon_max=-73.98)
+    padded = config.buffered_bbox(bbox, 150)
+
+    assert padded.lat_min < bbox.lat_min
+    assert padded.lat_max > bbox.lat_max
+    assert padded.lon_min < bbox.lon_min
+    assert padded.lon_max > bbox.lon_max
+
+
+def test_buffered_bbox_widens_longitude_more_than_latitude_at_nyc():
+    # A degree of longitude is a shorter real distance than a degree of
+    # latitude at NYC's latitude (~40.7N), so the same 150m buffer should
+    # need MORE longitude degrees than latitude degrees to cover it.
+    bbox = config.Bbox(lat_min=40.6, lat_max=40.7, lon_min=-74.0, lon_max=-73.9)
+    padded = config.buffered_bbox(bbox, 150)
+
+    lat_buffer_deg = bbox.lat_min - padded.lat_min
+    lon_buffer_deg = bbox.lon_min - padded.lon_min
+    assert lon_buffer_deg > lat_buffer_deg
+
+
+def test_buffered_bbox_zero_buffer_is_a_no_op():
+    bbox = config.Bbox(lat_min=40.0, lat_max=40.02, lon_min=-74.0, lon_max=-73.98)
+    assert config.buffered_bbox(bbox, 0) == bbox
+
+
 def test_brooklyn_bbox_contains_the_pilot_tile():
     # The pilot tile (Carroll Gardens + Gowanus) is real, known-good
     # Brooklyn coverage -- if a future edit to BROOKLYN_BBOX shrinks it

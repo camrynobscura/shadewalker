@@ -49,6 +49,41 @@ TILE_SIZE_LON_DEG = 0.024
 # Duplicated edges are deduplicated at server load time.
 FETCH_BUFFER_M = 150
 
+# For converting FETCH_BUFFER_M (meters) into degrees to pad a Bbox -- same
+# ~111km/degree-of-latitude approximation TILE_SIZE_LAT_DEG's comment above
+# already uses, good enough at this precision (a few meters of slop on a
+# 150m buffer) without pulling in a real geodesy library for it.
+METERS_PER_LAT_DEGREE = 111_320
+
+
+def buffered_bbox(bbox: Bbox, buffer_m: float) -> Bbox:
+    """Expand a bbox by buffer_m meters in every direction.
+
+    Without this, two tiles fetched with their exact, non-overlapping
+    bboxes never both capture a real intersection sitting near their shared
+    border -- so it never gets the same OSM node id in both tiles' data,
+    so GraphStore's load()-time merge (which matches on node id) has
+    nothing to actually stitch together. Confirmed empirically on the
+    first real multi-tile run: 92 Brooklyn tiles merged into 89 disconnected
+    graph components instead of one connected network. This buffer is what
+    creates the overlap the merge step depends on.
+
+    Longitude degrees shrink with latitude (a degree of longitude is a
+    shorter real distance the further from the equator you are), so the
+    buffer's own mid-latitude is used for that conversion -- the same
+    reasoning TILE_SIZE_LON_DEG's comment gives for NYC generally, just
+    computed per-bbox instead of with one fixed citywide number.
+    """
+    mid_lat = (bbox.lat_min + bbox.lat_max) / 2
+    lat_buffer_deg = buffer_m / METERS_PER_LAT_DEGREE
+    lon_buffer_deg = buffer_m / (METERS_PER_LAT_DEGREE * math.cos(math.radians(mid_lat)))
+    return Bbox(
+        lat_min=bbox.lat_min - lat_buffer_deg,
+        lat_max=bbox.lat_max + lat_buffer_deg,
+        lon_min=bbox.lon_min - lon_buffer_deg,
+        lon_max=bbox.lon_max + lon_buffer_deg,
+    )
+
 # Hand-picked rectangle, not Brooklyn's real (non-rectangular) shape --
 # chosen over a real borough-boundary polygon for now since the pipeline has
 # no geometric-filtering step today. Some overreach into water/neighboring

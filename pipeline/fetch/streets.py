@@ -31,9 +31,11 @@ from pipeline.config import Bbox
 
 STREETS_DIR = config.RAW_DIR / "streets"
 
-# Bump this whenever WALK_FILTER changes: it's baked into the cache filename,
-# so old cached graphs are ignored rather than silently reused.
-GRAPH_CACHE_VERSION = 2
+# Bump this whenever WALK_FILTER changes, or the fetch bbox logic changes
+# (v3: run_tile.py started passing a FETCH_BUFFER_M-padded bbox instead of
+# the tile's exact one) -- it's baked into the cache filename, so old cached
+# graphs are ignored rather than silently reused.
+GRAPH_CACHE_VERSION = 3
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
