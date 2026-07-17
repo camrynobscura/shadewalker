@@ -16,10 +16,13 @@ from pipeline import config
 CACHE_DIR = config.RAW_DIR / "socrata"
 
 
-def _auth_headers() -> dict[str, str]:
+def auth_headers() -> dict[str, str]:
     """X-App-Token raises Socrata's per-IP rate limit; omitted entirely
     (rather than sent empty) when no token is configured, so anonymous
-    requests keep working exactly as before."""
+    requests keep working exactly as before. Public because
+    pipeline/fetch/boundaries.py also needs it -- it doesn't go through
+    fetch_all_rows() below (only 5 rows, no pagination), but still wants
+    the same token behavior."""
     if config.SOCRATA_APP_TOKEN:
         return {"X-App-Token": config.SOCRATA_APP_TOKEN}
     return {}
@@ -48,7 +51,7 @@ def fetch_all_rows(
         return rows
 
     url = f"{config.SOCRATA_BASE_URL}/{dataset_id}.json"
-    headers = _auth_headers()
+    headers = auth_headers()
     rows: list[dict] = []
     offset = 0
 

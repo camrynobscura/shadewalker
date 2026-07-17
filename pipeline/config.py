@@ -265,8 +265,9 @@ MAX_SNAP_DISTANCE_M = 200.0
 # ── Data sources ──────────────────────────────────────────────────────────────
 
 SOCRATA_BASE_URL = "https://data.cityofnewyork.us/resource"
-TREES_DATASET_ID = "hn5i-inap"   # Forestry Tree Points — the live NYC Tree Map data
-SOCRATA_PAGE_SIZE = 50_000       # rows per request (underscores are just digit separators)
+TREES_DATASET_ID = "hn5i-inap"      # Forestry Tree Points — the live NYC Tree Map data
+BOUNDARIES_DATASET_ID = "gthc-hcne" # Borough Boundaries — real borough polygons, water excluded
+SOCRATA_PAGE_SIZE = 50_000          # rows per request (underscores are just digit separators)
 
 # Optional — unset means anonymous requests (fine at pilot-tile scale, risks
 # throttling at borough+ scale). Set as a real env var, never committed;

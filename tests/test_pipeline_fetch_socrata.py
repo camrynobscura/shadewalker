@@ -13,9 +13,9 @@ from pipeline.fetch import socrata
 
 def test_auth_headers_includes_token_when_configured(monkeypatch):
     monkeypatch.setattr(config, "SOCRATA_APP_TOKEN", "fake-token-123")
-    assert socrata._auth_headers() == {"X-App-Token": "fake-token-123"}
+    assert socrata.auth_headers() == {"X-App-Token": "fake-token-123"}
 
 
 def test_auth_headers_empty_when_token_unset(monkeypatch):
     monkeypatch.setattr(config, "SOCRATA_APP_TOKEN", None)
-    assert socrata._auth_headers() == {}
+    assert socrata.auth_headers() == {}
