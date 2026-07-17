@@ -137,6 +137,15 @@ def get_tile_bbox(tile_id: str) -> Bbox:
     return bbox
 
 
+def is_grid_tile_id(tile_id: str) -> bool:
+    """Whether tile_id is 'pilot' or a citywide grid id like 'r12c07' --
+    as opposed to a borough name like 'manhattan'. run_tile.py's main()
+    uses this to decide which of run()/run_borough() a CLI argument means,
+    now that not every borough has a config.BOROUGH_BBOXES entry to check
+    membership against (see pipeline/graph/boundary.py)."""
+    return tile_id == "pilot" or bool(_GRID_ID_PATTERN.fullmatch(tile_id))
+
+
 def get_tile_ids_for_bbox(bbox: Bbox) -> list[str]:
     """Every citywide-grid tile id whose box overlaps the given area.
 

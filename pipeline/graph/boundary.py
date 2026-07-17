@@ -14,8 +14,10 @@ depends only on its own id, not on who asked for it.
 """
 
 import shapely
-from shapely.geometry import shape
+from shapely.geometry import box, shape
 from shapely.geometry.base import BaseGeometry
+
+from pipeline import config
 
 
 def nyc_boundary(geojson: dict) -> BaseGeometry:
@@ -24,3 +26,35 @@ def nyc_boundary(geojson: dict) -> BaseGeometry:
     FeatureCollection -- see pipeline/fetch/boundaries.py for the fetch."""
     borough_shapes = [shape(feature["geometry"]) for feature in geojson["features"]]
     return shapely.union_all(borough_shapes)
+
+
+def borough_polygon(geojson: dict, borough: str) -> BaseGeometry:
+    """One borough's own real polygon (not unioned with the others) --
+    matched case-insensitively against the dataset's `boroname` (e.g.
+    "manhattan" matches "Manhattan"), so it takes the same lowercase
+    borough names config.BOROUGH_BBOXES's keys already use."""
+    for feature in geojson["features"]:
+        if feature["properties"]["boroname"].lower() == borough.lower():
+            return shape(feature["geometry"])
+    valid_names = sorted(feature["properties"]["boroname"] for feature in geojson["features"])
+    raise ValueError(f"No borough named {borough!r} in the dataset -- valid names: {valid_names}")
+
+
+def _tile_box(tile_id: str) -> BaseGeometry:
+    bbox = config.get_tile_bbox(tile_id)
+    return box(bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max)
+
+
+def tile_ids_for_polygon(polygon: BaseGeometry) -> list[str]:
+    """Every citywide-grid tile id whose box genuinely intersects the
+    polygon -- unlike config.get_tile_ids_for_bbox(), which only checks
+    a rectangle. A cheap bounding-box pass finds the candidates first
+    (reusing get_tile_ids_for_bbox on the polygon's own bounds), then
+    each candidate's real tile box is checked against the actual polygon
+    shape. For a shape as non-rectangular as Manhattan, this is the
+    difference between the tiles that matter and dozens more swept in
+    from NJ/Queens by the bounding rectangle alone."""
+    lon_min, lat_min, lon_max, lat_max = polygon.bounds
+    candidate_bbox = config.Bbox(lat_min=lat_min, lat_max=lat_max, lon_min=lon_min, lon_max=lon_max)
+    candidates = config.get_tile_ids_for_bbox(candidate_bbox)
+    return [tile_id for tile_id in candidates if _tile_box(tile_id).intersects(polygon)]
