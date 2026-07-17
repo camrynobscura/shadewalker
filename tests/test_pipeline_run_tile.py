@@ -10,6 +10,8 @@ of regression; only a test that run() actually *calls* the fetchers with
 a padded bbox can.
 """
 
+import networkx as nx
+
 from pipeline import config, run_tile
 
 
@@ -19,7 +21,13 @@ def test_run_fetches_with_a_bbox_padded_past_the_tiles_edges(monkeypatch):
 
     def fake_fetch_streets(bbox, tile_id):
         received["streets"] = bbox
-        return object()  # non-None, so run() doesn't take the open-water early return
+        # A real (trivial) graph, not a bare sentinel: run() now calls
+        # .number_of_nodes() on whatever clip_to_nyc hands back (mocked to
+        # identity below), and a non-empty graph also keeps run() past the
+        # open-water early return.
+        graph = nx.MultiDiGraph()
+        graph.add_node(1, x=0.0, y=0.0)
+        return graph
 
     def fake_fetch_trees(bbox, tile_id, refresh=False):
         received["trees"] = bbox
@@ -28,7 +36,14 @@ def test_run_fetches_with_a_bbox_padded_past_the_tiles_edges(monkeypatch):
     monkeypatch.setattr(run_tile.streets, "fetch_streets", fake_fetch_streets)
     monkeypatch.setattr(run_tile.trees, "fetch_trees", fake_fetch_trees)
     # The compute stages aren't under test -- stub them out so the fakes'
-    # sentinel returns never reach real geometry code.
+    # sentinel returns never reach real geometry code. Boundary clipping is
+    # also a no-op here: it isn't this test's concern (see
+    # test_pipeline_graph_boundary.py), and it would otherwise choke on the
+    # plain object() sentinel fake_fetch_streets returns (no real .nodes())
+    # or hit the real disk-cached borough-boundary fetch.
+    monkeypatch.setattr(run_tile.boundaries, "fetch_borough_boundaries", lambda: {})
+    monkeypatch.setattr(run_tile.boundary, "nyc_boundary", lambda geojson: None)
+    monkeypatch.setattr(run_tile.boundary, "clip_to_nyc", lambda graph, nyc_shape: graph)
     monkeypatch.setattr(run_tile.centerline, "build_edge_table", lambda graph: (None, None))
     monkeypatch.setattr(run_tile.tree_scoring, "score_and_join", lambda edges, rows: None)
     monkeypatch.setattr(run_tile.export, "write_tile", lambda tile_id, nodes, edges: None)

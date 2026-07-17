@@ -1,20 +1,24 @@
-"""Load-time pruning of unreachable components, exercised deterministically.
+"""Multi-component loading, exercised deterministically.
 
-The standing invariant in test_route_invariants.py asserts the loaded graph
-is one connected component -- but in CI, where data/tiles/ holds only the
-pilot tile, the data is already one component and the pruning branch never
-actually runs. These tests fabricate a two-component dataset (a small main
-network plus a disconnected fragment across "water", split over two tile
-files the way a real border tile would be) so the prune-and-reindex path
-executes on every run. The reindexing filters seven parallel node/edge
-structures in lockstep; the alignment tests below are what catch an
-off-by-one that would silently pair one edge's name with another's geometry.
+server/graph_store.py's load() used to prune everything but the largest
+connected component. As of the borough-boundary polygon work it keeps
+every component instead, trusting pipeline/graph/boundary.py's
+clip_to_nyc() to have already excluded non-NYC territory before data ever
+reaches data/tiles/ -- so a real disconnected place (Governors Island,
+eventually Staten Island) is no longer collateral damage. In CI, where
+data/tiles/ holds only the single-component pilot tile, this path never
+actually runs. These tests fabricate a two-component dataset (a small
+main network plus a genuinely disconnected "island", split over two tile
+files the way a real border tile would be) so it's exercised on every
+run, and its output -- both components present, arrays still aligned,
+routing behaving correctly on and across them -- is checked directly.
 """
 
 import gzip
 import json
 
 import pytest
+from shapely.geometry import LinearRing, Point, Polygon
 
 from pipeline import config
 from server.graph_store import GraphStore
@@ -25,9 +29,12 @@ MAIN_NODES = {
     "m3": [-73.9880, 40.6820],
     "m4": [-73.9900, 40.6820],
 }
-FRAGMENT_NODES = {
-    "f1": [-74.0500, 40.7200],
-    "f2": [-74.0480, 40.7200],
+# ~2.5km from the main cluster -- well past twice MAX_SNAP_DISTANCE_M
+# (200m), so the two components' buffered coverage footprints stay
+# genuinely disjoint rather than merging into one piece.
+ISLAND_NODES = {
+    "i1": [-74.0170, 40.6890],
+    "i2": [-74.0150, 40.6890],
 }
 
 # (u, v, name, length_m, tree_count) -- distinct values per edge on purpose,
@@ -37,7 +44,7 @@ MAIN_EDGES = [
     ("m2", "m3", "Beta Avenue", 220.0, 5),
     ("m3", "m4", "Gamma Road", 130.0, 0),
 ]
-FRAGMENT_EDGES = [("f1", "f2", "Foreign Lane", 165.0, 9)]
+ISLAND_EDGES = [("i1", "i2", "Island Path", 165.0, 9)]
 
 
 def _edge_record(u: str, v: str, name: str, length_m: float, tree_count: int, nodes: dict) -> dict:
@@ -61,76 +68,98 @@ def _write_tile(path, nodes: dict, edges: list) -> None:
 
 
 @pytest.fixture()
-def pruned_store(tmp_path, monkeypatch) -> GraphStore:
+def multi_component_store(tmp_path, monkeypatch) -> GraphStore:
     monkeypatch.setattr(config, "TILES_DIR", tmp_path)
     _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
-    _write_tile(tmp_path / "fragment.json.gz", FRAGMENT_NODES, FRAGMENT_EDGES)
+    _write_tile(tmp_path / "island.json.gz", ISLAND_NODES, ISLAND_EDGES)
     store = GraphStore()
     store.load()
     return store
 
 
-def test_pruning_drops_the_disconnected_fragment(pruned_store):
-    assert pruned_store._graph.vcount() == len(MAIN_NODES)
-    assert pruned_store._graph.ecount() == len(MAIN_EDGES)
-    for node_id in MAIN_NODES:
-        assert node_id in pruned_store._id_to_idx
-    for node_id in FRAGMENT_NODES:
-        assert node_id not in pruned_store._id_to_idx
+def test_load_keeps_every_component(multi_component_store):
+    assert multi_component_store._graph.vcount() == len(MAIN_NODES) + len(ISLAND_NODES)
+    assert multi_component_store._graph.ecount() == len(MAIN_EDGES) + len(ISLAND_EDGES)
+    for node_id in {**MAIN_NODES, **ISLAND_NODES}:
+        assert node_id in multi_component_store._id_to_idx
+
+    components = multi_component_store._graph.connected_components(mode="weak")
+    assert len(components) == 2
 
 
-def test_pruning_keeps_every_edge_array_aligned(pruned_store):
-    n_edges = pruned_store._graph.ecount()
-    assert len(pruned_store._length) == n_edges
-    assert len(pruned_store._names) == n_edges
-    assert len(pruned_store._tree_count) == n_edges
-    assert len(pruned_store._tree_deciduous) == n_edges
-    assert len(pruned_store._tree_evergreen) == n_edges
-    assert len(pruned_store._coord_offsets) == n_edges + 1
+def test_load_keeps_every_edge_array_aligned(multi_component_store):
+    n_edges = multi_component_store._graph.ecount()
+    assert len(multi_component_store._length) == n_edges
+    assert len(multi_component_store._names) == n_edges
+    assert len(multi_component_store._tree_count) == n_edges
+    assert len(multi_component_store._tree_deciduous) == n_edges
+    assert len(multi_component_store._tree_evergreen) == n_edges
+    assert len(multi_component_store._coord_offsets) == n_edges + 1
 
-    # Look each kept edge up by name and check its companion values --
-    # order-independent, so this fails on misalignment, not on reordering.
-    expected = {name: (length_m, count) for _, _, name, length_m, count in MAIN_EDGES}
-    assert sorted(pruned_store._names) == sorted(expected)
-    for i, name in enumerate(pruned_store._names):
+    # Look each edge up by name and check its companion values --
+    # order-independent, so this fails on misalignment, not on ordering.
+    expected = {name: (length_m, count) for _, _, name, length_m, count in MAIN_EDGES + ISLAND_EDGES}
+    assert sorted(multi_component_store._names) == sorted(expected)
+    for i, name in enumerate(multi_component_store._names):
         length_m, count = expected[name]
-        assert pruned_store._length[i] == pytest.approx(length_m)
-        assert pruned_store._tree_count[i] == count
+        assert multi_component_store._length[i] == pytest.approx(length_m)
+        assert multi_component_store._tree_count[i] == count
 
 
-def test_pruning_keeps_packed_geometry_aligned_with_endpoints(pruned_store):
+def test_load_keeps_packed_geometry_aligned_with_endpoints(multi_component_store):
     # Same invariant the packed-geometry test pins for real tiles: every
     # edge's coordinate slice must start and end at its own two endpoint
-    # nodes (in either order) -- here it proves reindexing didn't shift
-    # the coordinate buffer relative to the edge list.
-    for e in range(pruned_store._graph.ecount()):
-        u, v = pruned_store._graph.es[e].tuple
-        coords = pruned_store._edge_coords(e)
-        endpoints = {tuple(pruned_store._node_lonlat[u]), tuple(pruned_store._node_lonlat[v])}
+    # nodes (in either order) -- across both components, with nothing
+    # reindexed or dropped.
+    for e in range(multi_component_store._graph.ecount()):
+        u, v = multi_component_store._graph.es[e].tuple
+        coords = multi_component_store._edge_coords(e)
+        endpoints = {tuple(multi_component_store._node_lonlat[u]), tuple(multi_component_store._node_lonlat[v])}
         assert {tuple(coords[0]), tuple(coords[-1])} == endpoints
 
 
-def test_coverage_shrinks_to_the_kept_component(pruned_store):
-    # The served coverage area must not advertise the pruned fragment --
-    # that's the user-facing point of pruning (a click there should be
-    # rejected as out-of-coverage, not routed around a foreign island).
-    lon_min, lat_min, lon_max, lat_max = pruned_store._bounds
-    f_lon, f_lat = FRAGMENT_NODES["f1"]
-    assert not (lon_min <= f_lon <= lon_max and lat_min <= f_lat <= lat_max)
+def test_coverage_includes_both_components_as_separate_pieces(multi_component_store):
+    # The user-facing point of relaxing pruning: a genuinely disconnected
+    # real place (this fixture stands in for Governors Island) gets its
+    # own visible boundary now, instead of being silently left off the map
+    # while still being fully routable.
+    rings = multi_component_store.coverage_rings()
+    assert len(rings) == 2
 
-    # Same promise for the drawn boundary ring /coverage serves.
-    from shapely.geometry import Point, Polygon
+    m1_lon, m1_lat = MAIN_NODES["m1"]
+    i1_lon, i1_lat = ISLAND_NODES["i1"]
+    polys = [Polygon(ring) for ring in rings]
+    assert any(poly.contains(Point(m1_lon, m1_lat)) for poly in polys)
+    assert any(poly.contains(Point(i1_lon, i1_lat)) for poly in polys)
 
-    ring = pruned_store.coverage_ring()
-    assert ring[0] == ring[-1]
-    assert not Polygon(ring).contains(Point(f_lon, f_lat))
+    # Each piece is closed and CCW -- the frontend's hole-punch contract
+    # (MapView reverses each ring to cut a hole in the dimming mask).
+    for ring in rings:
+        assert ring[0] == ring[-1]
+        assert LinearRing(ring).is_ccw
 
 
-def test_routing_still_works_on_the_kept_component(pruned_store):
+def test_routing_works_within_each_component(multi_component_store):
     lon_a, lat_a = MAIN_NODES["m1"]
     lon_b, lat_b = MAIN_NODES["m3"]
-    start = pruned_store.snap_to_edge(lat_a, lon_a)
-    end = pruned_store.snap_to_edge(lat_b, lon_b)
-    result = pruned_store.route(start, end, tree_weight=0, month=7)
+    start = multi_component_store.snap_to_edge(lat_a, lon_a)
+    end = multi_component_store.snap_to_edge(lat_b, lon_b)
+    result = multi_component_store.route(start, end, tree_weight=0, month=7)
     assert result is not None
     assert result["length_m"] > 0
+
+
+@pytest.mark.filterwarnings("ignore:Couldn't reach some vertices:RuntimeWarning")
+def test_routing_returns_none_between_disconnected_components(multi_component_store):
+    # The other half of relaxed pruning's contract: two real, in-coverage
+    # points that legitimately can't reach each other (mainland <-> a
+    # ferry-only island) must get a clean "no route," not an error. igraph
+    # warns here by design -- server/graph_store.py filters it at module
+    # scope for the real server, but pytest resets warning filters per
+    # test, so this specific expected warning gets its own marker instead.
+    lon_a, lat_a = MAIN_NODES["m1"]
+    lon_b, lat_b = ISLAND_NODES["i1"]
+    start = multi_component_store.snap_to_edge(lat_a, lon_a)
+    end = multi_component_store.snap_to_edge(lat_b, lon_b)
+    result = multi_component_store.route(start, end, tree_weight=0, month=7)
+    assert result is None

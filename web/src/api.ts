@@ -81,14 +81,16 @@ export async function fetchRoute(
   return res.json()
 }
 
-/** GeoJSON polygon of the area we actually have street + tree data for —
- * drawn on the map so people can see where a route can start/end before
- * they try one. */
+/** GeoJSON multipolygon of the area(s) we actually have street + tree data
+ * for — drawn on the map so people can see where a route can start/end
+ * before they try one. MultiPolygon, not Polygon: disjoint routable areas
+ * (mainland NYC, Governors Island, eventually Staten Island) each get
+ * their own piece rather than being merged or dropped. */
 export interface CoverageFeature {
   type: 'Feature'
   geometry: {
-    type: 'Polygon'
-    coordinates: [number, number][][]
+    type: 'MultiPolygon'
+    coordinates: [number, number][][][]
   }
 }
 

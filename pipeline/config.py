@@ -137,6 +137,15 @@ def get_tile_bbox(tile_id: str) -> Bbox:
     return bbox
 
 
+def is_grid_tile_id(tile_id: str) -> bool:
+    """Whether tile_id is 'pilot' or a citywide grid id like 'r12c07' --
+    as opposed to a borough name like 'manhattan'. run_tile.py's main()
+    uses this to decide which of run()/run_borough() a CLI argument means,
+    now that not every borough has a config.BOROUGH_BBOXES entry to check
+    membership against (see pipeline/graph/boundary.py)."""
+    return tile_id == "pilot" or bool(_GRID_ID_PATTERN.fullmatch(tile_id))
+
+
 def get_tile_ids_for_bbox(bbox: Bbox) -> list[str]:
     """Every citywide-grid tile id whose box overlaps the given area.
 
@@ -265,8 +274,9 @@ MAX_SNAP_DISTANCE_M = 200.0
 # ── Data sources ──────────────────────────────────────────────────────────────
 
 SOCRATA_BASE_URL = "https://data.cityofnewyork.us/resource"
-TREES_DATASET_ID = "hn5i-inap"   # Forestry Tree Points — the live NYC Tree Map data
-SOCRATA_PAGE_SIZE = 50_000       # rows per request (underscores are just digit separators)
+TREES_DATASET_ID = "hn5i-inap"      # Forestry Tree Points — the live NYC Tree Map data
+BOUNDARIES_DATASET_ID = "gthc-hcne" # Borough Boundaries — real borough polygons, water excluded
+SOCRATA_PAGE_SIZE = 50_000          # rows per request (underscores are just digit separators)
 
 # Optional — unset means anonymous requests (fine at pilot-tile scale, risks
 # throttling at borough+ scale). Set as a real env var, never committed;

@@ -38,18 +38,20 @@ function toLatLngs(feature: RouteFeature): [number, number][] {
   return feature.geometry.coordinates.map(([lon, lat]) => [lat, lon])
 }
 
-/** A ring well outside the coverage polygon in every direction. Paired with
- * the coverage ring as a Polygon's two rings (outer boundary + hole),
- * Leaflet fills only the area *between* them — everything outside coverage
- * gets dimmed, the coverage area itself stays a clear "hole". Sized off the
- * coverage ring itself rather than a hardcoded NYC box, so this keeps
- * working unchanged once Stage 2 covers more than one tile. */
-function maskRing(coverageRing: [number, number][]): [number, number][] {
-  const lons = coverageRing.map(([lon]) => lon)
-  const lats = coverageRing.map(([, lat]) => lat)
+/** A ring well outside every coverage piece in every direction. Paired
+ * with the coverage rings as a Polygon's outer boundary + holes, Leaflet
+ * fills only the area *between* them — everything outside coverage gets
+ * dimmed, each coverage piece stays a clear "hole". Sized off every
+ * piece's combined bounds rather than a hardcoded NYC box, so this keeps
+ * working unchanged as more pieces (Governors Island, Staten Island) get
+ * added. */
+function maskRing(coverageRings: [number, number][][]): [number, number][] {
+  const points = coverageRings.flat()
+  const lons = points.map(([lon]) => lon)
+  const lats = points.map(([, lat]) => lat)
   const margin = 0.5 // degrees (~55 km) — comfortably beyond any zoom-out
   // a user would realistically reach in an NYC-scoped app, and bigger than
-  // Stage 2's eventual citywide coverage ring too
+  // Stage 2's eventual citywide coverage extent too
   const lonMin = Math.min(...lons) - margin
   const lonMax = Math.max(...lons) + margin
   const latMin = Math.min(...lats) - margin
@@ -63,31 +65,37 @@ function maskRing(coverageRing: [number, number][]): [number, number][] {
   ]
 }
 
-/** Dims everything outside the routable area, plus a dashed line marking
- * its edge. Two separate Polygons rather than one: the dimming needs a
- * hole (fill between two rings, coverage area excluded); the edge needs
- * its own stroke-only pass so the boundary itself reads crisply on top. */
+/** Dims everything outside the routable area(s), plus a dashed line
+ * marking each piece's edge. Two separate Polygons rather than one: the
+ * dimming needs one hole per piece (a single polygon: outer mask + every
+ * coverage ring as a hole); the edges need their own stroke-only pass, one
+ * closed shape per piece, so each boundary reads crisply on top and
+ * disjoint pieces (mainland NYC, Governors Island) never get connected by
+ * a stray line between them. */
 function CoverageOverlay({ coverage }: { coverage: CoverageFeature }) {
-  const ring = coverage.geometry.coordinates[0]
-  const outer = maskRing(ring)
+  const rings = coverage.geometry.coordinates.map((polygon) => polygon[0])
+  const outer = maskRing(rings)
   const toLatLng = ([lon, lat]: [number, number]): [number, number] => [lat, lon]
 
   return (
     <>
       <Polygon
-        // The hole ring has to wind opposite the outer ring — Leaflet's SVG
+        // Hole rings have to wind opposite the outer ring — Leaflet's SVG
         // paths use the default (nonzero) fill-rule, which fills straight
         // through a same-direction inner ring instead of punching a hole.
         // Reversing point order flips winding without changing the shape.
-        positions={[outer.map(toLatLng), [...ring].reverse().map(toLatLng)]}
+        // One polygon, N+1 rings: index 0 is the fill boundary, every ring
+        // after it is its own hole.
+        positions={[outer.map(toLatLng), ...rings.map((ring) => [...ring].reverse().map(toLatLng))]}
         pathOptions={{ stroke: false, fillColor: '#0b2418', fillOpacity: 0.16 }}
         interactive={false}
       />
       <Polygon
         // Same weight/dash/opacity as the fastest route's pink line below —
         // green instead, so it reads as "a line like that one" rather than
-        // an unrelated new style.
-        positions={[ring.map(toLatLng)]}
+        // an unrelated new style. Array-of-arrays: each piece is its own
+        // separate closed shape, not one polygon connecting them all.
+        positions={rings.map((ring) => [ring.map(toLatLng)])}
         pathOptions={{ color: '#00a86b', weight: 3, dashArray: '6 8', opacity: 0.85, fill: false }}
         interactive={false}
       />

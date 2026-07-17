@@ -86,6 +86,20 @@ def test_buffered_bbox_zero_buffer_is_a_no_op():
     assert config.buffered_bbox(bbox, 0) == bbox
 
 
+def test_is_grid_tile_id_true_for_pilot_and_grid_ids():
+    assert config.is_grid_tile_id("pilot")
+    assert config.is_grid_tile_id("r12c07")
+
+
+def test_is_grid_tile_id_false_for_borough_names():
+    # run_tile.py's main() relies on this distinction to route a CLI
+    # argument to run() vs run_borough() -- a borough name must never be
+    # mistaken for a tile id, or it'd fail tile-id parsing instead of
+    # reaching run_borough().
+    assert not config.is_grid_tile_id("brooklyn")
+    assert not config.is_grid_tile_id("manhattan")
+
+
 def test_brooklyn_bbox_contains_the_pilot_tile():
     # The pilot tile (Carroll Gardens + Gowanus) is real, known-good
     # Brooklyn coverage -- if a future edit to BROOKLYN_BBOX shrinks it

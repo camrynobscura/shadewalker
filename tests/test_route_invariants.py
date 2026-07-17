@@ -177,25 +177,26 @@ def test_two_points_on_the_same_block_route_directly_not_via_a_corner(graph_stor
     assert result["length_m"] < airline_m * 3
 
 
-def test_loaded_graph_is_one_connected_component(graph_store):
-    """Load-time pruning keeps only the largest connected component, so
-    whatever tiles are loaded, every routable point can reach every other
-    routable point. Guards the real Stage 2 failure this prevents: border
-    tiles' rectangular overreach swept in street fragments from across the
-    water (Jersey City, a Manhattan sliver, the Rockaways) that nothing
-    could route to -- coverage the router couldn't honor."""
-    components = graph_store._graph.connected_components(mode="weak")
-    assert len(components) == 1
-
-
 def test_coverage_polygon_traces_the_street_network_not_its_bounding_box(client):
-    """/coverage serves a concave hull of the loaded nodes, not a min/max
-    rectangle -- with Brooklyn-sized data the rectangle claimed water and
-    Lower Manhattan as clickable area that /route would then reject. The
-    drawn boundary must be one users can trust."""
+    """/coverage serves a MultiPolygon tracing the buffered street network,
+    not a min/max rectangle -- with Brooklyn-sized data a rectangle claimed
+    water and Lower Manhattan as clickable area that /route would then
+    reject. The drawn boundary must be one users can trust.
+
+    Checks whichever piece actually contains the known-routable FROM/TO
+    points, not just coordinates[0]: GraphStore.load() keeps every
+    component now (not just the largest), so with real, non-pilot data
+    loaded there can be many disjoint pieces in no particular order --
+    which one a real place lands in isn't a fixed index."""
     from shapely.geometry import LinearRing, Point as ShapelyPoint, Polygon
 
-    ring = client.get("/coverage").json()["geometry"]["coordinates"][0]
+    polygons = client.get("/coverage").json()["geometry"]["coordinates"]
+    from_point = ShapelyPoint(FROM["lon"], FROM["lat"])
+    to_point = ShapelyPoint(TO["lon"], TO["lat"])
+
+    matches = [polygon[0] for polygon in polygons if Polygon(polygon[0]).contains(from_point)]
+    assert len(matches) == 1  # disjoint pieces -- a real point belongs to exactly one
+    ring = matches[0]
 
     assert ring[0] == ring[-1]  # closed GeoJSON ring
     assert len(ring) >= 5
@@ -203,11 +204,11 @@ def test_coverage_polygon_traces_the_street_network_not_its_bounding_box(client)
     poly = Polygon(ring)
     assert poly.is_valid
     # Winding is part of the frontend contract: MapView punches its
-    # map-dimming hole by reversing this ring, which assumes CCW.
+    # map-dimming holes by reversing these rings, which assumes CCW.
     assert LinearRing(ring).is_ccw
-    # Known-routable points must be inside the drawn boundary.
-    assert poly.contains(ShapelyPoint(FROM["lon"], FROM["lat"]))
-    assert poly.contains(ShapelyPoint(TO["lon"], TO["lat"]))
+    # FROM and TO are both real, known-routable Carroll Gardens points --
+    # they must land in the very same piece.
+    assert poly.contains(to_point)
     # A genuinely traced outline is strictly smaller than its own bbox
     # (equality would mean it IS the rectangle).
     lon_min, lat_min, lon_max, lat_max = poly.bounds
