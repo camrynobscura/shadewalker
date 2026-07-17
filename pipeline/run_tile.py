@@ -4,7 +4,7 @@
     uv run python -m pipeline.run_tile pilot --refresh-trees
     uv run python -m pipeline.run_tile brooklyn
 
-Stages: fetch → graph → scoring → export. The fetch stage is disk-cached
+Stages: fetch → boundary clip → graph → scoring → export. The fetch stage is disk-cached
 (the slow, network-bound part); the compute stages are fast enough to
 re-run every time, which keeps them always consistent with config tweaks.
 A borough name runs every tile that covers it, one at a time, reusing the
@@ -39,6 +39,17 @@ def run(tile_id: str, refresh_trees: bool = False) -> None:
     street_graph = streets.fetch_streets(fetch_bbox, tile_id)
     if street_graph is None:
         print(f"[{tile_id}] skipped -- no walkable streets in this area")
+        return
+
+    # Drop anything fetch_bbox's overreach swept in from outside NYC
+    # (Jersey City, Bayonne, open water past the real coastline) before it
+    # ever reaches scoring/export -- the real fix for the foreign-territory
+    # problem server/graph_store.py's load-time pruning used to paper over
+    # after the fact (see PLAN.md's borough-boundary polygon plan).
+    nyc_shape = boundary.nyc_boundary(boundaries.fetch_borough_boundaries())
+    street_graph = boundary.clip_to_nyc(street_graph, nyc_shape)
+    if street_graph.number_of_nodes() == 0:
+        print(f"[{tile_id}] skipped -- no nodes remain inside NYC after boundary clipping")
         return
 
     tree_rows = trees.fetch_trees(fetch_bbox, tile_id, refresh=refresh_trees)

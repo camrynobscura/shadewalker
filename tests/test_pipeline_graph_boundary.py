@@ -3,6 +3,7 @@ logic. Two synthetic squares stand in for the real 5-borough dataset --
 exercising the union/containment logic without needing network access or
 the real 3MB file in the test suite."""
 
+import networkx as nx
 import pytest
 from shapely.geometry import Point, box, shape
 
@@ -87,3 +88,34 @@ def test_tile_ids_for_polygon_excludes_tiles_the_polygon_never_touches():
 
     result = set(boundary.tile_ids_for_polygon(two_corners))
     assert result == naive_candidates - {"r0c2", "r2c0"}
+
+
+def _make_street_graph():
+    """Two nodes inside a unit square, one outside, an edge crossing the
+    boundary and an edge staying entirely inside."""
+    graph = nx.MultiDiGraph()
+    graph.add_node("inside_1", x=0.5, y=0.5)
+    graph.add_node("inside_2", x=0.8, y=0.2)
+    graph.add_node("outside_1", x=5.0, y=5.0)
+    graph.add_edge("inside_1", "inside_2", key=0)
+    graph.add_edge("inside_1", "outside_1", key=0)
+    return graph
+
+
+def test_clip_to_nyc_drops_nodes_outside_the_boundary():
+    nyc_shape = box(0, 0, 1, 1)
+    clipped = boundary.clip_to_nyc(_make_street_graph(), nyc_shape)
+    assert set(clipped.nodes) == {"inside_1", "inside_2"}
+
+
+def test_clip_to_nyc_drops_edges_incident_to_a_removed_node():
+    nyc_shape = box(0, 0, 1, 1)
+    clipped = boundary.clip_to_nyc(_make_street_graph(), nyc_shape)
+    assert not clipped.has_edge("inside_1", "outside_1")
+    assert clipped.has_edge("inside_1", "inside_2")
+
+
+def test_clip_to_nyc_does_not_mutate_the_original_graph():
+    graph = _make_street_graph()
+    boundary.clip_to_nyc(graph, box(0, 0, 1, 1))
+    assert "outside_1" in graph.nodes

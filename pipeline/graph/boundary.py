@@ -13,8 +13,9 @@ breaking the per-tile GraphML cache's assumption that a tile's content
 depends only on its own id, not on who asked for it.
 """
 
+import networkx as nx
 import shapely
-from shapely.geometry import box, shape
+from shapely.geometry import Point, box, shape
 from shapely.geometry.base import BaseGeometry
 
 from pipeline import config
@@ -58,3 +59,27 @@ def tile_ids_for_polygon(polygon: BaseGeometry) -> list[str]:
     candidate_bbox = config.Bbox(lat_min=lat_min, lat_max=lat_max, lon_min=lon_min, lon_max=lon_max)
     candidates = config.get_tile_ids_for_bbox(candidate_bbox)
     return [tile_id for tile_id in candidates if _tile_box(tile_id).intersects(polygon)]
+
+
+def clip_to_nyc(street_graph: nx.MultiDiGraph, nyc_shape: BaseGeometry) -> nx.MultiDiGraph:
+    """Drop every node -- and its incident edges, via networkx's own
+    cascade on removal -- that falls outside NYC's real boundary. This is
+    what actually keeps foreign territory (Jersey City, Bayonne, swept in
+    by a tile's buffered fetch bbox overreaching past the real coastline)
+    out of the pipeline's data, rather than leaving
+    server/graph_store.py's load-time pruning to catch it after the fact
+    (see PLAN.md's borough-boundary polygon plan). Does not mutate
+    street_graph -- works on a copy, matching centerline.py's own
+    non-mutating convention.
+
+    Pure containment check in raw lon/lat degrees (osmnx's raw node
+    attributes, `x` = lon / `y` = lat) -- no measuring involved, so no
+    need for the meters-based CRS centerline.py uses for buffering."""
+    outside_nyc = [
+        node for node, data in street_graph.nodes(data=True)
+        if not nyc_shape.contains(Point(data["x"], data["y"]))
+    ]
+    clipped = street_graph.copy()
+    clipped.remove_nodes_from(outside_nyc)
+    print(f"  [boundary] dropped {len(outside_nyc)}/{street_graph.number_of_nodes()} nodes outside NYC")
+    return clipped
