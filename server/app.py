@@ -52,18 +52,21 @@ def health() -> dict:
 
 @app.get("/coverage")
 def coverage() -> dict:
-    """The loaded data's actual outline as a GeoJSON polygon, so the
+    """The loaded data's actual outline as a GeoJSON MultiPolygon, so the
     frontend can draw it on the map — computed from whatever tiles are
-    loaded, no server code change needed as Stage 2 adds more. A concave
-    hull of the street network, not a bounding box: with Brooklyn-sized
-    coverage, the box claimed water and Lower Manhattan as clickable area
+    loaded, no server code change needed as Stage 2 adds more. A
+    buffered-streets footprint, not a bounding box: with Brooklyn-sized
+    coverage, a box claimed water and Lower Manhattan as clickable area
     that /route would then reject — the drawn line should be one users
-    can trust."""
+    can trust. MultiPolygon (not Polygon) because GraphStore.load() keeps
+    every real connected component now, not just the largest — Governors
+    Island and eventually Staten Island get their own separate piece
+    rather than being silently left off the map while still routable."""
     return {
         "type": "Feature",
         "geometry": {
-            "type": "Polygon",
-            "coordinates": [store.coverage_ring()],
+            "type": "MultiPolygon",
+            "coordinates": [[ring] for ring in store.coverage_rings()],
         },
     }
 

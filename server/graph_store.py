@@ -25,6 +25,7 @@ whole graph — which keeps every slider value exact rather than quantized.
 import gzip
 import json
 import math
+import warnings
 from dataclasses import dataclass
 
 import igraph
@@ -36,6 +37,16 @@ from shapely.ops import substring
 from shapely.strtree import STRtree
 
 from pipeline import config
+
+# igraph's C layer emits this RuntimeWarning from get_shortest_paths()
+# whenever the two endpoints sit in different components -- route() below
+# hits it on every request between two genuinely disconnected real places
+# (mainland <-> Governors Island, eventually Staten Island), which is a
+# normal, expected outcome now that GraphStore.load() keeps every
+# component, not a bug. Filtered once here, at module scope, rather than
+# per-call: warnings.catch_warnings() mutates global filter state and
+# isn't thread-safe, and /route runs across Starlette's thread pool.
+warnings.filterwarnings("ignore", message="Couldn't reach some vertices", category=RuntimeWarning)
 
 
 def _dist2(p: list[float] | np.ndarray, q: np.ndarray) -> float:
@@ -98,7 +109,7 @@ class GraphStore:
         # OSM node ids (strings) exist only at the boundary.
         self._id_to_idx: dict[str, int] = {}
         self._node_lonlat: np.ndarray | None = None  # (N, 2) float64
-        self._coverage_ring: list[list[float]] = []  # closed [lon, lat] ring, CCW
+        self._coverage_rings: list[list[list[float]]] = []  # closed [lon, lat] rings, CCW, one per piece
         self._edge_lines_scaled: np.ndarray | None = None  # see _build_edge_index
         self._strtree: STRtree | None = None
         self._lat_scale = 1.0  # see _build_edge_index
@@ -162,64 +173,28 @@ class GraphStore:
                 names.append(edge["name"])
                 coords_per_edge.append(edge["coords"])
 
-        # Prune anything not connected to the main street network. Rectangular
-        # borough bboxes deliberately overreach past the real coastline (see
-        # BROOKLYN_BBOX), which sweeps in street fragments from across the
-        # water -- Jersey City, a Lower Manhattan sliver, the Rockaways --
-        # that no walkable street connects to the rest of the data. Keeping
-        # them would advertise coverage the router can't honor (a click in
-        # Jersey City would get a route around Jersey City, isolated from
-        # everything). Dropping them also shrinks the served coverage area,
-        # so those clicks get a clean out-of-coverage rejection instead.
-        # Self-healing by construction: once a later borough's tiles connect
-        # a pruned area for real (e.g. Queens reconnecting the Rockaways),
-        # it lands in the main component and stops being pruned. Known
-        # collateral: genuinely isolated walkable places with no street
-        # connection at all (Governors Island) are pruned too.
+        # No filtering here anymore -- every component is kept. This used to
+        # drop everything but the largest connected component, because
+        # rectangular borough bboxes deliberately overreached past the real
+        # coastline (see the old BROOKLYN_BBOX), sweeping in street
+        # fragments from across the water (Jersey City, a Lower Manhattan
+        # sliver, the Rockaways) with no real connection to the rest of the
+        # data. That's no longer possible: pipeline/graph/boundary.py's
+        # clip_to_nyc() now drops non-NYC territory at fetch time, before it
+        # ever reaches data/tiles/, so every component here is trusted as
+        # real NYC data -- including genuinely disconnected real places
+        # (Governors Island, ferry-only; eventually Staten Island, whose
+        # only bridges lead to NJ, not the rest of NYC). route()'s no-path
+        # case already returns a clean 422 for two points that legitimately
+        # can't connect (see the "disconnected" comment there), so a
+        # multi-component graph is a normal, supported state now, not an
+        # error condition -- see PLAN.md's borough-boundary polygon plan.
         provisional = igraph.Graph(n=len(node_lonlat), edges=edge_pairs, directed=False)
         components = provisional.connected_components(mode="weak")
         if len(components) > 1:
-            sizes = [len(component) for component in components]
-            main = sizes.index(max(sizes))
-            membership = components.membership
-
-            # Invert id->idx so kept nodes can be re-keyed to new indices.
-            ids_by_idx: list[str] = [""] * len(node_lonlat)
-            for node_id, idx in self._id_to_idx.items():
-                ids_by_idx[idx] = node_id
-
-            new_idx_by_old: dict[int, int] = {}
-            kept_lonlat: list[list[float]] = []
-            kept_id_to_idx: dict[str, int] = {}
-            for old_idx, lonlat in enumerate(node_lonlat):
-                if membership[old_idx] == main:
-                    new_idx_by_old[old_idx] = len(kept_lonlat)
-                    kept_id_to_idx[ids_by_idx[old_idx]] = len(kept_lonlat)
-                    kept_lonlat.append(lonlat)
-
-            # An edge's two endpoints always share a component, so checking
-            # u alone decides the whole edge. All per-edge lists filter in
-            # lockstep to stay position-aligned.
-            kept_pairs, kept_length, kept_deciduous = [], [], []
-            kept_evergreen, kept_counts, kept_names, kept_coords = [], [], [], []
-            for i, (u, v) in enumerate(edge_pairs):
-                if membership[u] != main:
-                    continue
-                kept_pairs.append((new_idx_by_old[u], new_idx_by_old[v]))
-                kept_length.append(length[i])
-                kept_deciduous.append(deciduous[i])
-                kept_evergreen.append(evergreen[i])
-                kept_counts.append(counts[i])
-                kept_names.append(names[i])
-                kept_coords.append(coords_per_edge[i])
-
-            print(f"[graph_store] pruned {len(components) - 1} unreachable component(s): "
-                  f"-{len(node_lonlat) - len(kept_lonlat)} nodes, "
-                  f"-{len(edge_pairs) - len(kept_pairs)} edges")
-            node_lonlat, edge_pairs = kept_lonlat, kept_pairs
-            length, deciduous, evergreen = kept_length, kept_deciduous, kept_evergreen
-            counts, names, coords_per_edge = kept_counts, kept_names, kept_coords
-            self._id_to_idx = kept_id_to_idx
+            sizes = sorted((len(component) for component in components), reverse=True)
+            print(f"[graph_store] {len(components)} disconnected components "
+                  f"(sizes, largest 5: {sizes[:5]})")
 
         self._names = names
         self._node_lonlat = np.array(node_lonlat)
@@ -245,16 +220,16 @@ class GraphStore:
 
         self._graph = igraph.Graph(n=len(node_lonlat), edges=edge_pairs, directed=False)
         self._build_edge_index()
-        self._coverage_ring = self._compute_coverage_ring()
+        self._coverage_rings = self._compute_coverage_rings()
 
         print(f"[graph_store] {len(tile_paths)} tile(s): "
               f"{len(node_lonlat)} nodes, {len(edge_pairs)} edges loaded")
 
-    def _compute_coverage_ring(self) -> list[list[float]]:
+    def _compute_coverage_rings(self) -> list[list[list[float]]]:
         """The drawn coverage boundary: the union of every street edge
         buffered by MAX_SNAP_DISTANCE_M — i.e. exactly the region the
         server accepts clicks in ("within 200m of a loaded street"), so
-        the dashed line on the map is the acceptance rule made visible.
+        the dashed line(s) on the map are the acceptance rule made visible.
 
         Chosen over a concave hull of the nodes after the hull clipped
         Red Hook: any global "how far in should the outline carve" knob
@@ -263,31 +238,35 @@ class GraphStore:
         the STRtree uses, so "200m" here is the same 200m the snap check
         measures. Costs ~2s of startup on Brooklyn-sized data.
 
-        Two accepted approximations, both slivers: simplify() can move
-        the drawn line up to ~22m either way (see COVERAGE_SIMPLIFY_DEG),
-        and interior holes in the footprint (a cemetery's unwalkable
-        core) are dropped — the frontend draws one ring, and a click in
+        Returns one ring per disjoint piece of the footprint — plural, not
+        a single ring picking "the biggest piece": load() now keeps every
+        real component (Governors Island, eventually Staten Island), and
+        each one deserves its own visible boundary rather than being
+        silently dropped from the map while still being fully routable.
+        /coverage serves these as a GeoJSON MultiPolygon.
+
+        Two accepted approximations, both slivers: simplify() can move a
+        ring up to ~22m either way (see COVERAGE_SIMPLIFY_DEG), and
+        interior holes in the footprint (a cemetery's unwalkable core) are
+        dropped — each piece is drawn as a single ring, and a click in
         such a pocket still gets the honest out-of-coverage rejection."""
         radius_deg = config.MAX_SNAP_DISTANCE_M / METERS_PER_DEGREE_LAT
         footprint = shapely.union_all(shapely.buffer(self._edge_lines_scaled, radius_deg, quad_segs=2))
         footprint = footprint.simplify(COVERAGE_SIMPLIFY_DEG)
-        if footprint.geom_type == "MultiPolygon":
-            # Post-prune data is one connected component, so its buffered
-            # footprint should be one polygon — but belt-and-braces for
-            # future multi-component coverage (see PLAN.md's Staten Island
-            # note): draw the biggest piece rather than crash.
-            footprint = max(footprint.geoms, key=lambda g: g.area)
-        # The frontend punches its map-dimming hole by reversing this ring,
-        # which assumes counterclockwise winding (the old rectangle's order)
-        # — orient() guarantees it regardless of what union_all produced.
-        footprint = orient(footprint)
-        return [[round(lon / self._lat_scale, 6), round(lat, 6)]
-                for lon, lat in footprint.exterior.coords]
+        pieces = list(footprint.geoms) if footprint.geom_type == "MultiPolygon" else [footprint]
+        # The frontend punches its map-dimming holes by reversing these
+        # rings, which assumes counterclockwise winding (the old
+        # rectangle's order) — orient() guarantees it regardless of what
+        # union_all produced.
+        return [
+            [[round(lon / self._lat_scale, 6), round(lat, 6)] for lon, lat in orient(piece).exterior.coords]
+            for piece in pieces
+        ]
 
-    def coverage_ring(self) -> list[list[float]]:
-        """The closed [lon, lat] ring /coverage serves — see
-        _compute_coverage_ring for shape and winding guarantees."""
-        return self._coverage_ring
+    def coverage_rings(self) -> list[list[list[float]]]:
+        """One closed [lon, lat] ring per disjoint coverage piece — see
+        _compute_coverage_rings for shape and winding guarantees."""
+        return self._coverage_rings
 
     def _edge_coords(self, edge: int) -> np.ndarray:
         """Edge `edge`'s [lon, lat] points — a zero-copy view into the
@@ -400,10 +379,10 @@ class GraphStore:
         larger, so this never newly rejects a point that used to pass.
 
         The bbox is padded by MAX_SNAP_DISTANCE_M to match the drawn
-        boundary: the coverage ring extends that far past the outermost
-        street (it IS the acceptance region drawn — see
-        _compute_coverage_ring), so a raw node-min/max box would wrongly
-        reject clicks just past the outermost street that the drawn line
+        boundary: each coverage ring extends that far past its outermost
+        street (they ARE the acceptance region drawn — see
+        _compute_coverage_rings), so a raw node-min/max box would wrongly
+        reject clicks just past the outermost street that a drawn ring
         includes and the snap check would accept.
         """
         pad_lat = config.MAX_SNAP_DISTANCE_M / METERS_PER_DEGREE_LAT
@@ -462,7 +441,15 @@ class GraphStore:
                 e_cost = e_dist_m / self._length[end.edge] * costs[end.edge]
                 # output="epath" → the path as a list of edge positions,
                 # which is what we need to sum attributes and stitch
-                # geometry.
+                # geometry. igraph's C layer warns here ("Couldn't reach
+                # some vertices") whenever s_node/e_node sit in different
+                # components -- an expected, common outcome now that
+                # load() keeps every component (mainland <-> Governors
+                # Island is exactly this), not a bug to surface in logs.
+                # Silenced once at module scope below, not per-call:
+                # warnings.catch_warnings() mutates global filter state
+                # and isn't thread-safe, and /route runs across
+                # Starlette's thread pool (see this function's docstring).
                 edge_path = self._graph.get_shortest_paths(
                     s_node, to=e_node, weights=costs, output="epath"
                 )[0]
@@ -481,7 +468,12 @@ class GraphStore:
                 best_plan = ("direct", direct_dist_m)
 
         if best_plan is None:
-            return None  # disconnected (shouldn't happen after retain_all=False)
+            # A legitimate outcome now, not a bug: load() keeps every
+            # component (see its own comment), so two points in genuinely
+            # disconnected parts of NYC -- mainland and Governors Island,
+            # eventually mainland and Staten Island -- hit this and get a
+            # clean "no route" here rather than an error.
+            return None
 
         segments: list[dict] = []  # consecutive same-street runs, for text directions
 
