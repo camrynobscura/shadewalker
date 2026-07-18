@@ -37,10 +37,10 @@ STREETS_DIR = config.RAW_DIR / "streets"
 # (v3: run_tile.py started passing a FETCH_BUFFER_M-padded bbox instead of
 # the tile's exact one; v4: retain_all=True -- see the comment at the
 # graph_from_bbox call; v5: un-excluded footway=crossing and added the
-# CYCLEWAY_FILTER union -- see both constants' comments) -- it's baked
-# into the cache filename, so old cached graphs are ignored rather than
-# silently reused.
-GRAPH_CACHE_VERSION = 5
+# CYCLEWAY_FILTER union; v6: added the FOOT_OVERRIDES_ACCESS_FILTER union
+# -- see each constant's comment) -- it's baked into the cache filename,
+# so old cached graphs are ignored rather than silently reused.
+GRAPH_CACHE_VERSION = 6
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -85,6 +85,31 @@ WALK_FILTER = (
 # foot=designated (explicitly shared-use) rather than broadening
 # WALK_FILTER's own list, so ordinary bike-only cycleways stay excluded.
 CYCLEWAY_FILTER = '["highway"="cycleway"]["foot"="designated"]'
+
+# A third query, also unioned into the main fetch: WALK_FILTER's
+# ["access"!~"private|no"] clause excludes any way tagged access=private
+# or access=no, but OSM's own tag hierarchy lets a more specific mode tag
+# override that default -- foot=designated or foot=yes on a way still
+# tagged access=no means "closed to general/vehicle access, but
+# pedestrians are specifically permitted," not "closed to everyone."
+# Confirmed real on Queensboro Bridge: its own pedestrian walkway is
+# split across several segments of the same physical path, some tagged
+# access=no + foot=designated, others with no access tag at all --
+# WALK_FILTER was dropping exactly the access=no segments, fragmenting
+# the path and cutting off both landings (see PLAN.md). Overpass QL
+# can't express "exclude access=private|no UNLESS foot overrides it" as
+# a single AND-chain of tag filters (each bracket is ANDed, and a
+# regex can only inspect one tag), so this mirrors CYCLEWAY_FILTER's
+# approach: a separate query for exactly the case WALK_FILTER's own
+# allowlist can't express, unioned into the result instead.
+FOOT_OVERRIDES_ACCESS_FILTER = (
+    '["highway"~"primary|primary_link|secondary|secondary_link|tertiary|tertiary_link'
+    '|unclassified|residential|living_street|pedestrian|footway|path|steps|service"]'
+    '["area"!~"yes"]'
+    '["foot"~"designated|yes"]'
+    '["access"~"private|no"]'
+    '["footway"!~"sidewalk"]'
+)
 
 # Point osmnx's internal HTTP cache into our data/ tree so everything the
 # pipeline ever downloads lives under one gitignored roof.
@@ -174,14 +199,15 @@ def _fetch_with_retry(bbox: Bbox, custom_filter: str, tile_id: str, label: str) 
 
 def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph | None:
     """Return the walkable street graph for the bbox, cached per tile --
-    the union of WALK_FILTER's main centerline query and CYCLEWAY_FILTER's
-    narrower foot=designated-cycleway query (see both constants' comments;
-    the latter is what a bridge landing modeled as a shared path needs).
+    the union of WALK_FILTER's main centerline query, CYCLEWAY_FILTER's
+    narrower foot=designated-cycleway query, and
+    FOOT_OVERRIDES_ACCESS_FILTER's access=no/private-but-foot-designated
+    query (see all three constants' comments).
 
     None means the bbox has no OSM ways matching WALK_FILTER at all -- real
-    for grid tiles that land mostly on open water (BROOKLYN_BBOX is a
-    rectangle, so it overreaches past the real coastline at its edges; see
-    PLAN.md), not a bug to retry.
+    for grid tiles that only clip a borough's real coastline at their
+    edge (a tile can intersect a borough's polygon by a sliver that's
+    still mostly open water; see PLAN.md), not a bug to retry.
     """
     graphml_path = STREETS_DIR / f"{tile_id}_v{GRAPH_CACHE_VERSION}.graphml"
 
@@ -195,11 +221,17 @@ def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph | None:
         print(f"  [streets] {tile_id}: no matching ways in this area (likely open water) -- skipping")
         return None
 
-    # A tile having no foot-designated cycleways is the common case, not
-    # an error -- most tiles have none, and that's fine: street_graph
+    # Neither extra query matching anything is the common case, not an
+    # error -- most tiles have neither, and that's fine: street_graph
     # alone is a complete, valid result.
     cycleway_graph = _fetch_with_retry(bbox, CYCLEWAY_FILTER, tile_id, "foot-designated cycleways")
     graph = nx.compose(street_graph, cycleway_graph) if cycleway_graph is not None else street_graph
+
+    access_override_graph = _fetch_with_retry(
+        bbox, FOOT_OVERRIDES_ACCESS_FILTER, tile_id, "foot-designated access=no/private ways"
+    )
+    if access_override_graph is not None:
+        graph = nx.compose(graph, access_override_graph)
 
     STREETS_DIR.mkdir(parents=True, exist_ok=True)
     ox.save_graphml(graph, graphml_path)

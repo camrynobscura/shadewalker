@@ -60,10 +60,10 @@ def test_tile_ids_for_polygon_matches_the_bbox_result_for_a_literal_rectangle():
     # A polygon shaped exactly like a rectangle should select exactly the
     # same tiles get_tile_ids_for_bbox() already does -- proves the extra
     # intersection filtering doesn't change behavior for the degenerate
-    # (already-shipped, Brooklyn-shaped) case.
-    brooklyn = config.BOROUGH_BBOXES["brooklyn"]
-    rect = box(brooklyn.lon_min, brooklyn.lat_min, brooklyn.lon_max, brooklyn.lat_max)
-    assert set(boundary.tile_ids_for_polygon(rect)) == set(config.get_tile_ids_for_bbox(brooklyn))
+    # (rectangular) case.
+    rect_bbox = config.Bbox(lat_min=40.570, lat_max=40.740, lon_min=-74.045, lon_max=-73.833)
+    rect = box(rect_bbox.lon_min, rect_bbox.lat_min, rect_bbox.lon_max, rect_bbox.lat_max)
+    assert set(boundary.tile_ids_for_polygon(rect)) == set(config.get_tile_ids_for_bbox(rect_bbox))
 
 
 def test_tile_ids_for_polygon_excludes_tiles_the_polygon_never_touches():

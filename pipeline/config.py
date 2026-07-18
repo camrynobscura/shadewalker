@@ -96,18 +96,6 @@ def buffered_bbox(bbox: Bbox, buffer_m: float) -> Bbox:
         lon_max=bbox.lon_max + lon_buffer_deg,
     )
 
-# Hand-picked rectangle, not Brooklyn's real (non-rectangular) shape --
-# chosen over a real borough-boundary polygon for now since the pipeline has
-# no geometric-filtering step today. Some overreach into water/neighboring
-# boroughs at the edges is expected and harmless: those grid tiles just fetch
-# whatever streets/trees actually exist there. Contains PILOT_BBOX (pinned by
-# a test in test_pipeline_config.py).
-BROOKLYN_BBOX = Bbox(lat_min=40.570, lat_max=40.740, lon_min=-74.045, lon_max=-73.833)
-
-# Boroughs with a defined tile-grid extent. One entry per borough as Stage 2
-# rolls out: Brooklyn -> Manhattan -> Queens -> Bronx -> Staten Island.
-BOROUGH_BBOXES = {"brooklyn": BROOKLYN_BBOX}
-
 # "r{row}c{col}" grid ids, e.g. "r12c07" -- row/column offsets from
 # CITY_BBOX's own lat_min/lon_min corner, in units of TILE_SIZE_LAT_DEG /
 # TILE_SIZE_LON_DEG.
@@ -152,17 +140,21 @@ def get_tile_bbox(tile_id: str) -> Bbox:
 def is_grid_tile_id(tile_id: str) -> bool:
     """Whether tile_id is 'pilot' or a citywide grid id like 'r12c07' --
     as opposed to a borough name like 'manhattan'. run_tile.py's main()
-    uses this to decide which of run()/run_borough() a CLI argument means,
-    now that not every borough has a config.BOROUGH_BBOXES entry to check
-    membership against (see pipeline/graph/boundary.py)."""
+    uses this to decide which of run()/run_borough() a CLI argument means --
+    every borough name resolves via its real boundary polygon (see
+    pipeline/graph/boundary.py), so there's no fixed set of borough names
+    to check membership against instead."""
     return tile_id == "pilot" or bool(_GRID_ID_PATTERN.fullmatch(tile_id))
 
 
 def get_tile_ids_for_bbox(bbox: Bbox) -> list[str]:
     """Every citywide-grid tile id whose box overlaps the given area.
 
-    Used to expand a borough's Bbox (e.g. BROOKLYN_BBOX) into the concrete
-    list of grid tiles run_tile.py needs to process to cover it.
+    Used as the cheap bounding-box candidate pass inside
+    pipeline/graph/boundary.py's tile_ids_for_polygon() -- every borough's
+    tile list is now resolved through a real boundary polygon, not a
+    hand-picked Bbox, so this function's own bbox-only result is no longer
+    used directly to cover a borough on its own.
     """
     # Tiles are half-open [start, start + size) -- a bbox edge that lands
     # exactly on a tile boundary belongs to the tile below it, not the one
@@ -175,6 +167,23 @@ def get_tile_ids_for_bbox(bbox: Bbox) -> list[str]:
     row_end = math.ceil(round((bbox.lat_max - CITY_BBOX.lat_min) / TILE_SIZE_LAT_DEG, 6)) - 1
     col_start = int((bbox.lon_min - CITY_BBOX.lon_min) // TILE_SIZE_LON_DEG)
     col_end = math.ceil(round((bbox.lon_max - CITY_BBOX.lon_min) / TILE_SIZE_LON_DEG, 6)) - 1
+
+    # Clamp to the grid's own valid range. A bbox that reaches past
+    # CITY_BBOX on any side (real for Queens: its real polygon dips
+    # ~20m south of CITY_BBOX.lat_min, at what's almost certainly open
+    # water off the Rockaways' tip -- discovered fetching real borough
+    # polygons rather than hand-picked bboxes) would otherwise produce a
+    # negative or out-of-range row/col that get_tile_bbox() rejects with
+    # a ValueError. Dropping the sliver outside CITY_BBOX is the same
+    # accepted tradeoff PILOT_BBOX/CITY_BBOX's own comments already make
+    # for hand-picked-rectangle overreach, just applied at the grid's
+    # edge instead of a borough's. NOT a safe fix if the clamped area is
+    # real land, not water -- see PLAN.md's Staten Island note.
+    max_row = math.ceil(round((CITY_BBOX.lat_max - CITY_BBOX.lat_min) / TILE_SIZE_LAT_DEG, 6)) - 1
+    max_col = math.ceil(round((CITY_BBOX.lon_max - CITY_BBOX.lon_min) / TILE_SIZE_LON_DEG, 6)) - 1
+    row_start, row_end = max(0, row_start), min(max_row, row_end)
+    col_start, col_end = max(0, col_start), min(max_col, col_end)
+
     return [
         f"r{row}c{col}"
         for row in range(row_start, row_end + 1)
