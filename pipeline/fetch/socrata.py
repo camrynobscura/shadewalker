@@ -8,12 +8,22 @@ to force a re-download).
 """
 
 import json
+import time
 
 import requests
 
 from pipeline import config
 
 CACHE_DIR = config.RAW_DIR / "socrata"
+
+# Real case (Queens, tile 145/154, after Brooklyn+Manhattan+144 Queens
+# tiles had already fetched cleanly): a single transient 503 from Socrata
+# killed the whole borough run, with 144 tiles' worth of progress sitting
+# safely cached on disk but the run itself dead. Mirrors streets.py's own
+# MAX_FETCH_RETRIES/FETCH_RETRY_BACKOFF_S -- same shape, applied to
+# Socrata's transient-failure pattern instead of Overpass's.
+MAX_FETCH_RETRIES = 3
+FETCH_RETRY_BACKOFF_S = 5
 
 
 def auth_headers() -> dict[str, str]:
@@ -26,6 +36,33 @@ def auth_headers() -> dict[str, str]:
     if config.SOCRATA_APP_TOKEN:
         return {"X-App-Token": config.SOCRATA_APP_TOKEN}
     return {}
+
+
+def _get_with_retry(url: str, params: dict, headers: dict) -> requests.Response:
+    """One page request, retrying on transient failures -- a 5xx status
+    or a network-level ConnectionError/Timeout, the same kind of one-off
+    server hiccup streets.py's own retry logic exists for. A 4xx status
+    (a malformed query, a rejected app token) means retrying would just
+    fail again identically, so those propagate immediately instead of
+    burning through the retry budget."""
+    for attempt in range(1, MAX_FETCH_RETRIES + 1):
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=120)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.HTTPError as exc:
+            if exc.response.status_code < 500:
+                raise
+            last_exc = exc  # Python 3 unbinds `exc` itself once this block ends
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            last_exc = exc
+
+        if attempt == MAX_FETCH_RETRIES:
+            raise last_exc
+        wait_s = FETCH_RETRY_BACKOFF_S * (2 ** (attempt - 1))
+        print(f"  [socrata] transient error ({last_exc}) on attempt "
+              f"{attempt}/{MAX_FETCH_RETRIES}, retrying in {wait_s}s...")
+        time.sleep(wait_s)
 
 
 def fetch_all_rows(
@@ -65,8 +102,7 @@ def fetch_all_rows(
             "$limit": config.SOCRATA_PAGE_SIZE,
             "$offset": offset,
         }
-        response = requests.get(url, params=params, headers=headers, timeout=120)
-        response.raise_for_status()  # turn HTTP errors (4xx/5xx) into exceptions
+        response = _get_with_retry(url, params, headers)
         page = response.json()
 
         rows.extend(page)

@@ -1,11 +1,15 @@
-"""Tests for pipeline/fetch/socrata.py's auth-header logic.
+"""Tests for pipeline/fetch/socrata.py's auth-header logic and
+_get_with_retry()'s transient-failure handling.
 
-No network calls here on purpose — fetch_all_rows() itself (pagination,
-caching, the live request) is deliberately out of pytest's scope (see
-PLAN.md); this only pins the one piece of that function's behavior a
-silent refactor could break without anyone noticing: whether the app
-token actually gets attached to outgoing requests.
+fetch_all_rows() itself (pagination, caching, the real live request) stays
+out of pytest's scope on purpose (see PLAN.md) -- no network calls here.
+_get_with_retry() earned mock-based coverage the same way streets.py's own
+retry logic did during Brooklyn: a real transient failure (a 503 from
+Socrata, mid-Queens-fetch, after 144/154 tiles had already fetched clean)
+found this code with no retry logic at all.
 """
+
+import requests
 
 from pipeline import config
 from pipeline.fetch import socrata
@@ -19,3 +23,63 @@ def test_auth_headers_includes_token_when_configured(monkeypatch):
 def test_auth_headers_empty_when_token_unset(monkeypatch):
     monkeypatch.setattr(config, "SOCRATA_APP_TOKEN", None)
     assert socrata.auth_headers() == {}
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            error = requests.exceptions.HTTPError(f"{self.status_code} error")
+            error.response = self
+            raise error
+
+
+def test_get_with_retry_succeeds_without_retrying_on_a_clean_response(monkeypatch):
+    monkeypatch.setattr(socrata.requests, "get", lambda *args, **kwargs: _FakeResponse(200))
+    response = socrata._get_with_retry("http://example.test", {}, {})
+    assert response.status_code == 200
+
+
+def test_get_with_retry_recovers_from_a_transient_503(monkeypatch):
+    # The real case: Socrata's own hiccup mid-Queens-fetch -- the second
+    # attempt succeeding is what should let a borough run survive a
+    # one-off blip instead of dying outright.
+    responses = iter([_FakeResponse(503), _FakeResponse(200)])
+    monkeypatch.setattr(socrata.requests, "get", lambda *args, **kwargs: next(responses))
+    monkeypatch.setattr(socrata.time, "sleep", lambda seconds: None)
+
+    response = socrata._get_with_retry("http://example.test", {}, {})
+    assert response.status_code == 200
+
+
+def test_get_with_retry_gives_up_after_max_retries_of_5xx(monkeypatch):
+    monkeypatch.setattr(socrata.requests, "get", lambda *args, **kwargs: _FakeResponse(503))
+    monkeypatch.setattr(socrata.time, "sleep", lambda seconds: None)
+
+    try:
+        socrata._get_with_retry("http://example.test", {}, {})
+        assert False, "expected HTTPError to propagate"
+    except requests.exceptions.HTTPError:
+        pass
+
+
+def test_get_with_retry_does_not_retry_a_4xx(monkeypatch):
+    # A malformed query or a rejected app token fails identically no
+    # matter how many times it's retried -- burning the retry budget on
+    # it would just delay the real error, not fix anything.
+    calls = []
+
+    def fake_get(*args, **kwargs):
+        calls.append(1)
+        return _FakeResponse(400)
+
+    monkeypatch.setattr(socrata.requests, "get", fake_get)
+
+    try:
+        socrata._get_with_retry("http://example.test", {}, {})
+        assert False, "expected HTTPError to propagate"
+    except requests.exceptions.HTTPError:
+        pass
+    assert len(calls) == 1
