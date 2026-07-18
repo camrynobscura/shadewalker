@@ -14,8 +14,9 @@ Design (the memory-conscious layout from the plan):
   non-numeric, only touched for the handful of edges on a returned route).
 - igraph (a C graph library with Python bindings) holds the topology and
   runs Dijkstra; a Shapely STRtree snaps clicked coordinates to the
-  nearest point on the nearest STREET (not the nearest intersection —
-  see snap_to_edge for why that distinction matters).
+  nearest point on the nearest reachable STREET (not the nearest
+  intersection, and not simply the nearest edge regardless of whether it
+  goes anywhere — see snap_pair for why both distinctions matter).
 
 Costs are NOT precomputed: each request's month + tree_weight produce a
 fresh cost array with two vectorized numpy lines — microseconds for the
@@ -23,6 +24,7 @@ whole graph — which keeps every slider value exact rather than quantized.
 """
 
 import gzip
+import hashlib
 import json
 import math
 import warnings
@@ -39,13 +41,16 @@ from shapely.strtree import STRtree
 from pipeline import config
 
 # igraph's C layer emits this RuntimeWarning from get_shortest_paths()
-# whenever the two endpoints sit in different components -- route() below
-# hits it on every request between two genuinely disconnected real places
-# (mainland <-> Governors Island, eventually Staten Island), which is a
-# normal, expected outcome now that GraphStore.load() keeps every
-# component, not a bug. Filtered once here, at module scope, rather than
-# per-call: warnings.catch_warnings() mutates global filter state and
-# isn't thread-safe, and /route runs across Starlette's thread pool.
+# whenever the two endpoints sit in different components. snap_pair()
+# (below) now keeps /route from ever calling route() with such a pair in
+# the first place -- two real, genuinely disconnected places (mainland
+# <-> Governors Island, eventually Staten Island) get a clean "no route"
+# from snap_pair() itself, cheaper than a Dijkstra call that walks the
+# whole component before giving up. route() still refuses the same case
+# on its own if ever called directly some other way, which is what would
+# still trip this warning -- filtered once here, at module scope, rather
+# than per-call: warnings.catch_warnings() mutates global filter state
+# and isn't thread-safe, and /route runs across Starlette's thread pool.
 warnings.filterwarnings("ignore", message="Couldn't reach some vertices", category=RuntimeWarning)
 
 
@@ -82,6 +87,47 @@ METERS_PER_DEGREE_LAT = 111_320.0
 # disagreement to a sliver nobody can click precisely enough to notice.
 COVERAGE_SIMPLIFY_DEG = 0.0002
 
+# Caches _compute_coverage_rings()'s output across server restarts --
+# measured at ~12s of a ~15s cold start at Brooklyn+Manhattan scale (a
+# shapely union_all over every edge's buffered geometry, which grows with
+# the graph), for output that only changes when the tiles themselves do.
+# Named with a leading dot so it reads as a derived artifact, not a tile;
+# living inside TILES_DIR (rather than a fixed path elsewhere) is
+# deliberate -- the cache automatically follows TILES_DIR wherever it
+# points, tests included, rather than every test that monkeypatches
+# TILES_DIR to a tmp_path silently reading/writing the real repo's cache
+# file instead of its own sandboxed one.
+COVERAGE_CACHE_FILENAME = ".coverage_cache.json"
+
+
+def _tiles_fingerprint(tile_paths: list) -> str:
+    """A cheap fingerprint of every loaded tile's identity (name, size,
+    mtime) — changes whenever a tile is added, removed, or re-exported,
+    which is exactly when the coverage cache (above) needs recomputing
+    rather than reused."""
+    parts = sorted(f"{p.name}:{p.stat().st_size}:{p.stat().st_mtime_ns}" for p in tile_paths)
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
+
+
+def _load_cached_coverage_rings(cache_path, fingerprint: str) -> list[list[list[float]]] | None:
+    """The on-disk coverage cache, if its fingerprint matches the tiles
+    being loaded right now — None on any mismatch, missing file, or
+    corrupt cache, all treated the same way (recompute), since this is
+    strictly a speed optimization with no correctness dependency on it."""
+    if not cache_path.exists():
+        return None
+    try:
+        cached = json.loads(cache_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    if cached.get("fingerprint") != fingerprint:
+        return None
+    return cached.get("rings")
+
+
+def _save_cached_coverage_rings(cache_path, fingerprint: str, rings: list[list[list[float]]]) -> None:
+    cache_path.write_text(json.dumps({"fingerprint": fingerprint, "rings": rings}))
+
 
 @dataclass(frozen=True)
 class SnapPoint:
@@ -89,9 +135,10 @@ class SnapPoint:
     closest position on the closest edge, plus the real-meters cost of
     reaching each of that edge's two real endpoints from there.
 
-    Tree-weight independent by construction — snap_to_edge() takes no
-    tree_weight, since finding the nearest street is pure geometry. Only
-    which endpoint route() ends up connecting through can vary by
+    Tree-weight independent by construction — snap_pair() takes no
+    tree_weight, since finding the nearest *reachable* street is pure
+    geometry plus connectivity, neither of which varies by tree_weight.
+    Only which endpoint route() ends up connecting through can vary by
     tree_weight; that's a routing decision, not a geometric one.
     """
 
@@ -117,6 +164,11 @@ class GraphStore:
 
         # Edge attribute arrays, all aligned by edge position.
         self._length = np.empty(0, dtype=np.float32)
+        # Which connected component each edge belongs to -- see
+        # snap_pair() for why this is tracked at all: every component is
+        # kept (below), including small disconnected fragments that
+        # shouldn't ever capture a click meant for the real street grid.
+        self._edge_component = np.empty(0, dtype=np.int32)
         self._tree_deciduous = np.empty(0, dtype=np.float32)
         self._tree_evergreen = np.empty(0, dtype=np.float32)
         self._tree_count = np.empty(0, dtype=np.int32)
@@ -141,6 +193,8 @@ class GraphStore:
                 f"No tiles in {config.TILES_DIR} — run the pipeline first "
                 "(uv run python -m pipeline.run_tile pilot)"
             )
+        coverage_fingerprint = _tiles_fingerprint(tile_paths)
+        coverage_cache_path = config.TILES_DIR / COVERAGE_CACHE_FILENAME
 
         node_lonlat: list[list[float]] = []
         edge_pairs: list[tuple[int, int]] = []  # (u_idx, v_idx) for igraph
@@ -173,29 +227,6 @@ class GraphStore:
                 names.append(edge["name"])
                 coords_per_edge.append(edge["coords"])
 
-        # No filtering here anymore -- every component is kept. This used to
-        # drop everything but the largest connected component, because
-        # rectangular borough bboxes deliberately overreached past the real
-        # coastline (see the old BROOKLYN_BBOX), sweeping in street
-        # fragments from across the water (Jersey City, a Lower Manhattan
-        # sliver, the Rockaways) with no real connection to the rest of the
-        # data. That's no longer possible: pipeline/graph/boundary.py's
-        # clip_to_nyc() now drops non-NYC territory at fetch time, before it
-        # ever reaches data/tiles/, so every component here is trusted as
-        # real NYC data -- including genuinely disconnected real places
-        # (Governors Island, ferry-only; eventually Staten Island, whose
-        # only bridges lead to NJ, not the rest of NYC). route()'s no-path
-        # case already returns a clean 422 for two points that legitimately
-        # can't connect (see the "disconnected" comment there), so a
-        # multi-component graph is a normal, supported state now, not an
-        # error condition -- see PLAN.md's borough-boundary polygon plan.
-        provisional = igraph.Graph(n=len(node_lonlat), edges=edge_pairs, directed=False)
-        components = provisional.connected_components(mode="weak")
-        if len(components) > 1:
-            sizes = sorted((len(component) for component in components), reverse=True)
-            print(f"[graph_store] {len(components)} disconnected components "
-                  f"(sizes, largest 5: {sizes[:5]})")
-
         self._names = names
         self._node_lonlat = np.array(node_lonlat)
         # The data's actual extent — whatever tiles happen to be loaded —
@@ -219,8 +250,42 @@ class GraphStore:
         )
 
         self._graph = igraph.Graph(n=len(node_lonlat), edges=edge_pairs, directed=False)
+
+        # No filtering here anymore -- every component is kept. This used to
+        # drop everything but the largest connected component, because
+        # rectangular borough bboxes deliberately overreached past the real
+        # coastline (see the old BROOKLYN_BBOX), sweeping in street
+        # fragments from across the water (Jersey City, a Lower Manhattan
+        # sliver, the Rockaways) with no real connection to the rest of the
+        # data. That's no longer possible: pipeline/graph/boundary.py's
+        # clip_to_nyc() now drops non-NYC territory at fetch time, before it
+        # ever reaches data/tiles/, so every component here is trusted as
+        # real NYC data -- including genuinely disconnected real places
+        # (Governors Island, ferry-only; eventually Staten Island, whose
+        # only bridges lead to NJ, not the rest of NYC) alongside plenty of
+        # genuinely disconnected junk (an orphaned pedestrian crossing, a
+        # plaza's interior path network -- see snap_pair() for why keeping
+        # these doesn't mean routing ever resolves onto one by mistake).
+        # snap_pair() below is what turns "two points that legitimately
+        # can't connect" into a clean 422, so a multi-component graph is a
+        # normal, supported state now, not an error condition -- see
+        # PLAN.md's borough-boundary polygon plan.
+        components = self._graph.connected_components(mode="weak")
+        membership = np.asarray(components.membership, dtype=np.int32)
+        self._edge_component = membership[[u for u, _ in edge_pairs]]
+        if len(components) > 1:
+            sizes = sorted((len(component) for component in components), reverse=True)
+            print(f"[graph_store] {len(components)} disconnected components "
+                  f"(sizes, largest 5: {sizes[:5]})")
+
         self._build_edge_index()
-        self._coverage_rings = self._compute_coverage_rings()
+
+        cached_rings = _load_cached_coverage_rings(coverage_cache_path, coverage_fingerprint)
+        if cached_rings is not None:
+            self._coverage_rings = cached_rings
+        else:
+            self._coverage_rings = self._compute_coverage_rings()
+            _save_cached_coverage_rings(coverage_cache_path, coverage_fingerprint, self._coverage_rings)
 
         print(f"[graph_store] {len(tile_paths)} tile(s): "
               f"{len(node_lonlat)} nodes, {len(edge_pairs)} edges loaded")
@@ -236,7 +301,10 @@ class GraphStore:
         shaves peninsulas, whereas a per-street footprint cannot exclude
         a routable place by construction. Built in the same scaled space
         the STRtree uses, so "200m" here is the same 200m the snap check
-        measures. Costs ~2s of startup on Brooklyn-sized data.
+        measures. Measured at ~12s at Brooklyn+Manhattan scale, growing
+        with the graph — load() only pays this on the first boot after a
+        real data change, caching the result otherwise (see load()'s use
+        of COVERAGE_CACHE_FILENAME).
 
         Returns one ring per disjoint piece of the footprint — plural, not
         a single ring picking "the biggest piece": load() now keeps every
@@ -275,7 +343,7 @@ class GraphStore:
         return self._coord_buf[self._coord_offsets[edge]:self._coord_offsets[edge + 1]]
 
     def _build_edge_index(self) -> None:
-        """Index edges for nearest-street snapping (see snap_to_edge).
+        """Index edges for nearest-street snapping (see snap_pair).
 
         One Shapely LineString per edge, in a cos(mean_lat)-scaled
         coordinate space — a degree of longitude is shorter than a degree
@@ -306,20 +374,90 @@ class GraphStore:
         idx, dist_deg = self._strtree.query_nearest(point, return_distance=True)
         return int(idx[0]), float(dist_deg[0]) * METERS_PER_DEGREE_LAT
 
-    def snap_to_edge(self, lat: float, lon: float) -> SnapPoint:
-        """Where a clicked/geocoded point resolves onto the street network:
-        the closest position on the closest edge.
+    def _nearby_components(self, lat: float, lon: float) -> dict[int, tuple[int, float]]:
+        """Every distinct connected component with an edge within
+        MAX_SNAP_DISTANCE_M of (lat, lon) — the same radius /coverage and
+        in_coverage() already treat as "close enough to be on the map,"
+        not a new tunable — mapped to that component's own nearest edge
+        and the real-meters distance to it.
 
-        Replaces the old nearest-NODE snap, which could only ever land on
-        an intersection — wrong whenever the real nearest thing is
-        mid-block. A real bug traced to exactly this: a click 5-34m from a
-        real named street was snapping 100+m away into a small plaza's
-        dense internal path network instead, because that plaza has far
-        more intersections-per-area than a normal block (nodes only every
-        ~200-300m), so it won the nearest-NODE comparison on density
-        alone, not on being the right answer.
+        A single click can have many components in range at once: a dense
+        plaza can put dozens of small disconnected path fragments within
+        200m of a real corner (measured up to 142 near a dense Manhattan
+        intersection). Returning all of them, rather than picking one
+        "nearest" overall, is what lets snap_pair() tell a genuinely
+        reachable street apart from a closer dead end.
         """
-        edge, _ = self._nearest_edge(lat, lon)
+        point = Point(lon * self._lat_scale, lat)
+        radius_deg = config.MAX_SNAP_DISTANCE_M / METERS_PER_DEGREE_LAT
+        candidates = self._strtree.query(point, predicate="dwithin", distance=radius_deg)
+        nearest_per_component: dict[int, tuple[int, float]] = {}
+        for edge in candidates:
+            edge = int(edge)
+            component = int(self._edge_component[edge])
+            dist_m = self._edge_lines_scaled[edge].distance(point) * METERS_PER_DEGREE_LAT
+            if component not in nearest_per_component or dist_m < nearest_per_component[component][1]:
+                nearest_per_component[component] = (edge, dist_m)
+        return nearest_per_component
+
+    def snap_pair(
+        self, from_lat: float, from_lon: float, to_lat: float, to_lon: float
+    ) -> tuple["SnapPoint", "SnapPoint"] | None:
+        """Snap a route request's two endpoints onto edges that can
+        actually reach each other.
+
+        Replaces snapping each point independently to its single nearest
+        edge, which ignored reachability entirely — a real bug: a click
+        at a real, named street corner (Union Square, a Brooklyn Bridge
+        landing) sometimes snapped onto a tiny disconnected fragment
+        instead (an orphaned pedestrian crossing, a plaza's interior path
+        network — see PLAN.md), because that fragment happened to sit a
+        few meters closer than the real, reachable street.
+
+        Considering every component within MAX_SNAP_DISTANCE_M of each
+        point and requiring one shared by both — rather than trying each
+        candidate with a real Dijkstra call — is what keeps this cheap
+        even where a click has dozens of components in range: it's a set
+        intersection over already-known component membership, not a
+        search. (An earlier design that tried routing through every
+        candidate pair was measured at ~48s for a single dense request —
+        this scales with "how many components are nearby," which this
+        design doesn't.)
+
+        None means no component reaches both points within
+        MAX_SNAP_DISTANCE_M — the same real "no route" case as mainland
+        <-> Governors Island, just recognized here instead of by a wasted
+        Dijkstra call that walks the whole component before giving up.
+        """
+        start_options = self._nearby_components(from_lat, from_lon)
+        end_options = self._nearby_components(to_lat, to_lon)
+        shared = start_options.keys() & end_options.keys()
+        if not shared:
+            return None
+
+        # Prefer whichever shared component sits closest to both points
+        # combined -- there's usually exactly one shared component (the
+        # main street grid), but a point near two real bridge landings
+        # could plausibly have more than one legitimate option.
+        best_component = min(shared, key=lambda c: start_options[c][1] + end_options[c][1])
+        start_edge, _ = start_options[best_component]
+        end_edge, _ = end_options[best_component]
+        return (
+            self._snap_point_for_edge(from_lat, from_lon, start_edge),
+            self._snap_point_for_edge(to_lat, to_lon, end_edge),
+        )
+
+    def _snap_point_for_edge(self, lat: float, lon: float, edge: int) -> SnapPoint:
+        """Where (lat, lon) projects onto a specific edge: the closest
+        position on it, plus the real-meters cost of reaching each of its
+        two real endpoints from there.
+
+        Split out from snap_pair (the only caller) so *which* edge to
+        snap onto (a reachability decision) and *where* on that edge (pure
+        geometry) are separate steps — this half replaces the old
+        nearest-NODE snap, which could only ever land on an intersection —
+        wrong whenever the real nearest thing is mid-block.
+        """
         line = self._edge_lines_scaled[edge]
         point = Point(lon * self._lat_scale, lat)
         frac = line.project(point) / line.length if line.length > 0 else 0.0
@@ -420,6 +558,16 @@ class GraphStore:
         mutating the one shared igraph.Graph per request would need
         locking that serializes every routing request.
 
+        The 2x2 combinations cost only 2 real Dijkstra runs, not 4:
+        get_shortest_paths(v, to=[...]) finds the cheapest path from one
+        source to every listed target in a single run (that's inherent to
+        how Dijkstra works, not a batching trick), so each start endpoint
+        covers both end endpoints at once. Worth it at citywide scale —
+        each run's fixed cost grows with the graph, measured around 13ms
+        on a 203k-node component (a straight-line distance thing, not a
+        constant), so halving the run count matters more here than it did
+        at pilot-tile scale.
+
         When start and end land on the same edge, also try cutting
         straight between them along it — otherwise two nearby clicks on
         the same block would be forced through a corner and back for no
@@ -432,27 +580,28 @@ class GraphStore:
 
         start_options = [(start.node_u, start.dist_to_u_m), (start.node_v, start.dist_to_v_m)]
         end_options = [(end.node_u, end.dist_to_u_m), (end.node_v, end.dist_to_v_m)]
+        end_nodes = [e_node for e_node, _ in end_options]
 
         best_cost: float | None = None
         best_plan: tuple | None = None
         for s_node, s_dist_m in start_options:
             s_cost = s_dist_m / self._length[start.edge] * costs[start.edge]
-            for e_node, e_dist_m in end_options:
+            # output="epath" → the path as a list of edge positions, which
+            # is what we need to sum attributes and stitch geometry. One
+            # call covers both end_nodes (see this function's docstring).
+            # igraph's C layer warns here ("Couldn't reach some vertices")
+            # whenever s_node and a given e_node sit in different
+            # components -- snap_pair() keeps the real /route flow from
+            # ever reaching this with such a pair, so in practice this is
+            # now only a defense-in-depth path (see the module-scope
+            # filter comment above for why it's silenced there rather
+            # than with a per-call warnings.catch_warnings(), which isn't
+            # thread-safe and /route runs across Starlette's thread pool).
+            edge_paths = self._graph.get_shortest_paths(
+                s_node, to=end_nodes, weights=costs, output="epath"
+            )
+            for (e_node, e_dist_m), edge_path in zip(end_options, edge_paths):
                 e_cost = e_dist_m / self._length[end.edge] * costs[end.edge]
-                # output="epath" → the path as a list of edge positions,
-                # which is what we need to sum attributes and stitch
-                # geometry. igraph's C layer warns here ("Couldn't reach
-                # some vertices") whenever s_node/e_node sit in different
-                # components -- an expected, common outcome now that
-                # load() keeps every component (mainland <-> Governors
-                # Island is exactly this), not a bug to surface in logs.
-                # Silenced once at module scope below, not per-call:
-                # warnings.catch_warnings() mutates global filter state
-                # and isn't thread-safe, and /route runs across
-                # Starlette's thread pool (see this function's docstring).
-                edge_path = self._graph.get_shortest_paths(
-                    s_node, to=e_node, weights=costs, output="epath"
-                )[0]
                 if not edge_path and s_node != e_node:
                     continue  # disconnected via this pair of endpoints
                 total_cost = s_cost + float(costs[edge_path].sum()) + e_cost

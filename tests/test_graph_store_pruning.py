@@ -46,6 +46,17 @@ MAIN_EDGES = [
 ]
 ISLAND_EDGES = [("i1", "i2", "Island Path", 165.0, 9)]
 
+# A tiny, unnamed, disconnected fragment sitting ~7m from m1 -- stands in
+# for a real orphaned pedestrian crossing or plaza-interior path (see
+# PLAN.md): not part of the street grid at all, but close enough to
+# occasionally win a naive "nearest edge, regardless of reachability"
+# comparison over the real street a few meters further out.
+JUNK_NODES = {
+    "j1": [-73.98995, 40.68005],
+    "j2": [-73.98985, 40.68005],
+}
+JUNK_EDGES = [("j1", "j2", "", 8.0, 0)]
+
 
 def _edge_record(u: str, v: str, name: str, length_m: float, tree_count: int, nodes: dict) -> dict:
     return {
@@ -142,24 +153,71 @@ def test_coverage_includes_both_components_as_separate_pieces(multi_component_st
 def test_routing_works_within_each_component(multi_component_store):
     lon_a, lat_a = MAIN_NODES["m1"]
     lon_b, lat_b = MAIN_NODES["m3"]
-    start = multi_component_store.snap_to_edge(lat_a, lon_a)
-    end = multi_component_store.snap_to_edge(lat_b, lon_b)
+    start, end = multi_component_store.snap_pair(lat_a, lon_a, lat_b, lon_b)
     result = multi_component_store.route(start, end, tree_weight=0, month=7)
     assert result is not None
     assert result["length_m"] > 0
 
 
-@pytest.mark.filterwarnings("ignore:Couldn't reach some vertices:RuntimeWarning")
-def test_routing_returns_none_between_disconnected_components(multi_component_store):
+def test_snap_pair_returns_none_between_disconnected_components(multi_component_store):
     # The other half of relaxed pruning's contract: two real, in-coverage
     # points that legitimately can't reach each other (mainland <-> a
-    # ferry-only island) must get a clean "no route," not an error. igraph
-    # warns here by design -- server/graph_store.py filters it at module
-    # scope for the real server, but pytest resets warning filters per
-    # test, so this specific expected warning gets its own marker instead.
+    # ferry-only island) must get a clean "no route" -- and without ever
+    # calling route()'s Dijkstra at all, since no shared component within
+    # snap range means the answer is already known.
     lon_a, lat_a = MAIN_NODES["m1"]
     lon_b, lat_b = ISLAND_NODES["i1"]
-    start = multi_component_store.snap_to_edge(lat_a, lon_a)
-    end = multi_component_store.snap_to_edge(lat_b, lon_b)
+    assert multi_component_store.snap_pair(lat_a, lon_a, lat_b, lon_b) is None
+
+
+@pytest.mark.filterwarnings("ignore:Couldn't reach some vertices:RuntimeWarning")
+def test_route_still_refuses_a_cross_component_pair_directly(multi_component_store):
+    # snap_pair() is what keeps the real /route flow from ever calling
+    # route() with mismatched points (see the test above) -- this pins
+    # that route() also refuses safely on its own, as a defense-in-depth
+    # safety net for any other caller. igraph warns here by design;
+    # pytest resets warning filters per test, so this expected warning
+    # gets its own marker instead of relying on graph_store.py's
+    # module-scope filter.
+    lon_a, lat_a = MAIN_NODES["m1"]
+    lon_b, lat_b = ISLAND_NODES["i1"]
+    edge_a, _ = multi_component_store._nearest_edge(lat_a, lon_a)
+    edge_b, _ = multi_component_store._nearest_edge(lat_b, lon_b)
+    start = multi_component_store._snap_point_for_edge(lat_a, lon_a, edge_a)
+    end = multi_component_store._snap_point_for_edge(lat_b, lon_b, edge_b)
     result = multi_component_store.route(start, end, tree_weight=0, month=7)
     assert result is None
+
+
+@pytest.fixture()
+def store_with_a_disconnected_fragment_near_a_real_street(tmp_path, monkeypatch) -> GraphStore:
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
+    _write_tile(tmp_path / "junk.json.gz", JUNK_NODES, JUNK_EDGES)
+    store = GraphStore()
+    store.load()
+    return store
+
+
+def test_snap_pair_ignores_a_disconnected_fragment_closer_than_the_real_street(
+    store_with_a_disconnected_fragment_near_a_real_street,
+):
+    # The real bug this fixture reproduces (Union Square, a Brooklyn
+    # Bridge landing -- see PLAN.md): a click right on the junk fragment
+    # (j1) is *closer* to it than to the real street (m1-m2, ~7m away).
+    # Naive nearest-edge snapping picked the fragment, which can't reach
+    # anywhere else -- routing to a distant real point (m3) failed even
+    # though a real, reachable street sits a few meters further out.
+    store = store_with_a_disconnected_fragment_near_a_real_street
+    lon_junk, lat_junk = JUNK_NODES["j1"]
+    lon_m3, lat_m3 = MAIN_NODES["m3"]
+
+    pair = store.snap_pair(lat_junk, lon_junk, lat_m3, lon_m3)
+    assert pair is not None
+    start, end = pair
+    # Landed on a real, named street -- not the unnamed junk fragment.
+    assert store._names[start.edge] != ""
+
+    result = store.route(start, end, tree_weight=0, month=7)
+    assert result is not None
+    assert result["length_m"] > 0
