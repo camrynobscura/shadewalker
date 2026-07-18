@@ -1,6 +1,8 @@
 """Tests for pipeline/config.py's tile-grid resolution (get_tile_bbox(),
 get_tile_ids_for_bbox())."""
 
+import math
+
 import pytest
 
 from pipeline import config
@@ -57,6 +59,43 @@ def test_get_tile_ids_for_bbox_spans_adjacent_tiles():
         lon_max=right.lon_max,
     )
     assert config.get_tile_ids_for_bbox(combined) == ["r5c5", "r5c6"]
+
+
+def test_get_tile_ids_for_bbox_clamps_a_sliver_south_of_city_bbox():
+    # Real case: Queens' real polygon dips ~20m south of CITY_BBOX.lat_min
+    # (almost certainly open water off the Rockaways' tip) -- a bbox
+    # reaching that far past the grid's own edge used to produce a
+    # negative row index ("r-1c9"), which get_tile_bbox() then rejected
+    # with a ValueError instead of get_tile_ids_for_bbox() ever returning.
+    sliver_past_edge = config.Bbox(
+        lat_min=config.CITY_BBOX.lat_min - 0.0002,
+        lat_max=config.CITY_BBOX.lat_min + config.TILE_SIZE_LAT_DEG,
+        lon_min=config.CITY_BBOX.lon_min,
+        lon_max=config.CITY_BBOX.lon_min + config.TILE_SIZE_LON_DEG,
+    )
+    assert config.get_tile_ids_for_bbox(sliver_past_edge) == ["r0c0"]
+
+
+def test_get_tile_ids_for_bbox_clamps_a_sliver_past_every_other_edge():
+    # Same clamp, exercised on the other three edges (north/east/west) --
+    # not hit by any real borough today, but the fix isn't direction-
+    # specific, so this pins that on purpose.
+    far_past_every_edge = config.Bbox(
+        lat_min=config.CITY_BBOX.lat_min,
+        lat_max=config.CITY_BBOX.lat_max + 1.0,
+        lon_min=config.CITY_BBOX.lon_min - 1.0,
+        lon_max=config.CITY_BBOX.lon_max + 1.0,
+    )
+    tile_ids = config.get_tile_ids_for_bbox(far_past_every_edge)
+    max_row = math.ceil(round(
+        (config.CITY_BBOX.lat_max - config.CITY_BBOX.lat_min) / config.TILE_SIZE_LAT_DEG, 6
+    )) - 1
+    max_col = math.ceil(round(
+        (config.CITY_BBOX.lon_max - config.CITY_BBOX.lon_min) / config.TILE_SIZE_LON_DEG, 6
+    )) - 1
+    assert f"r{max_row}c{max_col}" in tile_ids
+    assert f"r{max_row + 1}c0" not in tile_ids
+    assert f"r0c{max_col + 1}" not in tile_ids
 
 
 def test_buffered_bbox_expands_in_every_direction():

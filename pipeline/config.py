@@ -167,6 +167,23 @@ def get_tile_ids_for_bbox(bbox: Bbox) -> list[str]:
     row_end = math.ceil(round((bbox.lat_max - CITY_BBOX.lat_min) / TILE_SIZE_LAT_DEG, 6)) - 1
     col_start = int((bbox.lon_min - CITY_BBOX.lon_min) // TILE_SIZE_LON_DEG)
     col_end = math.ceil(round((bbox.lon_max - CITY_BBOX.lon_min) / TILE_SIZE_LON_DEG, 6)) - 1
+
+    # Clamp to the grid's own valid range. A bbox that reaches past
+    # CITY_BBOX on any side (real for Queens: its real polygon dips
+    # ~20m south of CITY_BBOX.lat_min, at what's almost certainly open
+    # water off the Rockaways' tip -- discovered fetching real borough
+    # polygons rather than hand-picked bboxes) would otherwise produce a
+    # negative or out-of-range row/col that get_tile_bbox() rejects with
+    # a ValueError. Dropping the sliver outside CITY_BBOX is the same
+    # accepted tradeoff PILOT_BBOX/CITY_BBOX's own comments already make
+    # for hand-picked-rectangle overreach, just applied at the grid's
+    # edge instead of a borough's. NOT a safe fix if the clamped area is
+    # real land, not water -- see PLAN.md's Staten Island note.
+    max_row = math.ceil(round((CITY_BBOX.lat_max - CITY_BBOX.lat_min) / TILE_SIZE_LAT_DEG, 6)) - 1
+    max_col = math.ceil(round((CITY_BBOX.lon_max - CITY_BBOX.lon_min) / TILE_SIZE_LON_DEG, 6)) - 1
+    row_start, row_end = max(0, row_start), min(max_row, row_end)
+    col_start, col_end = max(0, col_start), min(max_col, col_end)
+
     return [
         f"r{row}c{col}"
         for row in range(row_start, row_end + 1)
