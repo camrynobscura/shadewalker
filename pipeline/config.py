@@ -275,7 +275,12 @@ MAX_SNAP_DISTANCE_M = 200.0
 
 SOCRATA_BASE_URL = "https://data.cityofnewyork.us/resource"
 TREES_DATASET_ID = "hn5i-inap"      # Forestry Tree Points — the live NYC Tree Map data
-BOUNDARIES_DATASET_ID = "gthc-hcne" # Borough Boundaries — real borough polygons, water excluded
+BOUNDARIES_DATASET_ID = "wh2p-dxnf" # Borough Boundaries (water areas included) — see PLAN.md:
+                                     # a bridge's midspan sits over water, which the water-
+                                     # EXCLUDED sibling dataset (gthc-hcne) doesn't cover --
+                                     # that silently severed every inter-borough bridge crossing.
+                                     # This version's water jurisdiction still stops at the state
+                                     # line (verified: NJ side of the GWB, mid-Hudson excluded).
 SOCRATA_PAGE_SIZE = 50_000          # rows per request (underscores are just digit separators)
 
 # Optional — unset means anonymous requests (fine at pilot-tile scale, risks

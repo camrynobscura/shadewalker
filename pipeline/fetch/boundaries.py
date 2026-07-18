@@ -1,10 +1,19 @@
 """Fetch NYC's real borough-boundary polygons: the Borough Boundaries
-dataset (Socrata id in config.BOUNDARIES_DATASET_ID), one MultiPolygon
-feature per borough with water areas already excluded by the source. Used
-to keep foreign territory (Jersey City, Bayonne) out of the pipeline's
-data entirely -- replacing the hand-picked rectangles' overreach (see
-PLAN.md's Stage 2 section, "Borough-boundary polygon + pruning-rule
-change").
+(water areas included) dataset (Socrata id in config.BOUNDARIES_DATASET_ID),
+one MultiPolygon feature per borough. Used to keep foreign territory
+(Jersey City, Bayonne) out of the pipeline's data entirely -- replacing
+the hand-picked rectangles' overreach (see PLAN.md's Stage 2 section,
+"Borough-boundary polygon + pruning-rule change").
+
+Deliberately the water-INCLUDED sibling dataset, not the water-excluded
+one that shares the same schema: a bridge's midspan sits directly over
+water, and clip_to_nyc() (pipeline/graph/boundary.py) drops any node
+outside this polygon -- the water-excluded version silently severed
+every inter-borough bridge crossing, discovered when Brooklyn and
+Manhattan's mainlands loaded as two disconnected components. This
+version's jurisdiction still stops at the real state line (verified
+against the NJ side of the George Washington Bridge and mid-Hudson
+River), it just also covers NYC's own rivers between its boroughs.
 
 Only 5 rows, so unlike trees.py this needs no pagination: one direct
 GeoJSON export request, cached whole rather than through socrata.py's
@@ -18,7 +27,10 @@ import requests
 from pipeline import config
 from pipeline.fetch import socrata
 
-CACHE_PATH = config.RAW_DIR / "socrata" / "borough_boundaries.geojson"
+# Filename keyed to the dataset id so switching datasets (as just happened)
+# can't silently keep serving a stale cache from the old one -- exactly
+# the trap a fixed filename would have hit here.
+CACHE_PATH = config.RAW_DIR / "socrata" / f"borough_boundaries_{config.BOUNDARIES_DATASET_ID}.geojson"
 
 
 def fetch_borough_boundaries(refresh: bool = False) -> dict:
