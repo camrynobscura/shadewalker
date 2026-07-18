@@ -129,6 +129,38 @@ def _save_cached_coverage_rings(cache_path, fingerprint: str, rings: list[list[l
     cache_path.write_text(json.dumps({"fingerprint": fingerprint, "rings": rings}))
 
 
+# Manually verified real-world OSM node-id pairs that are the same
+# physical corner but got recorded as two different nodes -- a genuine
+# digitization gap in the source data, not a filter/tagging issue (see
+# PLAN.md's Rockaway/Cross Bay Bridge finding, 2026-07-18). Each entry is
+# a specific, individually-reviewed correction, never a general "connect
+# anything within N meters" rule: a citywide check for other close-but-
+# disconnected node pairs turned up 419 more within 30m, and every one
+# checked was an unnamed cemetery/park-style interior path network --
+# exactly the kind of deliberately-separate fragment snap_pair() already
+# protects from being reconnected to the street grid. Bridging those the
+# same way this pair is bridged would undo that protection, so this
+# stays a short, explicit list rather than an algorithm.
+KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
+    # Cross Bay Bridge's shared foot+bike path (its Rockaway-side
+    # landing) <-> East 21st Road, Broad Channel/Rockaway -- ~12m apart
+    # in OSM's own data, confirmed via a direct Overpass query: the same
+    # real corner, recorded as two different node ids.
+    ("608478726", "42938246", "Cross Bay Bridge"),
+]
+
+
+def _local_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Flat-earth distance between two nearby points -- fine at the
+    few-meters-to-tens-of-meters scale KNOWN_NODE_GAPS entries are at
+    (same approximation pipeline/config.py's buffered_bbox() already
+    uses for short local distances, just inverted)."""
+    mean_lat = (lat1 + lat2) / 2
+    dlat_m = (lat2 - lat1) * METERS_PER_DEGREE_LAT
+    dlon_m = (lon2 - lon1) * METERS_PER_DEGREE_LAT * math.cos(math.radians(mean_lat))
+    return math.hypot(dlat_m, dlon_m)
+
+
 @dataclass(frozen=True)
 class SnapPoint:
     """Where a clicked/geocoded point resolves onto the street network: the
@@ -226,6 +258,21 @@ class GraphStore:
                 counts.append(edge["tree_count"])
                 names.append(edge["name"])
                 coords_per_edge.append(edge["coords"])
+
+        for node_a, node_b, gap_name in KNOWN_NODE_GAPS:
+            if node_a not in self._id_to_idx or node_b not in self._id_to_idx:
+                continue  # not in this dataset (e.g. the pilot-only test tile) -- skip quietly
+            idx_a, idx_b = self._id_to_idx[node_a], self._id_to_idx[node_b]
+            lon_a, lat_a = node_lonlat[idx_a]
+            lon_b, lat_b = node_lonlat[idx_b]
+            edge_pairs.append((idx_a, idx_b))
+            length.append(_local_distance_m(lat_a, lon_a, lat_b, lon_b))
+            deciduous.append(0.0)
+            evergreen.append(0.0)
+            counts.append(0)
+            names.append(gap_name)
+            coords_per_edge.append([[lon_a, lat_a], [lon_b, lat_b]])
+            print(f"[graph_store] bridged known node gap: {node_a} <-> {node_b} ({gap_name})")
 
         self._names = names
         self._node_lonlat = np.array(node_lonlat)
