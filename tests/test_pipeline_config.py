@@ -1,5 +1,5 @@
 """Tests for pipeline/config.py's tile-grid resolution (get_tile_bbox(),
-get_tile_ids_for_bbox()) and the Brooklyn borough extent."""
+get_tile_ids_for_bbox())."""
 
 import pytest
 
@@ -100,12 +100,3 @@ def test_is_grid_tile_id_false_for_borough_names():
     assert not config.is_grid_tile_id("manhattan")
 
 
-def test_brooklyn_bbox_contains_the_pilot_tile():
-    # The pilot tile (Carroll Gardens + Gowanus) is real, known-good
-    # Brooklyn coverage -- if a future edit to BROOKLYN_BBOX shrinks it
-    # enough to exclude the pilot tile, that's a real regression.
-    brooklyn = config.BOROUGH_BBOXES["brooklyn"]
-    assert brooklyn.lat_min <= config.PILOT_BBOX.lat_min
-    assert brooklyn.lat_max >= config.PILOT_BBOX.lat_max
-    assert brooklyn.lon_min <= config.PILOT_BBOX.lon_min
-    assert brooklyn.lon_max >= config.PILOT_BBOX.lon_max

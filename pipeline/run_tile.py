@@ -86,22 +86,17 @@ def run(tile_id: str, refresh_trees: bool = False) -> None:
 def run_borough(borough: str, refresh_trees: bool = False) -> None:
     """Run every grid tile covering a borough, one at a time.
 
-    Boroughs with a hand-picked rectangle in config.BOROUGH_BBOXES
-    (currently just Brooklyn, from before the real borough-polygon
-    dataset was wired in) use that directly. Every other real borough
-    name falls through to the real NYC Open Data borough-boundary
-    polygon instead (pipeline/graph/boundary.py) -- a rectangle badly
-    overreaches a narrow, non-rectangular shape like Manhattan, sweeping
-    in tiles that are mostly NJ/Queens and would just be fetched and
-    thrown away. An unrecognized borough name surfaces as a ValueError
+    Every borough resolves through the real NYC Open Data borough-boundary
+    polygon (pipeline/graph/boundary.py), not a hand-picked rectangle --
+    Brooklyn used a rectangle (config.BOROUGH_BBOXES) until this leaked
+    real Queens/Staten Island territory into what was supposed to be
+    Brooklyn-only data (a rectangle can't hug a non-rectangular coastline;
+    see PLAN.md). An unrecognized borough name surfaces as a ValueError
     from boundary.borough_polygon() rather than a silent empty tile list.
     """
-    if borough in config.BOROUGH_BBOXES:
-        tile_ids = config.get_tile_ids_for_bbox(config.BOROUGH_BBOXES[borough])
-    else:
-        geojson = boundaries.fetch_borough_boundaries()
-        polygon = boundary.borough_polygon(geojson, borough)
-        tile_ids = boundary.tile_ids_for_polygon(polygon)
+    geojson = boundaries.fetch_borough_boundaries()
+    polygon = boundary.borough_polygon(geojson, borough)
+    tile_ids = boundary.tile_ids_for_polygon(polygon)
 
     print(f"[{borough}] {len(tile_ids)} tiles to process: {', '.join(tile_ids)}")
     for i, tile_id in enumerate(tile_ids, start=1):

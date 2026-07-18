@@ -179,9 +179,9 @@ def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph | None:
     the latter is what a bridge landing modeled as a shared path needs).
 
     None means the bbox has no OSM ways matching WALK_FILTER at all -- real
-    for grid tiles that land mostly on open water (BROOKLYN_BBOX is a
-    rectangle, so it overreaches past the real coastline at its edges; see
-    PLAN.md), not a bug to retry.
+    for grid tiles that only clip a borough's real coastline at their
+    edge (a tile can intersect a borough's polygon by a sliver that's
+    still mostly open water; see PLAN.md), not a bug to retry.
     """
     graphml_path = STREETS_DIR / f"{tile_id}_v{GRAPH_CACHE_VERSION}.graphml"
 

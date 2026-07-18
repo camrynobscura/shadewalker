@@ -1,7 +1,7 @@
 """Tests for pipeline/fetch/streets.py's handling of the two ways osmnx can
 fail to hand back a usable graph: "no data here" (real for grid tiles that
-land mostly on open water -- see BROOKLYN_BBOX's rectangular overreach past
-the real coastline) and transient connection failures (real: three separate
+only clip a borough's real coastline at their edge, still mostly open
+water) and transient connection failures (real: three separate
 ConnectionRefusedErrors during the Brooklyn run, each recovering within
 seconds). The two need opposite handling -- the first means skip this tile
 for good, the second means the same request would likely work if asked

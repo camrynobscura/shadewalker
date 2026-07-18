@@ -35,7 +35,7 @@ def borough_polygon(geojson: dict, borough: str) -> BaseGeometry:
     """One borough's own real polygon (not unioned with the others) --
     matched case-insensitively against the dataset's `boroname` (e.g.
     "manhattan" matches "Manhattan"), so it takes the same lowercase
-    borough names config.BOROUGH_BBOXES's keys already use."""
+    borough names run_tile.py's CLI argument already uses."""
     for feature in geojson["features"]:
         if feature["properties"]["boroname"].lower() == borough.lower():
             return shape(feature["geometry"])
