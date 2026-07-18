@@ -108,8 +108,10 @@ def route(
             detail="End point is outside our current coverage area — pick a point inside the dashed boundary shown on the map.",
         )
 
-    start = store.snap_to_edge(from_lat, from_lon)
-    end = store.snap_to_edge(to_lat, to_lon)
+    pair = store.snap_pair(from_lat, from_lon, to_lat, to_lon)
+    if pair is None:
+        raise HTTPException(status_code=422, detail="No path between these points")
+    start, end = pair
 
     routes = []
     for tree_weight in tree_weights:

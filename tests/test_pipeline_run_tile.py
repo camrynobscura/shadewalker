@@ -64,3 +64,29 @@ def test_run_fetches_with_a_bbox_padded_past_the_tiles_edges(monkeypatch):
     # just past a tile's true edge still shades edges inside it, and the
     # exported tile spans the whole padded area.
     assert received["trees"] == fetched
+
+
+def test_run_removes_a_stale_export_when_boundary_clipping_empties_the_tile(monkeypatch, tmp_path):
+    # A tile that had real data on a previous run (old rectangle-overreach
+    # pipeline, before clip_to_nyc existed) can legitimately clip down to
+    # zero nodes on a later run -- entirely foreign territory. Without
+    # cleanup, GraphStore.load() would keep merging in that stale export
+    # forever, since it merges every *.json.gz file it finds regardless of
+    # age. Real case that surfaced this: r9c8/r12c8/r13c8/r13c9 during the
+    # Brooklyn re-run after the water-included boundary dataset landed.
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    stale_path = tmp_path / "r9c8.json.gz"
+    stale_path.write_bytes(b"stale export from before boundary clipping existed")
+
+    graph = nx.MultiDiGraph()
+    graph.add_node(1, x=0.0, y=0.0)
+    monkeypatch.setattr(run_tile.streets, "fetch_streets", lambda bbox, tile_id: graph)
+    monkeypatch.setattr(run_tile.boundaries, "fetch_borough_boundaries", lambda: {})
+    monkeypatch.setattr(run_tile.boundary, "nyc_boundary", lambda geojson: None)
+    # Empties the tile entirely -- the exact condition that used to leave
+    # a stale export behind.
+    monkeypatch.setattr(run_tile.boundary, "clip_to_nyc", lambda graph, nyc_shape: nx.MultiDiGraph())
+
+    run_tile.run("r9c8")
+
+    assert not stale_path.exists()

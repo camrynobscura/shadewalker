@@ -90,8 +90,7 @@ def test_no_duplicate_consecutive_points_in_route_geometry(graph_store):
     stitching: a wrongly-assumed edge-geometry direction produced a
     there-and-back spike, which shows up as an exact duplicate point."""
     for tree_weight in (0, 5, 15, 40):
-        start = graph_store.snap_to_edge(FROM["lat"], FROM["lon"])
-        end = graph_store.snap_to_edge(TO["lat"], TO["lon"])
+        start, end = graph_store.snap_pair(FROM["lat"], FROM["lon"], TO["lat"], TO["lon"])
         result = graph_store.route(start, end, tree_weight=tree_weight, month=7)
         assert result is not None
         assert not _has_duplicate_consecutive_points(result["coords"])
@@ -131,7 +130,8 @@ def test_snapping_onto_a_real_intersection_is_essentially_exact(graph_store):
     to (almost) that same point -- confirms the projection math doesn't
     introduce meaningful drift for the simplest possible case."""
     lat, lon = _a_real_node_coordinate()
-    snap = graph_store.snap_to_edge(lat, lon)
+    edge, _ = graph_store._nearest_edge(lat, lon)
+    snap = graph_store._snap_point_for_edge(lat, lon, edge)
     assert abs(snap.point[0] - lon) < 1e-6
     assert abs(snap.point[1] - lat) < 1e-6
 
@@ -166,8 +166,7 @@ def test_two_points_on_the_same_block_route_directly_not_via_a_corner(graph_stor
     lon_a, lat_a = coords[len(coords) // 4]
     lon_b, lat_b = coords[3 * len(coords) // 4]
 
-    start = graph_store.snap_to_edge(lat_a, lon_a)
-    end = graph_store.snap_to_edge(lat_b, lon_b)
+    start, end = graph_store.snap_pair(lat_a, lon_a, lat_b, lon_b)
     assert start.edge == end.edge  # sanity check on the test's own setup
 
     result = graph_store.route(start, end, tree_weight=0, month=7)
@@ -304,8 +303,7 @@ def test_a_self_loop_edge_routes_without_error(graph_store):
     lon_a, lat_a = coords[len(coords) // 4]
     lon_b, lat_b = coords[3 * len(coords) // 4]
 
-    start = graph_store.snap_to_edge(lat_a, lon_a)
-    end = graph_store.snap_to_edge(lat_b, lon_b)
+    start, end = graph_store.snap_pair(lat_a, lon_a, lat_b, lon_b)
     assert start.edge == edge  # sanity check on the test's own setup
     assert end.edge == edge
 

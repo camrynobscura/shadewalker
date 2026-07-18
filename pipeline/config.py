@@ -18,7 +18,19 @@ from typing import NamedTuple
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"          # pathlib overloads "/" to join paths
 RAW_DIR = DATA_DIR / "raw"             # cached API downloads (never re-fetched)
-TILES_DIR = DATA_DIR / "tiles"         # pipeline output: one graph chunk per tile
+
+# Overridable via SHADEWALKER_TILES_DIR -- e2e tests (web/playwright.config.ts)
+# boot a real server against a real filesystem path, with no equivalent of
+# pytest's fixture-level isolation (tests/conftest.py) available. Without
+# this, an e2e run on a machine that's also done real borough work (this
+# directory holding real Brooklyn/Manhattan tiles alongside the pilot one)
+# silently tests against city-scale data instead of the small,
+# deterministic tile its specs are written against -- a real case: a point
+# picked to be outside the pilot tile's coverage became a real, valid
+# Manhattan location once Manhattan's tiles existed, and the "rejected as
+# out of coverage" test started failing for a reason with nothing to do
+# with the code under test.
+TILES_DIR = Path(os.environ.get("SHADEWALKER_TILES_DIR", DATA_DIR / "tiles"))
 
 
 # ── Geography ─────────────────────────────────────────────────────────────────
@@ -275,7 +287,12 @@ MAX_SNAP_DISTANCE_M = 200.0
 
 SOCRATA_BASE_URL = "https://data.cityofnewyork.us/resource"
 TREES_DATASET_ID = "hn5i-inap"      # Forestry Tree Points — the live NYC Tree Map data
-BOUNDARIES_DATASET_ID = "gthc-hcne" # Borough Boundaries — real borough polygons, water excluded
+BOUNDARIES_DATASET_ID = "wh2p-dxnf" # Borough Boundaries (water areas included) — see PLAN.md:
+                                     # a bridge's midspan sits over water, which the water-
+                                     # EXCLUDED sibling dataset (gthc-hcne) doesn't cover --
+                                     # that silently severed every inter-borough bridge crossing.
+                                     # This version's water jurisdiction still stops at the state
+                                     # line (verified: NJ side of the GWB, mid-Hudson excluded).
 SOCRATA_PAGE_SIZE = 50_000          # rows per request (underscores are just digit separators)
 
 # Optional — unset means anonymous requests (fine at pilot-tile scale, risks

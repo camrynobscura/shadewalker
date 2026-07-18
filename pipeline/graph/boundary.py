@@ -22,8 +22,10 @@ from pipeline import config
 
 
 def nyc_boundary(geojson: dict) -> BaseGeometry:
-    """The union of every borough's real polygon (water areas already
-    excluded by the source dataset). Pure function over the raw GeoJSON
+    """The union of every borough's real polygon, including NYC's own
+    water jurisdiction (a bridge's midspan needs to count as in-bounds --
+    see pipeline/fetch/boundaries.py for why the water-included dataset
+    is the right one here). Pure function over the raw GeoJSON
     FeatureCollection -- see pipeline/fetch/boundaries.py for the fetch."""
     borough_shapes = [shape(feature["geometry"]) for feature in geojson["features"]]
     return shapely.union_all(borough_shapes)

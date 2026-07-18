@@ -20,6 +20,25 @@ from pipeline.graph import boundary, centerline
 from pipeline.scoring import trees as tree_scoring
 
 
+def _remove_stale_export(tile_id: str) -> None:
+    """Delete tile_id's exported file, if one exists from a previous run.
+
+    A tile that used to have real data can legitimately go empty on a
+    later run -- most concretely, a tile that was 100% foreign territory
+    still exported under the old rectangle-overreach pipeline (before
+    clip_to_nyc existed) now correctly clips down to zero nodes. Without
+    this, its old export would sit in data/tiles/ forever: GraphStore's
+    load() merges every *.json.gz file it finds there regardless of when
+    it was written, so a stale export keeps re-polluting every future
+    load with exactly the foreign-territory garbage this whole body of
+    work exists to remove.
+    """
+    stale_path = config.TILES_DIR / f"{tile_id}.json.gz"
+    if stale_path.exists():
+        stale_path.unlink()
+        print(f"[{tile_id}] removed stale export from a previous run")
+
+
 def run(tile_id: str, refresh_trees: bool = False) -> None:
     bbox = config.get_tile_bbox(tile_id)
     print(f"[{tile_id}] lat {bbox.lat_min}–{bbox.lat_max}, lon {bbox.lon_min}–{bbox.lon_max}")
@@ -39,6 +58,7 @@ def run(tile_id: str, refresh_trees: bool = False) -> None:
     street_graph = streets.fetch_streets(fetch_bbox, tile_id)
     if street_graph is None:
         print(f"[{tile_id}] skipped -- no walkable streets in this area")
+        _remove_stale_export(tile_id)
         return
 
     # Drop anything fetch_bbox's overreach swept in from outside NYC
@@ -50,6 +70,7 @@ def run(tile_id: str, refresh_trees: bool = False) -> None:
     street_graph = boundary.clip_to_nyc(street_graph, nyc_shape)
     if street_graph.number_of_nodes() == 0:
         print(f"[{tile_id}] skipped -- no nodes remain inside NYC after boundary clipping")
+        _remove_stale_export(tile_id)
         return
 
     tree_rows = trees.fetch_trees(fetch_bbox, tile_id, refresh=refresh_trees)

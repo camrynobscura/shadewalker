@@ -5,7 +5,11 @@ the real coastline) and transient connection failures (real: three separate
 ConnectionRefusedErrors during the Brooklyn run, each recovering within
 seconds). The two need opposite handling -- the first means skip this tile
 for good, the second means the same request would likely work if asked
-again shortly -- so each gets its own tests here."""
+again shortly -- so each gets its own tests here. Also covers the
+CYCLEWAY_FILTER union (fetch_streets now makes two real Overpass queries,
+not one -- see its own module for why)."""
+
+import re
 
 import networkx as nx
 import pytest
@@ -25,11 +29,26 @@ def _mock_fetch(monkeypatch, tmp_path, graph_from_bbox):
     monkeypatch.setattr(streets.ox, "save_graphml", lambda graph, path: None)
 
 
+def _by_filter(main_fn, cycleway_fn=None):
+    """Dispatch a graph_from_bbox mock by which of the two real queries
+    fetch_streets makes -- WALK_FILTER (main) or CYCLEWAY_FILTER (the
+    shared-path union). Defaults the cycleway query to "no cycleways
+    here" (ValueError, the common real case) unless a test supplies its
+    own cycleway_fn."""
+    def dispatch(**kwargs):
+        if kwargs.get("custom_filter") == streets.CYCLEWAY_FILTER:
+            if cycleway_fn is not None:
+                return cycleway_fn(**kwargs)
+            raise ValueError("no foot-designated cycleways here")
+        return main_fn(**kwargs)
+    return dispatch
+
+
 def test_fetch_streets_returns_none_when_overpass_returns_no_data(monkeypatch, tmp_path):
     def raise_it(**kwargs):
         raise InsufficientResponseError("No data elements in server response.")
 
-    _mock_fetch(monkeypatch, tmp_path, raise_it)
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(raise_it))
     assert streets.fetch_streets(BBOX, "test-water-tile") is None
 
 
@@ -37,7 +56,7 @@ def test_fetch_streets_returns_none_when_no_nodes_survive_polygon_clipping(monke
     def raise_it(**kwargs):
         raise ValueError("Found no graph nodes within the requested polygon.")
 
-    _mock_fetch(monkeypatch, tmp_path, raise_it)
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(raise_it))
     assert streets.fetch_streets(BBOX, "test-water-tile") is None
 
 
@@ -51,7 +70,7 @@ def test_fetch_streets_retries_on_connection_error_then_succeeds(monkeypatch, tm
             raise requests.exceptions.ConnectionError("connection refused")
         return fake_graph
 
-    _mock_fetch(monkeypatch, tmp_path, flaky)
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(flaky))
     assert streets.fetch_streets(BBOX, "test-flaky-tile") is fake_graph
     assert calls["count"] == streets.MAX_FETCH_RETRIES
 
@@ -60,7 +79,7 @@ def test_fetch_streets_raises_after_exhausting_retries(monkeypatch, tmp_path):
     def always_fails(**kwargs):
         raise requests.exceptions.ConnectionError("connection refused")
 
-    _mock_fetch(monkeypatch, tmp_path, always_fails)
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(always_fails))
     with pytest.raises(requests.exceptions.ConnectionError):
         streets.fetch_streets(BBOX, "test-persistent-failure-tile")
 
@@ -83,8 +102,67 @@ def test_fetch_streets_asks_osmnx_for_all_components_with_the_walk_filter(monkey
         seen.update(kwargs)
         return nx.MultiDiGraph()
 
-    _mock_fetch(monkeypatch, tmp_path, record_kwargs)
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(record_kwargs))
     streets.fetch_streets(BBOX, "test-fetch-kwargs-tile")
 
     assert seen.get("retain_all") is True
     assert seen.get("custom_filter") == streets.WALK_FILTER
+
+
+def test_fetch_streets_unions_in_foot_designated_cycleways(monkeypatch, tmp_path):
+    # Some NYC bridges (confirmed real: Brooklyn Bridge's Brooklyn-side
+    # landing) model their pedestrian path as a shared foot+bike cycleway
+    # rather than a footway -- WALK_FILTER's highway allowlist doesn't
+    # include cycleway at all, so without this union the landing would be
+    # missing from the fetched data entirely, same as it was before this
+    # fix (see PLAN.md).
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=0.0, y=0.0)
+
+    cycleway_graph = nx.MultiDiGraph()
+    cycleway_graph.add_node("c1", x=1.0, y=1.0)
+
+    def cycleway_fn(**kwargs):
+        assert kwargs.get("custom_filter") == streets.CYCLEWAY_FILTER
+        return cycleway_graph
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph, cycleway_fn))
+    result = streets.fetch_streets(BBOX, "test-cycleway-union-tile")
+
+    assert "m1" in result.nodes
+    assert "c1" in result.nodes
+
+
+def test_fetch_streets_works_with_no_cycleways_in_the_area(monkeypatch, tmp_path):
+    # The common case: most tiles have zero foot=designated cycleways --
+    # that must not be treated as an error, or block the main result.
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=0.0, y=0.0)
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    result = streets.fetch_streets(BBOX, "test-no-cycleway-tile")
+
+    assert list(result.nodes) == ["m1"]
+
+
+def test_walk_filter_excludes_sidewalk_but_not_crossing():
+    # A marked pedestrian crossing bridges a real gap -- e.g. connecting a
+    # bridge's own footway to the street grid at its landing (confirmed
+    # real on all 3 Manhattan<->Brooklyn bridges checked; see PLAN.md) --
+    # rather than duplicating a street's own centerline the way a
+    # parallel sidewalk does. The two used to be excluded together;
+    # that silently disconnected every such landing. This pins the
+    # distinction so a future "cleanup" can't quietly reintroduce it.
+    footway_clause = re.search(r'\["footway"!~"([^"]+)"\]', streets.WALK_FILTER)
+    assert footway_clause is not None
+    excluded = footway_clause.group(1).split("|")
+    assert "sidewalk" in excluded
+    assert "crossing" not in excluded
+
+
+def test_cycleway_filter_requires_foot_designated():
+    # Scoped tightly on purpose: broadening this to admit every cycleway
+    # (not just explicitly shared-use ones) would start routing
+    # pedestrians down ordinary bike-only lanes.
+    assert '"highway"="cycleway"' in streets.CYCLEWAY_FILTER
+    assert '"foot"="designated"' in streets.CYCLEWAY_FILTER
