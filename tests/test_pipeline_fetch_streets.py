@@ -6,8 +6,9 @@ ConnectionRefusedErrors during the Brooklyn run, each recovering within
 seconds). The two need opposite handling -- the first means skip this tile
 for good, the second means the same request would likely work if asked
 again shortly -- so each gets its own tests here. Also covers the
-CYCLEWAY_FILTER union (fetch_streets now makes two real Overpass queries,
-not one -- see its own module for why)."""
+CYCLEWAY_FILTER and FOOT_OVERRIDES_ACCESS_FILTER unions (fetch_streets
+now makes three real Overpass queries, not one -- see the module for
+why)."""
 
 import re
 
@@ -29,17 +30,22 @@ def _mock_fetch(monkeypatch, tmp_path, graph_from_bbox):
     monkeypatch.setattr(streets.ox, "save_graphml", lambda graph, path: None)
 
 
-def _by_filter(main_fn, cycleway_fn=None):
-    """Dispatch a graph_from_bbox mock by which of the two real queries
-    fetch_streets makes -- WALK_FILTER (main) or CYCLEWAY_FILTER (the
-    shared-path union). Defaults the cycleway query to "no cycleways
-    here" (ValueError, the common real case) unless a test supplies its
-    own cycleway_fn."""
+def _by_filter(main_fn, cycleway_fn=None, access_override_fn=None):
+    """Dispatch a graph_from_bbox mock by which of the three real queries
+    fetch_streets makes -- WALK_FILTER (main), CYCLEWAY_FILTER (the
+    shared-path union), or FOOT_OVERRIDES_ACCESS_FILTER (the
+    foot-designated-despite-access=no/private union). Defaults the two
+    narrower queries to "nothing here" (ValueError, the common real
+    case) unless a test supplies its own function for one."""
     def dispatch(**kwargs):
         if kwargs.get("custom_filter") == streets.CYCLEWAY_FILTER:
             if cycleway_fn is not None:
                 return cycleway_fn(**kwargs)
             raise ValueError("no foot-designated cycleways here")
+        if kwargs.get("custom_filter") == streets.FOOT_OVERRIDES_ACCESS_FILTER:
+            if access_override_fn is not None:
+                return access_override_fn(**kwargs)
+            raise ValueError("no foot-designated access=no/private ways here")
         return main_fn(**kwargs)
     return dispatch
 
@@ -145,6 +151,46 @@ def test_fetch_streets_works_with_no_cycleways_in_the_area(monkeypatch, tmp_path
     assert list(result.nodes) == ["m1"]
 
 
+def test_fetch_streets_unions_in_foot_designated_access_override_ways(monkeypatch, tmp_path):
+    # Confirmed real on Queensboro Bridge: its own pedestrian walkway is
+    # split across several segments of the same physical path, some
+    # tagged access=no + foot=designated, others with no access tag at
+    # all -- WALK_FILTER's own access clause drops exactly the access=no
+    # segments (see PLAN.md). Without this union those segments would be
+    # missing from the fetched data entirely, fragmenting the path.
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=0.0, y=0.0)
+
+    override_graph = nx.MultiDiGraph()
+    override_graph.add_node("a1", x=2.0, y=2.0)
+
+    def access_override_fn(**kwargs):
+        assert kwargs.get("custom_filter") == streets.FOOT_OVERRIDES_ACCESS_FILTER
+        return override_graph
+
+    _mock_fetch(
+        monkeypatch, tmp_path,
+        _by_filter(lambda **kwargs: main_graph, access_override_fn=access_override_fn),
+    )
+    result = streets.fetch_streets(BBOX, "test-access-override-union-tile")
+
+    assert "m1" in result.nodes
+    assert "a1" in result.nodes
+
+
+def test_fetch_streets_works_with_no_access_override_ways_in_the_area(monkeypatch, tmp_path):
+    # The common case: most tiles have zero access=no/private-but-
+    # foot-designated ways -- that must not be treated as an error, or
+    # block the main result.
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=0.0, y=0.0)
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    result = streets.fetch_streets(BBOX, "test-no-access-override-tile")
+
+    assert list(result.nodes) == ["m1"]
+
+
 def test_walk_filter_excludes_sidewalk_but_not_crossing():
     # A marked pedestrian crossing bridges a real gap -- e.g. connecting a
     # bridge's own footway to the street grid at its landing (confirmed
@@ -166,3 +212,13 @@ def test_cycleway_filter_requires_foot_designated():
     # pedestrians down ordinary bike-only lanes.
     assert '"highway"="cycleway"' in streets.CYCLEWAY_FILTER
     assert '"foot"="designated"' in streets.CYCLEWAY_FILTER
+
+
+def test_foot_overrides_access_filter_requires_an_explicit_foot_override():
+    # Scoped tightly on purpose: this should only admit ways where foot
+    # access is explicitly designated/yes despite a general access
+    # restriction -- not every access=no/private way, which would
+    # reintroduce genuinely gated/private ways WALK_FILTER's own clause
+    # exists to keep out.
+    assert '"foot"~"designated|yes"' in streets.FOOT_OVERRIDES_ACCESS_FILTER
+    assert '"access"~"private|no"' in streets.FOOT_OVERRIDES_ACCESS_FILTER
