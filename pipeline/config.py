@@ -18,7 +18,19 @@ from typing import NamedTuple
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"          # pathlib overloads "/" to join paths
 RAW_DIR = DATA_DIR / "raw"             # cached API downloads (never re-fetched)
-TILES_DIR = DATA_DIR / "tiles"         # pipeline output: one graph chunk per tile
+
+# Overridable via SHADEWALKER_TILES_DIR -- e2e tests (web/playwright.config.ts)
+# boot a real server against a real filesystem path, with no equivalent of
+# pytest's fixture-level isolation (tests/conftest.py) available. Without
+# this, an e2e run on a machine that's also done real borough work (this
+# directory holding real Brooklyn/Manhattan tiles alongside the pilot one)
+# silently tests against city-scale data instead of the small,
+# deterministic tile its specs are written against -- a real case: a point
+# picked to be outside the pilot tile's coverage became a real, valid
+# Manhattan location once Manhattan's tiles existed, and the "rejected as
+# out of coverage" test started failing for a reason with nothing to do
+# with the code under test.
+TILES_DIR = Path(os.environ.get("SHADEWALKER_TILES_DIR", DATA_DIR / "tiles"))
 
 
 # ── Geography ─────────────────────────────────────────────────────────────────
