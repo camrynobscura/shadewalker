@@ -8,7 +8,10 @@ for good, the second means the same request would likely work if asked
 again shortly -- so each gets its own tests here. Also covers the
 CYCLEWAY_FILTER and FOOT_OVERRIDES_ACCESS_FILTER unions (fetch_streets
 now makes three real Overpass queries, not one -- see the module for
-why)."""
+why), and the compose-before-simplify fix (each of the three is fetched
+unsimplified and simplified once after composing, not simplified
+independently before composing -- see fetch_streets()'s own docstring for
+the real bug, High Bridge, this fixes)."""
 
 import re
 
@@ -67,6 +70,9 @@ def test_fetch_streets_returns_none_when_no_nodes_survive_polygon_clipping(monke
 
 
 def test_fetch_streets_retries_on_connection_error_then_succeeds(monkeypatch, tmp_path):
+    # fetch_streets() now runs every result through simplify_graph() once
+    # (see the module for why), which always returns a new graph object --
+    # so this checks the result's shape rather than its identity.
     fake_graph = nx.MultiDiGraph()
     calls = {"count": 0}
 
@@ -77,7 +83,8 @@ def test_fetch_streets_retries_on_connection_error_then_succeeds(monkeypatch, tm
         return fake_graph
 
     _mock_fetch(monkeypatch, tmp_path, _by_filter(flaky))
-    assert streets.fetch_streets(BBOX, "test-flaky-tile") is fake_graph
+    result = streets.fetch_streets(BBOX, "test-flaky-tile")
+    assert list(result.nodes) == []
     assert calls["count"] == streets.MAX_FETCH_RETRIES
 
 
@@ -91,9 +98,9 @@ def test_fetch_streets_raises_after_exhausting_retries(monkeypatch, tmp_path):
 
 
 def test_fetch_streets_asks_osmnx_for_all_components_with_the_walk_filter(monkeypatch, tmp_path):
-    # Two kwargs where a one-line "cleanup" silently changes what data
-    # exists, and no data-level test in CI can catch either (the pilot
-    # tile happens not to depend on them):
+    # Three kwargs where a one-line "cleanup" silently changes what data
+    # exists, and no data-level test in CI can catch any of them (the
+    # pilot tile happens not to depend on them):
     #   - retain_all=True is what keeps neighborhoods that merely *look*
     #     disconnected through one tile's peephole (Red Hook: expressway
     #     trench + water on three sides) from being deleted at fetch time.
@@ -102,6 +109,10 @@ def test_fetch_streets_asks_osmnx_for_all_components_with_the_walk_filter(monkey
     #   - custom_filter=WALK_FILTER is the centerline model; swapping back
     #     to network_type="walk" reintroduces the unnamed-sidewalk trap
     #     documented in CLAUDE.md.
+    #   - simplify=False keeps each of the three filters' own fetch from
+    #     simplifying in isolation, before it's had a chance to see the
+    #     other two filters' ways -- see _fetch_with_retry's own comment
+    #     for the real bug (High Bridge) this caused.
     seen = {}
 
     def record_kwargs(**kwargs):
@@ -113,6 +124,7 @@ def test_fetch_streets_asks_osmnx_for_all_components_with_the_walk_filter(monkey
 
     assert seen.get("retain_all") is True
     assert seen.get("custom_filter") == streets.WALK_FILTER
+    assert seen.get("simplify") is False
 
 
 def test_fetch_streets_unions_in_foot_designated_cycleways(monkeypatch, tmp_path):
@@ -176,6 +188,44 @@ def test_fetch_streets_unions_in_foot_designated_access_override_ways(monkeypatc
 
     assert "m1" in result.nodes
     assert "a1" in result.nodes
+
+
+def test_fetch_streets_simplifies_once_after_composing_all_three_results(monkeypatch, tmp_path):
+    # The actual bug fix, pinned directly. Real case (High Bridge,
+    # confirmed 2026-07-18): a node shared between WALK_FILTER's and
+    # CYCLEWAY_FILTER's own results looks like a plain pass-through to
+    # each filter's own isolated simplification pass, so simplifying each
+    # fetch BEFORE composing them can drop a real intersection's
+    # connection to one side entirely (see PLAN.md/HISTORY.md for the
+    # full mechanism). Simplifying is un-mockable in the small, no-network
+    # unit tests elsewhere in this file (they bypass osmnx's real
+    # graph_from_bbox, so its real simplify=True behavior never runs) --
+    # so this test doesn't reproduce the bug on real data, it pins the
+    # mechanism of the fix: simplify_graph() is called exactly once, on
+    # the graph that already has all three filters' nodes composed in,
+    # not once per filter before composing.
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=0.0, y=0.0)
+    cycleway_graph = nx.MultiDiGraph()
+    cycleway_graph.add_node("c1", x=1.0, y=1.0)
+    override_graph = nx.MultiDiGraph()
+    override_graph.add_node("a1", x=2.0, y=2.0)
+
+    calls = []
+
+    def fake_simplify(graph, **kwargs):
+        calls.append(set(graph.nodes))
+        return graph
+
+    monkeypatch.setattr(streets.ox.simplification, "simplify_graph", fake_simplify)
+    _mock_fetch(
+        monkeypatch, tmp_path,
+        _by_filter(lambda **kwargs: main_graph, lambda **kwargs: cycleway_graph, lambda **kwargs: override_graph),
+    )
+    streets.fetch_streets(BBOX, "test-simplify-once-tile")
+
+    assert len(calls) == 1
+    assert calls[0] == {"m1", "c1", "a1"}
 
 
 def test_fetch_streets_works_with_no_access_override_ways_in_the_area(monkeypatch, tmp_path):

@@ -68,8 +68,15 @@ def run(tile_id: str, refresh_trees: bool = False) -> None:
     # after the fact (see PLAN.md's borough-boundary polygon plan).
     nyc_shape = boundary.nyc_boundary(boundaries.fetch_borough_boundaries())
     street_graph = boundary.clip_to_nyc(street_graph, nyc_shape)
-    if street_graph.number_of_nodes() == 0:
-        print(f"[{tile_id}] skipped -- no nodes remain inside NYC after boundary clipping")
+    if street_graph.number_of_edges() == 0:
+        # Real case (Bronx r22c19): a few isolated nodes can survive
+        # clipping -- each one's own edges all led to a node that got
+        # dropped, so networkx's cascade-delete on removal leaves these
+        # as edgeless stragglers, not a fully-empty graph. Checking edges
+        # rather than nodes catches this; centerline.build_edge_table()
+        # crashes on an edgeless graph (osmnx's own to_undirected() raises
+        # "Graph contains no edges" via graph_to_gdfs()).
+        print(f"[{tile_id}] skipped -- no edges remain inside NYC after boundary clipping")
         _remove_stale_export(tile_id)
         return
 

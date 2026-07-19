@@ -22,11 +22,13 @@ def test_run_fetches_with_a_bbox_padded_past_the_tiles_edges(monkeypatch):
     def fake_fetch_streets(bbox, tile_id):
         received["streets"] = bbox
         # A real (trivial) graph, not a bare sentinel: run() now calls
-        # .number_of_nodes() on whatever clip_to_nyc hands back (mocked to
-        # identity below), and a non-empty graph also keeps run() past the
-        # open-water early return.
+        # .number_of_edges() on whatever clip_to_nyc hands back (mocked to
+        # identity below), so it needs an actual edge, not just a node, to
+        # keep run() past the post-clipping early return.
         graph = nx.MultiDiGraph()
         graph.add_node(1, x=0.0, y=0.0)
+        graph.add_node(2, x=0.001, y=0.0)
+        graph.add_edge(1, 2)
         return graph
 
     def fake_fetch_trees(bbox, tile_id, refresh=False):
@@ -88,5 +90,35 @@ def test_run_removes_a_stale_export_when_boundary_clipping_empties_the_tile(monk
     monkeypatch.setattr(run_tile.boundary, "clip_to_nyc", lambda graph, nyc_shape: nx.MultiDiGraph())
 
     run_tile.run("r9c8")
+
+    assert not stale_path.exists()
+
+
+def test_run_skips_a_tile_left_with_edgeless_nodes_after_boundary_clipping(monkeypatch, tmp_path):
+    # Real case: Bronx r22c19 clipped from 985 nodes down to 3 -- each of
+    # those 3 survived only because it sits inside NYC itself, but every
+    # edge it had led to a node that got dropped, so networkx's
+    # cascade-delete on removal left 3 nodes and zero edges, not an empty
+    # graph. run() used to check number_of_nodes() == 0 only, so this fell
+    # through into centerline.build_edge_table(), which crashes on an
+    # edgeless graph (osmnx's to_undirected() raises "Graph contains no
+    # edges").
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    stale_path = tmp_path / "r22c19.json.gz"
+    stale_path.write_bytes(b"stale export from before this edge case was handled")
+
+    graph = nx.MultiDiGraph()
+    graph.add_node(1, x=0.0, y=0.0)
+    monkeypatch.setattr(run_tile.streets, "fetch_streets", lambda bbox, tile_id: graph)
+    monkeypatch.setattr(run_tile.boundaries, "fetch_borough_boundaries", lambda: {})
+    monkeypatch.setattr(run_tile.boundary, "nyc_boundary", lambda geojson: None)
+
+    edgeless = nx.MultiDiGraph()
+    edgeless.add_node(1, x=0.0, y=0.0)
+    edgeless.add_node(2, x=0.0, y=0.0)
+    edgeless.add_node(3, x=0.0, y=0.0)
+    monkeypatch.setattr(run_tile.boundary, "clip_to_nyc", lambda graph, nyc_shape: edgeless)
+
+    run_tile.run("r22c19")
 
     assert not stale_path.exists()
