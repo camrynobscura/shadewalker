@@ -167,6 +167,21 @@ KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
     # real corner, recorded as two different node ids.
     ("608478726", "42938246", "Cross Bay Bridge"),
 
+    # Pulaski Bridge's own footway <-> nearby footway=crossing/sidewalk
+    # infrastructure at its landing -- 1-12m apart, the same small-scale
+    # digitization-gap pattern as the entry above, not a filter
+    # exclusion: PLAN.md's original 2026-07-18 finding ("only connects
+    # via excluded footway=sidewalk, not easily fixable") pre-dates
+    # footway=crossing being un-excluded from WALK_FILTER and didn't
+    # have this data to check against. Confirmed via direct Overpass
+    # query: every way touching this area is genuinely walkable
+    # (footway=sidewalk/crossing with marked/signaled crossings, a
+    # highway=path, Pulaski Bridge's own footway) -- nothing tagged
+    # foot=no or vehicle-only, unlike Roosevelt Island Bridge above.
+    ("4384787164", "9785884677", "Pulaski Bridge"),
+    ("739651503", "11622964702", "Pulaski Bridge"),
+    ("9690694933", "11211160285", "Pulaski Bridge"),
+
     # Tile-boundary truncation gaps -- see the comment above.
     ("9191842218", "9191842217", "Manhattan Bridge Pedestrian Path"),
     ("3564754694", "11638917883", "Manhattan Bridge Pedestrian Path"),
