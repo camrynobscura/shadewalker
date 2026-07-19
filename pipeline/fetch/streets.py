@@ -37,10 +37,13 @@ STREETS_DIR = config.RAW_DIR / "streets"
 # (v3: run_tile.py started passing a FETCH_BUFFER_M-padded bbox instead of
 # the tile's exact one; v4: retain_all=True -- see the comment at the
 # graph_from_bbox call; v5: un-excluded footway=crossing and added the
-# CYCLEWAY_FILTER union; v6: added the FOOT_OVERRIDES_ACCESS_FILTER union
-# -- see each constant's comment) -- it's baked into the cache filename,
-# so old cached graphs are ignored rather than silently reused.
-GRAPH_CACHE_VERSION = 6
+# CYCLEWAY_FILTER union; v6: added the FOOT_OVERRIDES_ACCESS_FILTER union;
+# v7: fetch all three filters unsimplified and simplify once after
+# composing them, instead of each filter simplifying independently before
+# the union -- see fetch_streets()'s docstring) -- it's baked into the
+# cache filename, so old cached graphs are ignored rather than silently
+# reused.
+GRAPH_CACHE_VERSION = 7
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -178,6 +181,25 @@ def _fetch_with_retry(bbox: Bbox, custom_filter: str, tile_id: str, label: str) 
     ConnectionError gets its own, separate handling (retry, not skip) --
     unlike ValueError, it says nothing about whether this tile has data,
     only that this one attempt to ask didn't reach the server.
+
+    simplify=False, NOT True (osmnx's own default): each of our three
+    queries only ever sees the ways ITS OWN filter matched, so simplifying
+    right here -- before the three results are combined -- lets a real
+    junction between two different filters' ways get mishandled. Real
+    case (High Bridge, confirmed 2026-07-18): the node where its cycleway
+    (matched only by CYCLEWAY_FILTER) meets University Avenue (matched
+    only by WALK_FILTER) looks like a plain pass-through point to
+    WALK_FILTER's isolated view, so WALK_FILTER's own simplification
+    folds it into a longer street edge and drops that specific node id;
+    CYCLEWAY_FILTER's isolated view keeps the node, but as a dead end,
+    since it has no idea University Avenue exists. Compose ends up with
+    the node, but not its real connection to the street grid. Confirmed
+    the same mechanism drops a whole way outright when a filter's own
+    match set is sparse and mostly disconnected (RFK/Triborough's
+    "Randall's Island Connector": 128 raw edges simplified down to 2 in
+    CYCLEWAY_FILTER's own isolated fetch, and that way wasn't one of the
+    2). fetch_streets() simplifies once, after composing all three --
+    see its own docstring.
     """
     for attempt in range(1, MAX_FETCH_RETRIES + 1):
         try:
@@ -185,6 +207,7 @@ def _fetch_with_retry(bbox: Bbox, custom_filter: str, tile_id: str, label: str) 
                 bbox=(bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max),
                 custom_filter=custom_filter,
                 retain_all=True,
+                simplify=False,
             )
         except ValueError:
             return None
@@ -203,6 +226,14 @@ def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph | None:
     narrower foot=designated-cycleway query, and
     FOOT_OVERRIDES_ACCESS_FILTER's access=no/private-but-foot-designated
     query (see all three constants' comments).
+
+    Each of the three is fetched unsimplified (see _fetch_with_retry's
+    simplify=False comment for why) and composed into one graph BEFORE
+    simplifying -- once, here -- so osmnx's topology simplification sees
+    every filter's ways together and can correctly tell a real
+    intersection between two different filters' matches apart from a
+    genuine dead end, instead of each filter's own simplification pass
+    guessing from an incomplete picture.
 
     None means the bbox has no OSM ways matching WALK_FILTER at all -- real
     for grid tiles that only clip a borough's real coastline at their
@@ -224,14 +255,18 @@ def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph | None:
     # Neither extra query matching anything is the common case, not an
     # error -- most tiles have neither, and that's fine: street_graph
     # alone is a complete, valid result.
+    graph = street_graph
     cycleway_graph = _fetch_with_retry(bbox, CYCLEWAY_FILTER, tile_id, "foot-designated cycleways")
-    graph = nx.compose(street_graph, cycleway_graph) if cycleway_graph is not None else street_graph
+    if cycleway_graph is not None:
+        graph = nx.compose(graph, cycleway_graph)
 
     access_override_graph = _fetch_with_retry(
         bbox, FOOT_OVERRIDES_ACCESS_FILTER, tile_id, "foot-designated access=no/private ways"
     )
     if access_override_graph is not None:
         graph = nx.compose(graph, access_override_graph)
+
+    graph = ox.simplification.simplify_graph(graph)
 
     STREETS_DIR.mkdir(parents=True, exist_ok=True)
     ox.save_graphml(graph, graphml_path)
