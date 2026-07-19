@@ -141,12 +141,72 @@ def _save_cached_coverage_rings(cache_path, fingerprint: str, rings: list[list[l
 # protects from being reconnected to the street grid. Bridging those the
 # same way this pair is bridged would undo that protection, so this
 # stays a short, explicit list rather than an algorithm.
+#
+# The 2026-07-19 batch below has a different root cause: not a
+# digitization gap, but pipeline/fetch/streets.py's per-tile Overpass
+# fetch truncating a long way (a greenway, esplanade, or pedestrian
+# bridge) at a different real OSM vertex in each of two adjacent tiles,
+# when that way's vertices happen to be spaced further apart than
+# FETCH_BUFFER_M's overlap -- see HISTORY.md's compose-before-simplify
+# sweep entry for the full mechanism. Tried a bigger FETCH_BUFFER_M and
+# osmnx's truncate_by_edge=True as general, root-cause fixes first;
+# tested against real data via the actual fetch/clip/simplify/export
+# pipeline, neither reliably closed the gap even on the one case fully
+# verified, so per-case bridging is the deployed fix, not a stopgap
+# ahead of a "real" one. Every entry below is confirmed via a direct
+# Overpass query on the underlying way's tags, not picked by distance
+# alone -- the same sweep flagged Roosevelt Island Bridge too, and that
+# one was checked and rejected this way: its "gap" is real distance
+# between two different real things (a foot=no roadway and a
+# separately-mapped sidewalk that doesn't touch these nodes), not a
+# path split in two.
 KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
     # Cross Bay Bridge's shared foot+bike path (its Rockaway-side
     # landing) <-> East 21st Road, Broad Channel/Rockaway -- ~12m apart
     # in OSM's own data, confirmed via a direct Overpass query: the same
     # real corner, recorded as two different node ids.
     ("608478726", "42938246", "Cross Bay Bridge"),
+
+    # Pulaski Bridge's own footway <-> nearby footway=crossing/sidewalk
+    # infrastructure at its landing -- 1-12m apart, the same small-scale
+    # digitization-gap pattern as the entry above, not a filter
+    # exclusion: PLAN.md's original 2026-07-18 finding ("only connects
+    # via excluded footway=sidewalk, not easily fixable") pre-dates
+    # footway=crossing being un-excluded from WALK_FILTER and didn't
+    # have this data to check against. Confirmed via direct Overpass
+    # query: every way touching this area is genuinely walkable
+    # (footway=sidewalk/crossing with marked/signaled crossings, a
+    # highway=path, Pulaski Bridge's own footway) -- nothing tagged
+    # foot=no or vehicle-only, unlike Roosevelt Island Bridge above.
+    ("4384787164", "9785884677", "Pulaski Bridge"),
+    ("739651503", "11622964702", "Pulaski Bridge"),
+    ("9690694933", "11211160285", "Pulaski Bridge"),
+
+    # Tile-boundary truncation gaps -- see the comment above.
+    ("9191842218", "9191842217", "Manhattan Bridge Pedestrian Path"),
+    ("3564754694", "11638917883", "Manhattan Bridge Pedestrian Path"),
+    ("246651644", "12161232284", "Hudson River Park Esplanade"),
+    ("12644027075", "12152905164", "Hudson River Park Esplanade"),
+    ("8729985306", "12198069447", "Bronx River Greenway"),
+    ("1024175662", "3616599502", "Mosholu-Pelham Greenway"),
+    ("11037604160", "11037604159", "East River Esplanade"),
+    ("387181476", "387181479", "East River Esplanade"),
+    ("7782217038", "6304586882", "East River Esplanade"),
+    ("348444405", "2350521367", "Harlem River Pathway"),
+    ("10125049230", "608494469", "Flatbush Avenue Greenway"),
+    ("466530316", "608494950", "Flatbush Avenue Greenway"),
+    ("466530316", "2356694584", "Flatbush Avenue Greenway"),
+    ("10125049230", "2356694586", "Flatbush Avenue Greenway"),
+    ("10125049229", "10125049224", "Flatbush Avenue Greenway"),
+    ("10125049230", "10125049231", "Flatbush Avenue Greenway"),
+    ("10125049230", "10125049233", "Flatbush Avenue Greenway"),
+    ("401828152", "401828132", "Harlem River Drive Greenway"),
+    ("10032649492", "12036632939", "Leif Ericson Park Greenway"),
+    ("1100356499", "8151268693", "Putnam Greenway"),
+    ("2346900217", "2346900228", "Pugsley Creek Greenway"),
+    ("2557285537", "608513702", "Park Drive Greenway"),
+    ("608491459", "6382627345", "Jamaica Bay Greenway"),
+    ("42830977", "608478724", "Cross Bay Bridge"),
 ]
 
 

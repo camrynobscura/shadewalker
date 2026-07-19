@@ -48,7 +48,16 @@ class Bbox(NamedTuple):
 PILOT_BBOX = Bbox(lat_min=40.664, lat_max=40.690, lon_min=-74.008, lon_max=-73.978)
 
 # All of NYC — the outer bound for the Stage 2 tile grid.
-CITY_BBOX = Bbox(lat_min=40.49, lat_max=40.92, lon_min=-74.26, lon_max=-73.68)
+#
+# lat_min shifted south by exactly one TILE_SIZE_LAT_DEG (40.49 -> 40.472) to
+# cover Staten Island's real southern extent: its borough polygon reaches
+# ~1,406m past the old lat_min, confirmed directly against
+# boundary.borough_polygon(...).bounds, not a rough estimate. Because the
+# shift is an exact multiple of TILE_SIZE_LAT_DEG, every existing tile's real
+# lat/lon bounds are unchanged -- only its row number in the "r{row}c{col}"
+# id shifts by +1. See PLAN.md/HISTORY.md for the migration this required
+# (tree-cache rename, stale tile-export cleanup).
+CITY_BBOX = Bbox(lat_min=40.472, lat_max=40.92, lon_min=-74.26, lon_max=-73.68)
 
 # Tile size for the citywide grid (Stage 2). Both ≈ 2 km: one degree of
 # latitude is ~111 km everywhere, but a degree of longitude shrinks with
