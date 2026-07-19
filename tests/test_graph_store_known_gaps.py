@@ -1,9 +1,14 @@
 """Tests for graph_store.py's KNOWN_NODE_GAPS patch -- a short, manually
-verified list of real OSM node-id pairs that are the same physical corner
-but got recorded as two different nodes (a genuine digitization gap; see
-PLAN.md's Rockaway/Cross Bay Bridge finding). Exercised here with a
-synthetic two-tile fixture reusing the real node ids from the first entry,
-so this runs in CI without needing the real Queens data on disk.
+verified list of real OSM node-id pairs that should be reachable from
+each other but load as separate components. The original entry (index 0)
+is a genuine digitization gap in OSM's own data (see PLAN.md's
+Rockaway/Cross Bay Bridge finding); the batch added 2026-07-19 has a
+different cause -- pipeline/fetch/streets.py truncating a long way at a
+different real vertex in each of two adjacent tiles (see HISTORY.md's
+compose-before-simplify-sweep entry) -- but the same server-side fix
+applies either way. Exercised here with synthetic two-tile fixtures
+reusing real node ids from the list, so this runs in CI without needing
+the real data on disk.
 """
 
 import gzip
@@ -102,3 +107,52 @@ def test_load_skips_a_known_gap_whose_node_ids_are_absent(tmp_path, monkeypatch)
 
     assert store._graph.ecount() == 1
     assert GAP_NAME not in store._names
+
+
+def test_every_known_node_gap_entry_is_well_formed():
+    # Cheap structural check on the whole manually-curated list (25
+    # entries as of the 2026-07-19 tile-boundary-truncation batch) --
+    # catches a typo'd or accidentally-empty entry that the behavioral
+    # tests above, which only exercise entry [0], wouldn't.
+    seen_pairs = set()
+    for node_a, node_b, name in graph_store.KNOWN_NODE_GAPS:
+        assert node_a and node_b and name
+        assert node_a != node_b
+        pair = frozenset((node_a, node_b))
+        assert pair not in seen_pairs, f"duplicate gap entry: {node_a} <-> {node_b}"
+        seen_pairs.add(pair)
+
+
+# A second real entry, distinct from KNOWN_NODE_GAPS[0] -- proves load()
+# bridges every listed gap, not just the first one it encounters (a real
+# risk given the list grew from 1 entry to 25 in the same change: a
+# future refactor that stops after the first match would pass every
+# existing test above while silently leaving the other 24 unbridged).
+SECOND_GAP_NODE_A, SECOND_GAP_NODE_B, SECOND_GAP_NAME = next(
+    entry for entry in graph_store.KNOWN_NODE_GAPS if entry[2] == "Bronx River Greenway"
+)
+
+SECOND_MAIN_NODES = {
+    "s1": [-73.87, 40.84],
+    SECOND_GAP_NODE_B: [-73.868, 40.84],
+}
+SECOND_MAIN_EDGES = [("s1", SECOND_GAP_NODE_B, "Shore Road", 150.0, 1)]
+
+SECOND_ISLAND_NODES = {
+    SECOND_GAP_NODE_A: [-73.90, 40.86],  # ~2.5km away, same isolation margin as above
+    "s3": [-73.898, 40.86],
+}
+SECOND_ISLAND_EDGES = [(SECOND_GAP_NODE_A, "s3", "Greenway Spur", 140.0, 4)]
+
+
+def test_load_bridges_a_second_known_node_gap_entry(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    _write_tile(tmp_path / "main.json.gz", SECOND_MAIN_NODES, SECOND_MAIN_EDGES)
+    _write_tile(tmp_path / "island.json.gz", SECOND_ISLAND_NODES, SECOND_ISLAND_EDGES)
+
+    store = GraphStore()
+    store.load()
+
+    components = store._graph.connected_components(mode="weak")
+    assert len(components) == 1
+    assert SECOND_GAP_NAME in store._names
