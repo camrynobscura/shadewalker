@@ -1,6 +1,6 @@
-import { useId, useState } from 'react'
-import { geocode, type Point, type RouteFeature } from '../api'
-import { formatDistance } from '../format'
+import { useEffect, useId, useRef, useState } from 'react'
+import { geocode, reverseGeocode, type Point, type RouteFeature } from '../api'
+import { formatCoords, formatDistance } from '../format'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import styles from './Controls.module.css'
 
@@ -24,14 +24,29 @@ type FieldStatus = 'idle' | 'searching' | 'notfound' | 'found'
 
 /** Owns one address field's query/status and how to resolve it. A hook,
  * not a component, because Controls needs two independent copies (start,
- * end) that a single shared "find route" submit can resolve together. */
-function useAddressField(onResolve: (p: Point) => void) {
+ * end) that a single shared "find route" submit can resolve together.
+ *
+ * `externalPoint` is the other direction: a point that landed in `start`/
+ * `end` from outside this field's own resolve() -- a map click, or the
+ * USE_LOCATION button -- which this field still needs to show *something*
+ * for, even though no address text ever got typed. `shownPointRef` is
+ * what tells those two directions apart: it's the point (if any) that the
+ * current `query` text already represents, kept in a ref rather than
+ * state since updating it must never itself trigger a render. Compared by
+ * value against `externalPoint` (not object identity) because a point
+ * this field resolved itself round-trips back down through the parent as
+ * a new object with the same lat/lon -- reference equality would treat
+ * that as "a new point," and redundantly reverse-geocode text that's
+ * already better than anything reverse-geocoding would produce. */
+function useAddressField(onResolve: (p: Point) => void, externalPoint: Point | null) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<FieldStatus>('idle')
+  const shownPointRef = useRef<Point | null>(null)
 
   function onChange(value: string) {
     setQuery(value)
     setStatus('idle')
+    shownPointRef.current = null // free-typed text no longer matches any known point
   }
 
   // `status !== 'idle'` blocks a repeat: onChange resets status back to
@@ -43,11 +58,34 @@ function useAddressField(onResolve: (p: Point) => void) {
     const result = await geocode(query)
     if (result) {
       setStatus('found')
+      shownPointRef.current = { lat: result.lat, lon: result.lon }
       onResolve({ lat: result.lat, lon: result.lon })
     } else {
       setStatus('notfound')
     }
   }
+
+  useEffect(() => {
+    if (!externalPoint) return
+    const shown = shownPointRef.current
+    if (shown && shown.lat === externalPoint.lat && shown.lon === externalPoint.lon) return
+
+    shownPointRef.current = externalPoint
+    // Coordinates first, instantly -- reverse-geocoding is a real network
+    // round trip (measured ~70-100ms once warm, up to ~1s on a session's
+    // first call), and the field showing nothing while a marker's already
+    // on the map would look broken. Also doubles as the fallback if the
+    // lookup below fails outright (open water, Nominatim down).
+    setQuery(formatCoords(externalPoint))
+    setStatus('found')
+    reverseGeocode(externalPoint).then((label) => {
+      // Bail if a newer point (another click) or free-typed text has since
+      // superseded this one -- shownPointRef.current would no longer be
+      // this exact object in either case. Without this check, a slow
+      // response landing late could stomp on something newer.
+      if (label && shownPointRef.current === externalPoint) setQuery(label)
+    })
+  }, [externalPoint])
 
   return { query, status, onChange, resolve }
 }
@@ -154,6 +192,12 @@ export function compareRoutes(selected: RouteFeature, baseline: RouteFeature): R
 interface ControlsProps {
   treeWeight: number
   onTreeWeightChange: (w: number) => void
+  /** Current start/end, purely so their address fields can reverse-geocode
+   * a point that arrived from outside this component (a map click, or
+   * USE_LOCATION) -- not used to control the fields; typed text is still
+   * this component's own state. */
+  start: Point | null
+  end: Point | null
   onSetStart: (p: Point) => void
   onSetEnd: (p: Point) => void
   onClear: () => void
@@ -177,6 +221,8 @@ interface ControlsProps {
 export function Controls({
   treeWeight,
   onTreeWeightChange,
+  start: startPoint,
+  end: endPoint,
   onSetStart,
   onSetEnd,
   onClear,
@@ -195,8 +241,8 @@ export function Controls({
   const selectedPreset = TREE_PRESETS.find((preset) => preset.value === treeWeight)
   const comparison = selected && baseline ? compareRoutes(selected, baseline) : null
 
-  const start = useAddressField(onSetStart)
-  const end = useAddressField(onSetEnd)
+  const start = useAddressField(onSetStart, startPoint)
+  const end = useAddressField(onSetEnd, endPoint)
   const isSearching = start.status === 'searching' || end.status === 'searching'
 
   return (

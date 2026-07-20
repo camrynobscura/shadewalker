@@ -133,6 +133,8 @@ export default function App() {
           <Controls
             treeWeight={treeWeight}
             onTreeWeightChange={setTreeWeight}
+            start={start}
+            end={end}
             onSetStart={updateStart}
             onSetEnd={updateEnd}
             onClear={handleClear}
