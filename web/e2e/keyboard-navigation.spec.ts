@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { POINT_A, POINT_B, routeUrl } from './fixtures'
+import { mockGeocode, POINT_A, POINT_B, routeUrl } from './fixtures'
 
 // axe-core inspects markup, not actual tab behavior — this checks the part
 // it can't: that CLAUDE.md's accessibility promises (skip link, logical
@@ -7,6 +7,9 @@ import { POINT_A, POINT_B, routeUrl } from './fixtures'
 // drive the app with a keyboard, nothing else.
 
 test('reaches and operates every control in order via keyboard alone', async ({ page }) => {
+  // routeUrl() lands with start/end already set, which now reverse-geocodes
+  // into the address fields on load -- mock it or this hits live Nominatim.
+  await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
   // Wait for the route so CLEAR_ROUTE exists and is part of the tab order.
   await expect(page.getByText('dist', { exact: true })).toBeVisible()

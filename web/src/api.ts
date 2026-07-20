@@ -124,3 +124,35 @@ export async function geocode(query: string): Promise<GeocodeResult | null> {
     label: results[0].display_name.split(',').slice(0, 2).join(','),
   }
 }
+
+/** The reverse of geocode(): a point the user picked (a map click, a
+ * geolocation fix) back to a short human-readable label, so an address
+ * field can show real text instead of the point that filled it.
+ *
+ * Built from the structured `address.house_number`/`address.road` fields,
+ * not `display_name` -- Nominatim's reverse lookup happily matches the
+ * nearest tagged POI (a restaurant, a brewery, a numbered sports pitch),
+ * and `display_name` puts that POI's own name first: reverse-geocoding a
+ * point right outside a restaurant returned "Lucali, 575, Henry Street,
+ * ..." there, a business name where an address field needs an address.
+ * `address.house_number`/`address.road` stay separate from whatever POI
+ * tag matched (confirmed against several categories -- amenity, craft,
+ * leisure -- each keys its own name under its own category, never under
+ * `house_number`/`road`), so reading those two fields directly sidesteps
+ * the problem instead of trying to filter business names out after the
+ * fact. Falls back to just `road` with no house number (e.g. a path
+ * inside a park), or null (→ the caller's own coordinate fallback) if
+ * Nominatim has no address-shaped answer at all. */
+export async function reverseGeocode(point: Point): Promise<string | null> {
+  const params = new URLSearchParams({
+    lat: String(point.lat),
+    lon: String(point.lon),
+    format: 'jsonv2',
+  })
+  const res = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`)
+  if (!res.ok) return null
+  const result: { address?: { house_number?: string; road?: string } } = await res.json()
+  const road = result.address?.road
+  if (!road) return null
+  return result.address?.house_number ? `${result.address.house_number}, ${road}` : road
+}

@@ -16,6 +16,9 @@ test('initial load has no violations', async ({ page }) => {
 })
 
 test('a drawn route has no violations', async ({ page }) => {
+  // routeUrl() lands with start/end already set, which now reverse-geocodes
+  // into the address fields on load -- mock it or this hits live Nominatim.
+  await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
   await expect(page.getByText('dist', { exact: true })).toBeVisible()
 
@@ -98,6 +101,9 @@ test('header tagline and instructions meet AA text contrast', async ({ page }) =
 })
 
 test('out-of-coverage rejection has no violations', async ({ page }) => {
+  // Same reason as the "a drawn route" test above -- start/end from
+  // routeUrl() now reverse-geocodes on load regardless of coverage.
+  await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_OUTSIDE_COVERAGE))
   // Plain getByText('coverage') is ambiguous once the map's own coverage-
   // area legend entry is loaded (same word, unrelated element) -- role="alert"

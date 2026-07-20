@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDistance, formatDistanceParts } from './format'
+import { formatCoords, formatDistance, formatDistanceParts } from './format'
 
 describe('formatDistance', () => {
   it('rounds a short distance to whole feet', () => {
@@ -36,5 +36,19 @@ describe('formatDistanceParts', () => {
       const { value, unit } = formatDistanceParts(meters)
       expect(`${value} ${unit}`).toBe(formatDistance(meters))
     }
+  })
+})
+
+describe('formatCoords', () => {
+  it('renders lat/lon to 4 decimal places, comma-separated', () => {
+    expect(formatCoords({ lat: 40.6795, lon: -73.9962 })).toBe('40.6795, -73.9962')
+  })
+
+  it('pads a value with fewer decimal places out to 4', () => {
+    expect(formatCoords({ lat: 40.68, lon: -73.5 })).toBe('40.6800, -73.5000')
+  })
+
+  it('rounds rather than truncates past the 4th decimal place', () => {
+    expect(formatCoords({ lat: 40.67951, lon: -73.99615 })).toBe('40.6795, -73.9962')
   })
 })

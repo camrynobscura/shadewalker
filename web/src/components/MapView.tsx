@@ -1,4 +1,5 @@
 import { divIcon } from 'leaflet'
+import { useEffect } from 'react'
 import {
   Circle,
   CircleMarker,
@@ -115,6 +116,61 @@ function ClickHandler({ onMapClick }: { onMapClick: (p: Point) => void }) {
   return null
 }
 
+/** Keeps the whole route in view as start/end/the selected preset change --
+ * without this, the map's viewport never moves on its own (PILOT_CENTER is
+ * only ever applied once, at mount), so with all 5 boroughs live, an
+ * address search or click outside whatever's currently on screen would
+ * compute and draw a real route the user can't actually see without
+ * manually panning to find it. Reframes on every preset switch too, not
+ * just the initial start/end pick, since a higher Shade_priority detour can
+ * extend well past the bounds a lower one fit. */
+function RouteFraming({
+  start,
+  end,
+  selected,
+  baseline,
+}: {
+  start: Point | null
+  end: Point | null
+  selected: RouteFeature | null
+  baseline: RouteFeature | null
+}) {
+  const map = useMap()
+
+  useEffect(() => {
+    const animate = !reducedMotion()
+    if (start && end) {
+      const route = selected ?? baseline
+      const points: [number, number][] = [
+        [start.lat, start.lon],
+        [end.lat, end.lon],
+        ...(route ? toLatLngs(route) : []),
+      ]
+      // Uneven padding, not a uniform one: the legend (bottom-left, up to
+      // ~163x88px with all 3 rows shown) and the Locate-me button
+      // (bottom-right) both float over the map itself, so a plain 48px on
+      // every side still let a fitted point land right behind one of them.
+      // paddingTopLeft's x covers the legend's width; paddingBottomRight's
+      // y covers whichever of the two overlays is taller -- that alone
+      // keeps every fitted point out of the bottom strip entirely, so it
+      // doesn't matter which corner it's actually closer to.
+      map.fitBounds(points, {
+        paddingTopLeft: [190, 48],
+        paddingBottomRight: [48, 100],
+        maxZoom: 17,
+        animate,
+      })
+    }
+    // Deliberately no else-branch for "only one of start/end set": panning
+    // the instant point A lands was more disruptive than useful in
+    // practice -- it re-centers/zooms the view around a point the user
+    // likely just clicked while already looking straight at it. Wait for
+    // the pair to frame together instead.
+  }, [start, end, selected, baseline, map])
+
+  return null
+}
+
 /** Explains the map's line styles. Real text (not just aria-hidden swatches)
  * so the meaning doesn't depend on noticing the color/dash difference —
  * screen readers get it too, since it's plain content in reading order,
@@ -206,6 +262,7 @@ export function MapView({ start, end, selected, baseline, coverage, position, on
           detectRetina
         />
         <ClickHandler onMapClick={onMapClick} />
+        <RouteFraming start={start} end={end} selected={selected} baseline={baseline} />
 
         {/* Drawn first (and non-interactive) so the route lines and markers
             always sit visually on top of it, never the other way round. */}
