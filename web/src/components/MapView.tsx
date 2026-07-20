@@ -160,13 +160,12 @@ function RouteFraming({
         maxZoom: 17,
         animate,
       })
-    } else if (start || end) {
-      // Only one point picked so far (e.g. a search that filled just the
-      // start address) -- nothing to fit a route to yet, but it should
-      // still be visible rather than off-screen in another borough.
-      const p = (start ?? end)!
-      map.setView([p.lat, p.lon], 15, { animate })
     }
+    // Deliberately no else-branch for "only one of start/end set": panning
+    // the instant point A lands was more disruptive than useful in
+    // practice -- it re-centers/zooms the view around a point the user
+    // likely just clicked while already looking straight at it. Wait for
+    // the pair to frame together instead.
   }, [start, end, selected, baseline, map])
 
   return null
