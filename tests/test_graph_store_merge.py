@@ -13,6 +13,7 @@ real data on disk.
 
 import gzip
 import json
+from pathlib import Path
 
 import pytest
 
@@ -125,3 +126,24 @@ def test_genuinely_different_parallel_edges_both_survive(tmp_path, monkeypatch):
         ],
     })
     assert len(store._length) == 2
+
+
+def test_no_pilot_fixture_lingering_in_production_tiles_dir():
+    """Tripwire for the one way the stale-fixture bug can come back:
+    regenerating the fixture (`uv run python -m pipeline.run_tile pilot`)
+    writes to data/tiles/, and forgetting to MOVE the output to
+    tests/fixtures/ would put a pilot tile back where the production
+    server loads every *.json.gz it finds -- exactly the accident that
+    once injected 559 stale duplicate edges (and stale tree scores that
+    won dedupe ties) into citywide routing.
+
+    Checks the repo's real data/tiles/ by its own path, NOT
+    config.TILES_DIR -- conftest's session fixture redirects TILES_DIR at
+    an isolated directory that legitimately contains a pilot copy."""
+    lingering = Path(__file__).resolve().parent.parent / "data" / "tiles" / "pilot.json.gz"
+    assert not lingering.exists(), (
+        "data/tiles/pilot.json.gz exists -- a regenerated pilot tile was left in "
+        "the production tiles directory, where the server would load it alongside "
+        "the real citywide tiles. Move it to tests/fixtures/pilot.json.gz "
+        "(see CLAUDE.md's fixture-regeneration note)."
+    )
