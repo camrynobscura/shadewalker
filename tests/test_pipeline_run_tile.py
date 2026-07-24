@@ -10,7 +10,9 @@ of regression; only a test that run() actually *calls* the fetchers with
 a padded bbox can.
 """
 
+import geopandas as gpd
 import networkx as nx
+from shapely.geometry import LineString
 
 from pipeline import config, run_tile
 
@@ -35,6 +37,25 @@ def test_run_fetches_with_a_bbox_padded_past_the_tiles_edges(monkeypatch):
         received["trees"] = bbox
         return object()
 
+    # An edge table whose real extent deliberately pokes ~500m past the
+    # tile's own bbox on one side -- the tree fetch must be sized from
+    # THIS, not from the tile's nominal padded bbox (see run()'s comment:
+    # simplified street graphs can carry edges well past the fetched
+    # area, and scoring them against a nominal-bbox tree fetch produced
+    # real zero-tree copies of a 95-tree greenway edge).
+    overshoot_lat = tile_bbox.lat_max + 0.0045  # ~500m past the top edge
+    fake_edges = gpd.GeoDataFrame(
+        {
+            "geometry": [
+                LineString([
+                    (tile_bbox.lon_min, tile_bbox.lat_min),
+                    (tile_bbox.lon_min, overshoot_lat),
+                ])
+            ]
+        },
+        crs="EPSG:4326",
+    )
+
     monkeypatch.setattr(run_tile.streets, "fetch_streets", fake_fetch_streets)
     monkeypatch.setattr(run_tile.trees, "fetch_trees", fake_fetch_trees)
     # The compute stages aren't under test -- stub them out so the fakes'
@@ -46,7 +67,7 @@ def test_run_fetches_with_a_bbox_padded_past_the_tiles_edges(monkeypatch):
     monkeypatch.setattr(run_tile.boundaries, "fetch_borough_boundaries", lambda: {})
     monkeypatch.setattr(run_tile.boundary, "nyc_boundary", lambda geojson: None)
     monkeypatch.setattr(run_tile.boundary, "clip_to_nyc", lambda graph, nyc_shape: graph)
-    monkeypatch.setattr(run_tile.centerline, "build_edge_table", lambda graph: (None, None))
+    monkeypatch.setattr(run_tile.centerline, "build_edge_table", lambda graph: (None, fake_edges))
     monkeypatch.setattr(run_tile.tree_scoring, "score_and_join", lambda edges, rows: None)
     monkeypatch.setattr(run_tile.export, "write_tile", lambda tile_id, nodes, edges: None)
 
@@ -62,10 +83,15 @@ def test_run_fetches_with_a_bbox_padded_past_the_tiles_edges(monkeypatch):
     assert fetched.lon_min < tile_bbox.lon_min
     assert fetched.lon_max > tile_bbox.lon_max
 
-    # Trees must cover the identical padded area, not the bare tile: a tree
-    # just past a tile's true edge still shades edges inside it, and the
-    # exported tile spans the whole padded area.
-    assert received["trees"] == fetched
+    # Trees must cover the built edges' real extent -- including the
+    # deliberate overshoot past the tile's own bbox -- with margin to
+    # spare on every side, so no scored edge's corridor can reach past
+    # the fetched tree data.
+    trees_bbox = received["trees"]
+    assert trees_bbox.lat_max > overshoot_lat
+    assert trees_bbox.lat_min < tile_bbox.lat_min
+    assert trees_bbox.lon_min < tile_bbox.lon_min
+    assert trees_bbox.lon_max > tile_bbox.lon_min  # the edge runs along lon_min
 
 
 def test_run_removes_a_stale_export_when_boundary_clipping_empties_the_tile(monkeypatch, tmp_path):

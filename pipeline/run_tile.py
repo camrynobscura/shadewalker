@@ -80,10 +80,25 @@ def run(tile_id: str, refresh_trees: bool = False) -> None:
         _remove_stale_export(tile_id)
         return
 
-    tree_rows = trees.fetch_trees(fetch_bbox, tile_id, refresh=refresh_trees)
-
-    # graph → scoring → export
+    # Build the edge table BEFORE fetching trees, so the tree fetch can
+    # cover the edges' real extent instead of the tile's nominal padded
+    # bbox. The two are usually the same area -- but osmnx's simplification
+    # can hand back edges reaching well past the fetched bbox (a merged-
+    # chain edge keeps its full geometry), and scoring such an edge against
+    # a nominal-bbox tree fetch silently produces a zero-tree copy of a
+    # street that another tile scores correctly. Real case: a 1.7km Harlem
+    # River Drive Greenway edge, 0 trees in r19c13's export vs 95 in
+    # r20c13's, resolved at server load time by arbitrary filename order.
     nodes, edges = centerline.build_edge_table(street_graph)
+
+    # total_bounds is (minx, miny, maxx, maxy) on the LAT/LON geometry --
+    # the tree fetch queries Socrata in lat/lon, so the meter-based
+    # geometry_m column is the wrong one here (the dual-CRS rule).
+    lon_min, lat_min, lon_max, lat_max = edges["geometry"].total_bounds
+    edges_bbox = config.Bbox(lat_min=lat_min, lat_max=lat_max, lon_min=lon_min, lon_max=lon_max)
+    tree_bbox = config.buffered_bbox(edges_bbox, config.TREE_FETCH_MARGIN_M)
+    tree_rows = trees.fetch_trees(tree_bbox, tile_id, refresh=refresh_trees)
+
     edges = tree_scoring.score_and_join(edges, tree_rows)
     export.write_tile(tile_id, nodes, edges)
 
