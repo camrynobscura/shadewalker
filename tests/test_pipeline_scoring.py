@@ -79,6 +79,19 @@ def test_tree_within_buffer_counts_tree_outside_buffer_does_not():
     assert result.iloc[0]["tree_deciduous"] == 0
 
 
+def test_a_setback_tree_at_13m_counts_pinning_the_14m_buffer():
+    """A tree 13m off the centerline must count -- this is the whole point
+    of TREE_BUFFER_M being 14 rather than the original 12: Central Park
+    South's real tree row sits 12.7-14.0m out (park-side), and at 12m a
+    tree here scored zero, reading a genuinely tree-lined block as barren.
+    Fails if the buffer is ever silently reverted to 12 (or below 13)."""
+    edges = _edge()
+    lon, lat = _offset_m(BASE_LON, BASE_LAT, 5.0, 13.0)  # 13m off the line
+
+    result = score_and_join(edges, [_tree_row(lon, lat)])
+    assert result.iloc[0]["tree_count"] == 1
+
+
 def test_dead_trees_are_excluded():
     edges = _edge()
     lon, lat = _offset_m(BASE_LON, BASE_LAT, 5.0, 5.0)
