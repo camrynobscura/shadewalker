@@ -79,6 +79,19 @@ def test_tree_within_buffer_counts_tree_outside_buffer_does_not():
     assert result.iloc[0]["tree_deciduous"] == 0
 
 
+def test_a_setback_tree_at_13m_counts_pinning_the_14m_buffer():
+    """A tree 13m off the centerline must count -- this is the whole point
+    of TREE_BUFFER_M being 14 rather than the original 12: Central Park
+    South's real tree row sits 12.7-14.0m out (park-side), and at 12m a
+    tree here scored zero, reading a genuinely tree-lined block as barren.
+    Fails if the buffer is ever silently reverted to 12 (or below 13)."""
+    edges = _edge()
+    lon, lat = _offset_m(BASE_LON, BASE_LAT, 5.0, 13.0)  # 13m off the line
+
+    result = score_and_join(edges, [_tree_row(lon, lat)])
+    assert result.iloc[0]["tree_count"] == 1
+
+
 def test_dead_trees_are_excluded():
     edges = _edge()
     lon, lat = _offset_m(BASE_LON, BASE_LAT, 5.0, 5.0)
@@ -151,11 +164,103 @@ def test_multiple_trees_on_one_edge_sum_into_the_edge_totals():
 
 
 def test_a_tree_between_two_corridors_counts_toward_both():
-    # Two parallel edges 10m apart -- well within each one's 12m buffer of
-    # the midpoint, so a tree exactly between them falls in both corridors.
+    # Two parallel edges 10m apart -- well within each one's buffer of the
+    # midpoint, so a tree exactly between them falls in both corridors.
+    # These edges carry no names, so they can't be sibling carriageways --
+    # this is the legitimate shared-credit case (e.g. a corner tree between
+    # two genuinely different streets), and it must keep counting for both.
     edges = _edges(_edge(dy_m=0.0), _edge(dy_m=10.0))
     lon, lat = _offset_m(BASE_LON, BASE_LAT, 5.0, 5.0)  # midpoint between the two lines
 
     result = score_and_join(edges, [_tree_row(lon, lat)])
     assert result.iloc[0]["tree_count"] == 1
     assert result.iloc[1]["tree_count"] == 1
+
+
+def _named_edges(*rows_with_names: tuple[gpd.GeoDataFrame, str],
+                 node_pairs: list[tuple[str, str]] | None = None) -> gpd.GeoDataFrame:
+    """Like _edges, but with a name column and a (u, v, key) MultiIndex --
+    the shape the real pipeline edge table has, which the sibling-
+    carriageway detection reads."""
+    import pandas as pd
+
+    frames = [frame for frame, _name in rows_with_names]
+    combined = gpd.GeoDataFrame(
+        pd.concat(frames, ignore_index=True), geometry="geometry_m", crs=METRIC_CRS
+    )
+    combined["name"] = [name for _frame, name in rows_with_names]
+    if node_pairs is None:
+        node_pairs = [(f"u{i}", f"v{i}") for i in range(len(combined))]
+    combined.index = pd.MultiIndex.from_tuples(
+        [(u, v, 0) for u, v in node_pairs], names=["u", "v", "key"]
+    )
+    return combined
+
+
+def test_a_median_tree_between_sibling_carriageways_counts_only_toward_the_nearer():
+    # The divided-boulevard case: two same-named carriageways 12m apart
+    # (Park Avenue's measured range is 11-18m). A median tree 5m from one
+    # side and 7m from the other falls in both corridors; it must count
+    # once, toward the nearer carriageway -- full credit to both sides
+    # inflated those streets' tree value by a measured 19% citywide.
+    edges = _named_edges(
+        (_edge(dy_m=0.0), "Divided Boulevard"),
+        (_edge(dy_m=12.0), "Divided Boulevard"),
+    )
+    lon, lat = _offset_m(BASE_LON, BASE_LAT, 50.0, 5.0)  # 5m from south, 7m from north
+
+    result = score_and_join(edges, [_tree_row(lon, lat)])
+    assert result.iloc[0]["tree_count"] == 1  # the nearer (south) carriageway
+    assert result.iloc[1]["tree_count"] == 0
+
+
+def test_differently_named_parallel_streets_both_keep_a_shared_tree():
+    # Same geometry as the sibling case, but the two streets genuinely
+    # differ -- shared credit is correct and must survive the sibling rule.
+    edges = _named_edges(
+        (_edge(dy_m=0.0), "Alpha Street"),
+        (_edge(dy_m=12.0), "Beta Street"),
+    )
+    lon, lat = _offset_m(BASE_LON, BASE_LAT, 50.0, 5.0)
+
+    result = score_and_join(edges, [_tree_row(lon, lat)])
+    assert result.iloc[0]["tree_count"] == 1
+    assert result.iloc[1]["tree_count"] == 1
+
+
+def test_consecutive_blocks_sharing_a_node_are_not_siblings():
+    # Two same-named edges that SHARE an endpoint are consecutive blocks of
+    # one street, not two carriageways -- a tree near the shared corner
+    # legitimately sits in both blocks' corridors and keeps both credits.
+    first_block = _edge(dx_m=0.0, length_m=100.0)
+    second_block = _edge(dx_m=100.0, length_m=100.0)  # continues where the first ends
+    edges = _named_edges(
+        (first_block, "Continuous Street"),
+        (second_block, "Continuous Street"),
+        node_pairs=[("a", "b"), ("b", "c")],  # "b" shared: consecutive, not parallel
+    )
+    lon, lat = _offset_m(BASE_LON, BASE_LAT, 100.0, 5.0)  # at the shared corner
+
+    result = score_and_join(edges, [_tree_row(lon, lat)])
+    assert result.iloc[0]["tree_count"] == 1
+    assert result.iloc[1]["tree_count"] == 1
+
+
+def test_three_carriageway_groups_are_handled_transitively():
+    # Queens Boulevard-style: main road plus a service road on each side,
+    # three same-named near-parallel edges abreast (511 of the 3,393 groups
+    # found citywide have 3+ members). A tree in the first gap sits in the
+    # corridors of all three at a 14m buffer; only the single nearest
+    # carriageway may keep it, which requires the grouping to be
+    # transitive -- pairwise-only logic would let the far side keep a copy.
+    edges = _named_edges(
+        (_edge(dy_m=0.0), "Queens Boulevard"),
+        (_edge(dy_m=13.0), "Queens Boulevard"),
+        (_edge(dy_m=26.0), "Queens Boulevard"),
+    )
+    lon, lat = _offset_m(BASE_LON, BASE_LAT, 50.0, 6.0)  # 6m, 7m, 20m from the three lines
+
+    result = score_and_join(edges, [_tree_row(lon, lat)])
+    assert result.iloc[0]["tree_count"] == 1
+    assert result.iloc[1]["tree_count"] == 0
+    assert result.iloc[2]["tree_count"] == 0

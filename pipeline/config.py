@@ -203,7 +203,21 @@ def get_tile_ids_for_bbox(bbox: Bbox) -> list[str]:
 # ── Tree scoring ──────────────────────────────────────────────────────────────
 
 # How far from a street's centerline a tree still counts toward that street.
-TREE_BUFFER_M = 12
+# 14, up from the original 12: Central Park South's real tree row sits
+# 12.7-14.0m out (park-side, behind the fence line -- ~2m further than a
+# curbside tree pit), and the hard cutoff at 12m was excluding roughly half
+# of it, making the whole street read as barren. A 12-16m sweep showed 14m
+# captures everything 15m or 16m does on the measured blocks, so this is
+# the smallest bump that fixes the set-back-tree case (see PLAN.md's
+# 2026-07-22/23 scoring investigation).
+TREE_BUFFER_M = 14
+
+# Padding for the tree fetch around the *built edge table's* real extent
+# (run_tile.py derives the tree bbox from the edges, not the tile's nominal
+# padded bbox) -- must exceed TREE_BUFFER_M so every edge's full corridor is
+# covered by fetched tree data. The margin past TREE_BUFFER_M is slop for
+# the bbox math's ~meter-level approximations, nothing more.
+TREE_FETCH_MARGIN_M = 30
 
 # A tree's size factor is min(dbh, cap)/cap — trunk diameter as a canopy proxy,
 # capped so one giant (or mistyped) trunk can't dominate a block's score.

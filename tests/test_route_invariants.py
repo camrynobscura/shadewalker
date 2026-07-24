@@ -29,6 +29,40 @@ def _has_duplicate_consecutive_points(coords: list[list[float]]) -> bool:
     return any(a == b for a, b in zip(coords, coords[1:]))
 
 
+def _main_component_nodes() -> dict[str, list[float]]:
+    """The pilot fixture's nodes restricted to its largest connected
+    component. The fixture carries every component the pipeline keeps --
+    143 of them, mostly tiny fragments (a pier, a fenced path) -- and a
+    test that picks "the node nearest X" without this filter can land on a
+    fragment no route can leave, turning a routing test into a
+    connectivity-lottery 422."""
+    tile = json.loads(gzip.open(PILOT_FIXTURE, "rt").read())
+
+    neighbors: dict[str, set[str]] = {}
+    for edge in tile["edges"]:
+        neighbors.setdefault(edge["u"], set()).add(edge["v"])
+        neighbors.setdefault(edge["v"], set()).add(edge["u"])
+
+    seen: set[str] = set()
+    largest: set[str] = set()
+    for start in neighbors:
+        if start in seen:
+            continue
+        component = {start}
+        frontier = [start]
+        while frontier:
+            node = frontier.pop()
+            for other in neighbors[node]:
+                if other not in component:
+                    component.add(other)
+                    frontier.append(other)
+        seen |= component
+        if len(component) > len(largest):
+            largest = component
+
+    return {node_id: lonlat for node_id, lonlat in tile["nodes"].items() if node_id in largest}
+
+
 def _a_real_node_coordinate() -> tuple[float, float]:
     """One real intersection's exact (lat, lon), read straight from the
     pilot tile file -- independent of GraphStore's internal node ordering.
@@ -39,8 +73,7 @@ def _a_real_node_coordinate() -> tuple[float, float]:
     an arbitrary Brooklyn tile, then by picking a node from a tile whose
     whole area gets pruned at load time (Rockaway fragments, unreachable
     from the main network)."""
-    tile = json.loads(gzip.open(PILOT_FIXTURE, "rt").read())
-    lon, lat = next(iter(tile["nodes"].values()))
+    lon, lat = next(iter(_main_component_nodes().values()))
     return lat, lon
 
 
@@ -55,11 +88,12 @@ def _nearest_real_node_coordinate(approx_lat: float, approx_lon: float) -> tuple
     arbitrary other tile (which is exactly what
     `next(config.TILES_DIR.glob("*.json.gz"))` silently broke into the
     moment real Brooklyn data existed alongside it -- it only ever "worked"
-    because pilot.json.gz used to be the only file present).
+    because pilot.json.gz used to be the only file present). Restricted to
+    the main component (see _main_component_nodes) so routing tests can't
+    land on an unreachable fragment.
     """
-    tile = json.loads(gzip.open(PILOT_FIXTURE, "rt").read())
     best_lon, best_lat = min(
-        tile["nodes"].values(),
+        _main_component_nodes().values(),
         key=lambda lonlat: _haversine_m(approx_lat, approx_lon, lonlat[1], lonlat[0]),
     )
     return best_lat, best_lon
@@ -328,32 +362,39 @@ def test_shade_fraction_is_always_between_zero_and_one(client, tree_weight):
     assert 0.0 <= res.json()["routes"][0]["properties"]["shade_fraction"] <= 1.0
 
 
-def test_shade_fraction_can_rise_even_when_tree_count_plateaus(client):
-    """The exact real case that motivated shade_fraction: for this walk,
-    MED (w=15) and MAX (w=40) land on the same tree_count (397) -- raising
-    tree_weight bought no extra trees at all -- yet MAX spends noticeably
-    more of the walk actually under cover (verified directly against the
-    server with SHADE_DENSITY_THRESHOLD=0.025 and SHADE_CROSSING_GAP_M=6.0:
-    70.1% shaded at w=15 vs 75.4% at w=40). tree_count alone can't show
-    that difference; shade_fraction should. The margin below is
-    intentionally looser than the measured 5.3-point gap -- tight enough
-    to catch a real regression, loose enough to not break every time the
-    threshold or crossing gap get recalibrated."""
-    from_lat, from_lon = 40.68354, -74.00009
-    to_lat, to_lon = 40.66674, -73.98442
+def test_shade_fraction_carries_signal_tree_count_cannot(client):
+    """Why shade_fraction exists: tree_count alone can't say how much of a
+    walk is actually under cover. These two walks, re-derived against the
+    14m-buffer fixture (2026-07-23), count exactly the same 205 trees yet
+    differ hugely in shaded length -- 19.6% vs 75.6%. A regression that
+    made shade_fraction a function of tree_count, or broke its wiring,
+    can't get both right.
 
-    routes = client.get(
-        "/route",
-        params={
-            "from_lat": from_lat, "from_lon": from_lon,
-            "to_lat": to_lat, "to_lon": to_lon,
-            "tree_weights": [15, 40],
-        },
-    ).json()["routes"]
-    med, max_ = routes[0]["properties"], routes[1]["properties"]
+    (This test originally pinned a single OD where MED and MAX plateaued
+    on tree_count while shade_fraction still rose. At the 14m buffer that
+    phenomenon no longer occurs anywhere in the pilot tile -- whenever MED
+    and MAX plateau on tree_count now, they're taking the identical route
+    -- so the same intent is pinned across two walks instead.)"""
+    walk_leafy_park_slope = {"from_lat": 40.67842, "from_lon": -73.97900,
+                             "to_lat": 40.68520, "to_lon": -73.98865}
+    walk_industrial_red_hook = {"from_lat": 40.67243, "from_lon": -74.00973,
+                                "to_lat": 40.68845, "to_lon": -74.00118}
 
-    assert med["tree_count"] == max_["tree_count"]  # the original plateau
-    assert max_["shade_fraction"] > med["shade_fraction"] + 0.03  # but a real shade gain
+    shades = {}
+    counts = {}
+    for label, walk in (("leafy", walk_leafy_park_slope),
+                        ("industrial", walk_industrial_red_hook)):
+        props = client.get(
+            "/route", params={**walk, "tree_weights": [15]},
+        ).json()["routes"][0]["properties"]
+        shades[label] = props["shade_fraction"]
+        counts[label] = props["tree_count"]
+
+    assert counts["leafy"] == counts["industrial"]  # identical tree_count...
+    # ...but wildly different real coverage (measured 0.756 vs 0.196; the
+    # margin is loose so threshold/crossing-gap recalibrations don't break
+    # it, while a wiring regression still does).
+    assert shades["leafy"] > shades["industrial"] + 0.3
 
 
 def test_shade_fraction_crossing_deduction_leaves_a_low_shade_route_alone(client):
@@ -366,7 +407,8 @@ def test_shade_fraction_crossing_deduction_leaves_a_low_shade_route_alone(client
     here -- test_a_heavily_shaded_route_never_reads_as_exactly_full_shade
     in test_route_regressions.py wouldn't catch that, since it only checks
     that a *heavily* shaded route drops below 100%, not that a lightly
-    shaded one is left alone."""
+    shaded one is left alone. (Pinned value re-derived 2026-07-23 against
+    the regenerated 14m-buffer fixture: 0.23 -> 0.258.)"""
     res = client.get(
         "/route",
         params={
@@ -375,7 +417,7 @@ def test_shade_fraction_crossing_deduction_leaves_a_low_shade_route_alone(client
             "tree_weights": [15],
         },
     )
-    assert res.json()["routes"][0]["properties"]["shade_fraction"] == 0.23
+    assert res.json()["routes"][0]["properties"]["shade_fraction"] == 0.258
 
 
 def test_every_edge_geometry_starts_and_ends_at_its_own_nodes(graph_store):
