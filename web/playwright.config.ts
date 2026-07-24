@@ -9,12 +9,14 @@ import { defineConfig, devices } from '@playwright/test'
 // defines for `vite dev` — confirmed empirically, no separate config
 // needed here.
 //
-// The backend command copies the pilot tile into its own directory and
-// points SHADEWALKER_TILES_DIR at it before starting uvicorn, rather than
-// loading data/tiles/ directly — that directory can also hold real
-// Brooklyn/Manhattan tiles once the pipeline's done real borough work,
-// and these specs are written against the small, deterministic pilot
-// tile specifically (see pipeline/config.py's TILES_DIR comment).
+// The backend command copies the committed pilot fixture
+// (tests/fixtures/pilot.json.gz — the same file the pytest suite runs
+// against) into its own directory and points SHADEWALKER_TILES_DIR at it
+// before starting uvicorn, rather than loading data/tiles/ directly —
+// that directory holds the real citywide tiles once the pipeline's done
+// real borough work, and these specs are written against the small,
+// deterministic pilot tile specifically (see pipeline/config.py's
+// TILES_DIR comment).
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -22,7 +24,7 @@ export default defineConfig({
   webServer: [
     {
       command:
-        'mkdir -p data/e2e_tiles && cp data/tiles/pilot.json.gz data/e2e_tiles/ && ' +
+        'mkdir -p data/e2e_tiles && cp tests/fixtures/pilot.json.gz data/e2e_tiles/ && ' +
         'SHADEWALKER_TILES_DIR="$(pwd)/data/e2e_tiles" uv run uvicorn server.app:app --port 8000',
       cwd: '..',
       url: 'http://localhost:8000/health',
