@@ -293,7 +293,8 @@ class GraphStore:
         length, deciduous, evergreen, counts = [], [], [], []
         names: list[str] = []
         coords_per_edge: list[list[list[float]]] = []  # packed into _coord_buf after the loop
-        seen_edges: set[tuple] = set()  # cross-tile dedupe on (u, v, key, side)
+        seen_edges: dict[tuple, int] = {}  # (u, v, key, side) -> position in the lists above
+        seen_geometries: set[tuple] = set()  # (u, v, side, geometry hash) -- see below
 
         for path in tile_paths:
             tile = json.loads(gzip.open(path, "rt").read())
@@ -306,11 +307,47 @@ class GraphStore:
             for edge in tile["edges"]:
                 # Border edges appear in two neighboring tiles; a canonical
                 # (sorted) node pair makes both copies hash identically.
+                # Each tile scored its copy against only its own tree
+                # fetch, so the copies can disagree -- when they do, keep
+                # the better-scored one, not the first-seen one. Both
+                # copies count trees in the identical corridor, so a copy
+                # can only be MISSING trees its tile's fetch didn't cover,
+                # never have extras: higher tree value == closer to
+                # complete. (First-seen-wins silently kept the worse copy
+                # 3,740 times citywide, including a 1.7km Harlem River
+                # Drive Greenway edge held at 0 trees while its other
+                # copy had 95.)
                 dedupe_key = (*sorted((edge["u"], edge["v"])), edge["key"], edge["side"])
-                if dedupe_key in seen_edges:
+                existing = seen_edges.get(dedupe_key)
+                if existing is not None:
+                    stored_value = deciduous[existing] + evergreen[existing]
+                    if edge["tree_deciduous"] + edge["tree_evergreen"] > stored_value:
+                        length[existing] = edge["length_m"]
+                        deciduous[existing] = edge["tree_deciduous"]
+                        evergreen[existing] = edge["tree_evergreen"]
+                        counts[existing] = edge["tree_count"]
+                        names[existing] = edge["name"]
+                        coords_per_edge[existing] = edge["coords"]
                     continue
-                seen_edges.add(dedupe_key)
 
+                # OSM itself sometimes contains the same way twice --
+                # identical geometry between the same two nodes, which
+                # osmnx keeps as parallel edges under different multigraph
+                # keys (159 confirmed citywide, all within a single tile).
+                # Keep one: same endpoints, so dropping the extra copy
+                # can't disconnect anything. Hashing the coords (direction-
+                # insensitive) instead of storing them keeps this set small;
+                # genuinely different parallel edges between the same nodes
+                # (a street and a separate path) hash differently and both
+                # survive.
+                forward = tuple(tuple(point) for point in edge["coords"])
+                geometry_key = (*dedupe_key[:2], edge["side"],
+                                min(hash(forward), hash(forward[::-1])))
+                if geometry_key in seen_geometries:
+                    continue
+                seen_geometries.add(geometry_key)
+
+                seen_edges[dedupe_key] = len(edge_pairs)
                 edge_pairs.append((self._id_to_idx[edge["u"]], self._id_to_idx[edge["v"]]))
                 length.append(edge["length_m"])
                 deciduous.append(edge["tree_deciduous"])

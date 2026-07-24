@@ -5,9 +5,10 @@ connected component. As of the borough-boundary polygon work it keeps
 every component instead, trusting pipeline/graph/boundary.py's
 clip_to_nyc() to have already excluded non-NYC territory before data ever
 reaches data/tiles/ -- so a real disconnected place (Governors Island,
-eventually Staten Island) is no longer collateral damage. In CI, where
-data/tiles/ holds only the single-component pilot tile, this path never
-actually runs. These tests fabricate a two-component dataset (a small
+eventually Staten Island) is no longer collateral damage. The pilot
+fixture the suite runs against (tests/fixtures/pilot.json.gz) is
+single-component, so this path never actually runs on the suite's own
+data. These tests fabricate a two-component dataset (a small
 main network plus a genuinely disconnected "island", split over two tile
 files the way a real border tile would be) so it's exercised on every
 run, and its output -- both components present, arrays still aligned,

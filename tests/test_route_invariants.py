@@ -8,6 +8,7 @@ import math
 import pytest
 
 from pipeline import config
+from tests.conftest import PILOT_FIXTURE
 
 # A real, well-connected pair of points inside the pilot tile -- used
 # wherever a test just needs *some* valid route, not a specific bug case.
@@ -32,13 +33,13 @@ def _a_real_node_coordinate() -> tuple[float, float]:
     """One real intersection's exact (lat, lon), read straight from the
     pilot tile file -- independent of GraphStore's internal node ordering.
 
-    Pinned to pilot.json.gz (same reasoning as _nearest_real_node_coordinate
-    below): "whichever tile file globs first" broke twice once real borough
-    tiles existed locally -- first by reading an arbitrary Brooklyn tile,
-    then by picking a node from a tile whose whole area gets pruned at load
-    time (Rockaway fragments, unreachable from the main network)."""
-    tile_path = config.TILES_DIR / "pilot.json.gz"
-    tile = json.loads(gzip.open(tile_path, "rt").read())
+    Pinned to the committed pilot fixture (same reasoning as
+    _nearest_real_node_coordinate below): "whichever tile file globs first"
+    broke twice once real borough tiles existed locally -- first by reading
+    an arbitrary Brooklyn tile, then by picking a node from a tile whose
+    whole area gets pruned at load time (Rockaway fragments, unreachable
+    from the main network)."""
+    tile = json.loads(gzip.open(PILOT_FIXTURE, "rt").read())
     lon, lat = next(iter(tile["nodes"].values()))
     return lat, lon
 
@@ -48,16 +49,15 @@ def _nearest_real_node_coordinate(approx_lat: float, approx_lon: float) -> tuple
     the pilot tile file -- lets a test target "near this corner" without
     assuming any specific node happens to sit exactly there.
 
-    Pinned to pilot.json.gz specifically, not "whichever tile file exists" --
-    every caller passes a PILOT_BBOX-derived point and wants the pilot
-    tile's own nearest node, not the nearest node in some arbitrary other
-    tile that happens to also be sitting in data/tiles/ locally (which is
-    exactly what `next(config.TILES_DIR.glob("*.json.gz"))` silently broke
-    into the moment real Brooklyn data existed alongside it -- it only ever
-    "worked" because pilot.json.gz used to be the only file present).
+    Pinned to the committed pilot fixture specifically, not "whichever tile
+    file exists" -- every caller passes a PILOT_BBOX-derived point and wants
+    the pilot tile's own nearest node, not the nearest node in some
+    arbitrary other tile (which is exactly what
+    `next(config.TILES_DIR.glob("*.json.gz"))` silently broke into the
+    moment real Brooklyn data existed alongside it -- it only ever "worked"
+    because pilot.json.gz used to be the only file present).
     """
-    tile_path = config.TILES_DIR / "pilot.json.gz"
-    tile = json.loads(gzip.open(tile_path, "rt").read())
+    tile = json.loads(gzip.open(PILOT_FIXTURE, "rt").read())
     best_lon, best_lat = min(
         tile["nodes"].values(),
         key=lambda lonlat: _haversine_m(approx_lat, approx_lon, lonlat[1], lonlat[0]),
