@@ -6,6 +6,7 @@ there's no reason to repeat it once per test when the underlying tile
 data never changes between tests.
 """
 
+import os
 import shutil
 from pathlib import Path
 
@@ -62,3 +63,33 @@ def client(_pilot_only_tiles_dir):
     lifespan hook runs, loading tile data into the app's own GraphStore."""
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture(scope="session")
+def citywide_store() -> GraphStore:
+    """A GraphStore loaded against the REAL production tiles (data/tiles/),
+    for the opt-in-by-default citywide sweep (see the `citywide` marker).
+
+    Skips cleanly when that data isn't present -- CI and a fresh clone only
+    ever have the committed pilot fixture, never the gitignored citywide
+    tiles. Deliberately independent of _pilot_only_tiles_dir: it points at
+    the real production directory itself and restores config.TILES_DIR
+    afterward, so it coexists with the pilot-isolated fixtures in one test
+    session without either clobbering the other's global TILES_DIR. The
+    ~15s load is paid once per session, and only when this fixture is
+    actually used (i.e. the citywide test wasn't deselected)."""
+    production_tiles = Path(os.environ.get("SHADEWALKER_TILES_DIR", config.DATA_DIR / "tiles"))
+    tiles = sorted(production_tiles.glob("*.json.gz"))
+    if len(tiles) < 10:
+        pytest.skip(
+            f"citywide tiles not present in {production_tiles} ({len(tiles)} found) "
+            "-- run the pipeline to enable the citywide sweep"
+        )
+    saved_tiles_dir = config.TILES_DIR
+    config.TILES_DIR = production_tiles
+    try:
+        store = GraphStore()
+        store.load()
+    finally:
+        config.TILES_DIR = saved_tiles_dir
+    return store

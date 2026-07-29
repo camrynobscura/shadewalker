@@ -24,3 +24,10 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]  # so `import server`/`import pipeline` resolve from the repo root
+markers = [
+    # The citywide shade-monotonicity sweep. Runs by default WHEN the real
+    # data/tiles/ citywide data is present (it skips otherwise -- CI and a
+    # fresh clone only have the committed pilot fixture). Opt out of the
+    # ~15s graph load in a tight edit-test loop with: pytest -m "not citywide".
+    "citywide: opt-out-able sweep over the full citywide graph (skips if data absent)",
+]
