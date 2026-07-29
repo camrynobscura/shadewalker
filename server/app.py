@@ -28,7 +28,7 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException, Query
 
 from pipeline import config
-from server.graph_store import GraphStore
+from server.graph_store import GraphStore, clamp_shade_monotonic
 
 store = GraphStore()
 
@@ -113,12 +113,21 @@ def route(
         raise HTTPException(status_code=422, detail="No path between these points")
     start, end = pair
 
-    routes = []
+    results = []
     for tree_weight in tree_weights:
         result = store.route(start, end, tree_weight=tree_weight, month=month)
         if result is None:
             raise HTTPException(status_code=422, detail="No path between these points")
-        routes.append(_to_feature(result, tree_weight))
+        results.append(result)
+
+    # Guarantee the Shade_priority promise: a higher tree_weight must never
+    # come back with less shade than a lower one. route() optimizes a smooth
+    # density cost while shade_fraction is a thresholded stat, so the two can
+    # disagree -- clamp the batch to non-decreasing shade before returning
+    # (only ever falls back to a route already computed here). See
+    # clamp_shade_monotonic's docstring for the full why.
+    results = clamp_shade_monotonic(results, tree_weights)
+    routes = [_to_feature(result, tree_weight) for result, tree_weight in zip(results, tree_weights)]
 
     return {
         "routes": routes,

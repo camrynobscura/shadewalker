@@ -74,6 +74,42 @@ def _add_segment(segments: list[dict], name: str, length_m: float) -> None:
         segments.append({"name": name, "length_m": length_m})
 
 
+def clamp_shade_monotonic(routes: list[dict], weights: list[float]) -> list[dict]:
+    """Enforce the Shade_priority promise across a batch of routes: as
+    tree_weight increases, a route's shade_fraction must never DECREASE.
+    Returns a new list aligned with `routes`/`weights`; any route that would
+    break the guarantee is replaced by the shadiest lower-or-equal-weight
+    route already in the batch.
+
+    Why this is needed: route() minimizes a smooth density-weighted cost, but
+    shade_fraction is a thresholded (shaded-or-not per edge) stat with a
+    per-crossing deduction on top -- so the route chosen for a higher weight
+    can genuinely report LESS shade than a lower weight's route (~17% of
+    citywide routes; up to a 0.22 drop). /route computes every preset in one
+    call, so this is pure post-processing: it only ever falls back to a real
+    route the batch already produced, never one worse on shade than the
+    preset's own route -- the walker strictly benefits, and length/time can
+    only stay level or drop when it fires (the fallback route is shorter).
+
+    Substitutes the WHOLE route dict (geometry + every stat together), never
+    just the shade number, so nothing downstream can disagree. Order-robust:
+    walks weights ascending regardless of the requested order and returns the
+    result in the original positions. shade_fraction is already rounded to
+    3dp upstream, so the epsilon only guards against float noise, not real
+    differences.
+    """
+    epsilon = 1e-9
+    clamped = list(routes)
+    best: dict | None = None  # shadiest route seen so far, ascending weight
+    for position in sorted(range(len(routes)), key=lambda i: weights[i]):
+        route = routes[position]
+        if best is not None and route["shade_fraction"] < best["shade_fraction"] - epsilon:
+            clamped[position] = best
+        else:
+            best = route
+    return clamped
+
+
 # A degree of latitude is ~111.32 km everywhere on Earth — used to convert
 # STRtree query distances (in degrees-of-latitude units, since only
 # longitude gets scaled) back into real meters.

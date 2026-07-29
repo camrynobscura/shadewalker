@@ -4,10 +4,12 @@ just the specific historical bugs in test_route_regressions.py."""
 import gzip
 import json
 import math
+import random
 
 import pytest
 
 from pipeline import config
+from server.graph_store import clamp_shade_monotonic
 from tests.conftest import PILOT_FIXTURE
 
 # A real, well-connected pair of points inside the pilot tile -- used
@@ -130,10 +132,18 @@ def test_no_duplicate_consecutive_points_in_route_geometry(graph_store):
         assert not _has_duplicate_consecutive_points(result["coords"])
 
 
-def test_more_shade_priority_never_finds_fewer_trees(client):
-    """A higher shade priority should never do worse than a lower one for
-    the same walk -- the router is strictly seeking more trees as the
-    weight increases, so tree_count should only go up or stay flat."""
+def test_tree_count_does_not_drop_for_the_reference_pair(client):
+    """A spot check that tree_count holds-or-rises as Shade_priority
+    increases FOR THIS ONE well-behaved pair -- NOT a universal invariant.
+    Tree count is not guaranteed monotonic in general: a genuinely shadier
+    route can pass fewer individual trees (denser but shorter), and the
+    server clamps only shade_fraction to be monotonic, never tree_count. The
+    real, guaranteed invariant is shade -- see
+    test_more_shade_priority_never_reduces_shade_over_many_random_routes and
+    the citywide sweep. This pair just happens to stay tree-monotonic in
+    every month, so it's kept as a cheap regression signal on one fixed
+    walk; if a future fixture regen makes it non-monotonic, replace it
+    rather than re-asserting a false universal."""
     res = client.get(
         "/route",
         params={
@@ -144,6 +154,131 @@ def test_more_shade_priority_never_finds_fewer_trees(client):
     )
     counts = [feature["properties"]["tree_count"] for feature in res.json()["routes"]]
     assert counts == sorted(counts)
+
+
+def test_more_shade_priority_never_reduces_shade_over_many_random_routes(client):
+    """The core Shade_priority promise, checked over many routes instead of
+    one hand-picked pair: raising the priority (0 -> 5 -> 15 -> 40) must
+    never LOWER a route's reported shade_fraction. Each preset's shade must
+    be >= the preset before it.
+
+    This is the invariant the monotonic clamp exists to guarantee. Without
+    it the property genuinely fails on real geography: the cost formula
+    `length / (1 + w * density)` gives a saturating discount, so at high
+    weight the router chains many barely-treed blocks (a big cost discount,
+    but each below SHADE_DENSITY_THRESHOLD so worth nothing to
+    shade_fraction) over fewer genuinely-shady ones; and SHADE_CROSSING_GAP_M
+    subtracts per shaded-shaded transition in the reporting layer, which the
+    router can't see. Both can make a higher preset report less shade. The
+    clamp resolves it by never serving a higher preset a route whose shade a
+    lower preset already beat -- all four presets are computed per /route
+    call, so it's pure post-processing over routes the request already has.
+
+    Random but SEEDED, so it's deterministic in CI while still sweeping far
+    more of the graph than the fixed-pair tests above. Months are pinned
+    (not left to the server clock) both for determinism and because the bug
+    is worst at partial canopy -- spring and fall, not high summer (measured
+    in the pilot tile: ~4% of routes non-monotonic in January vs ~21% in
+    April), so a summer-only check would understate it.
+
+    Note it asserts shade only, not tree_count: a genuinely shadier route
+    can legitimately pass fewer individual trees (denser-but-shorter), so
+    tree_count is not a monotonic invariant and the clamp doesn't force it
+    to be -- see test_tree_count_does_not_drop_for_the_reference_pair above,
+    which only holds for its one fixed pair, not in general."""
+    node_coords = list(_main_component_nodes().values())  # [lon, lat] each
+    rng = random.Random(20260724)
+
+    violations = []
+    routed = 0
+    attempts = 0
+    while routed < 60 and attempts < 60 * 40:
+        attempts += 1
+        a, b = rng.choice(node_coords), rng.choice(node_coords)
+        if a == b:
+            continue
+        routed_this_pair = False
+        for month in (4, 7, 10):
+            res = client.get(
+                "/route",
+                params={
+                    "from_lat": a[1], "from_lon": a[0],
+                    "to_lat": b[1], "to_lon": b[0],
+                    "tree_weights": [0, 5, 15, 40],
+                    "month": month,
+                },
+            )
+            if res.status_code != 200:
+                continue  # a pair that doesn't resolve -- doesn't exercise the invariant
+            routed_this_pair = True
+            shades = [f["properties"]["shade_fraction"] for f in res.json()["routes"]]
+            for i in range(1, len(shades)):
+                if shades[i] < shades[i - 1] - 1e-9:
+                    violations.append((month, a, b, shades))
+                    break
+        if routed_this_pair:
+            routed += 1
+
+    assert routed >= 40, f"only routed {routed} pairs -- sampling got too sparse to be a real check"
+    assert not violations, (
+        f"{len(violations)} route(s) where raising Shade_priority reduced shade_fraction "
+        f"(should be impossible after the monotonic clamp). First few:\n"
+        + "\n".join(
+            f"  month={m} from={a[1]:.5f},{a[0]:.5f} to={b[1]:.5f},{b[0]:.5f} "
+            f"shades={[round(x, 3) for x in s]}"
+            for m, a, b, s in violations[:5]
+        )
+    )
+
+
+# The clamp that makes the invariant above hold, unit-tested directly on
+# synthetic route dicts -- fast, deterministic, and covering the edge cases
+# a random route sweep might not happen to hit.
+
+def _fake_route(shade: float) -> dict:
+    """A minimal stand-in for a GraphStore.route() result. The clamp only
+    reads shade_fraction and swaps whole dicts, so identity (`is`) lets a
+    test assert exactly WHICH route object it fell back to."""
+    return {"shade_fraction": shade, "marker": object()}
+
+
+def test_clamp_replaces_a_dropping_preset_with_the_shadier_lower_one():
+    routes = [_fake_route(0.5), _fake_route(0.3), _fake_route(0.4), _fake_route(0.2)]
+    clamped = clamp_shade_monotonic(routes, [0.0, 5.0, 15.0, 40.0])
+    assert [r["shade_fraction"] for r in clamped] == [0.5, 0.5, 0.5, 0.5]
+    # each clamped-down slot is the SAME object it fell back to (whole-route swap)
+    assert clamped[1] is routes[0] and clamped[2] is routes[0] and clamped[3] is routes[0]
+
+
+def test_clamp_leaves_an_already_rising_sequence_untouched():
+    routes = [_fake_route(0.1), _fake_route(0.2), _fake_route(0.2), _fake_route(0.4)]
+    clamped = clamp_shade_monotonic(routes, [0.0, 5.0, 15.0, 40.0])
+    assert all(clamped[i] is routes[i] for i in range(len(routes)))  # same objects, same order
+
+
+def test_clamp_only_falls_back_as_far_as_needed():
+    # rises to 0.5, dips at 15, then genuinely beats it at 40
+    routes = [_fake_route(0.1), _fake_route(0.5), _fake_route(0.3), _fake_route(0.6)]
+    clamped = clamp_shade_monotonic(routes, [0.0, 5.0, 15.0, 40.0])
+    assert [r["shade_fraction"] for r in clamped] == [0.1, 0.5, 0.5, 0.6]
+    assert clamped[2] is routes[1]  # fell back to the 0.5 route, not all the way to NONE
+    assert clamped[3] is routes[3]  # kept its own -- it's genuinely shadier
+
+
+def test_clamp_handles_a_single_weight():
+    routes = [_fake_route(0.3)]
+    assert clamp_shade_monotonic(routes, [15.0]) == routes
+
+
+def test_clamp_is_robust_to_weights_requested_out_of_order():
+    # Requested descending; the clamp must reason in ascending-weight space
+    # and return results in the caller's original positions.
+    weights = [40.0, 0.0, 15.0, 5.0]
+    routes = [_fake_route(0.2), _fake_route(0.5), _fake_route(0.4), _fake_route(0.3)]
+    clamped = clamp_shade_monotonic(routes, weights)
+    by_ascending_weight = [clamped[i]["shade_fraction"] for i in sorted(range(4), key=lambda i: weights[i])]
+    assert by_ascending_weight == sorted(by_ascending_weight)  # non-decreasing in weight
+    assert by_ascending_weight[0] == 0.5  # NONE is shadiest here, so all clamp up to it
 
 
 def test_route_length_is_never_shorter_than_the_straight_line_distance(client):
