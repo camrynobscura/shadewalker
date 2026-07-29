@@ -170,20 +170,25 @@ export function snapToPreset(weight: number): number {
 
 export interface RouteComparison {
   extraMinutes: number
-  extraTrees: number
   extraShadePct: number
   extraLengthM: number
 }
 
-/** How much more time/trees/shade the selected preset costs relative to
- * the plain-shortest baseline. Computed client-side -- /route returns
- * every preset's full properties in one response now, so there's no need
- * for the server to precompute just one preset's delta against NONE
- * anymore; this is a pure subtraction over data the client already has. */
+/** How much more shade the selected preset buys, and what it costs in time
+ * and distance, relative to the plain-shortest (NONE) baseline. Computed
+ * client-side -- /route returns every preset's full properties in one
+ * response, so this is a pure subtraction over data the client already has.
+ *
+ * Deliberately no tree-count delta: the server guarantees shade_fraction is
+ * monotonic in Shade_priority (see clamp_shade_monotonic), but tree_count
+ * isn't -- a genuinely shadier route can pass fewer individual trees -- so a
+ * "-3 trees" beside "+5% shade" would muddy the very thing this line is for.
+ * Absolute tree_count still shows in RouteStats. After the clamp, all three
+ * deltas here are guaranteed >= 0, which is why the template can hardcode a
+ * leading "+". */
 export function compareRoutes(selected: RouteFeature, baseline: RouteFeature): RouteComparison {
   return {
     extraMinutes: Math.round(selected.properties.minutes - baseline.properties.minutes),
-    extraTrees: selected.properties.tree_count - baseline.properties.tree_count,
     extraShadePct: Math.round((selected.properties.shade_fraction - baseline.properties.shade_fraction) * 100),
     extraLengthM: Math.round((selected.properties.length_m - baseline.properties.length_m) * 10) / 10,
   }
@@ -366,10 +371,9 @@ export function Controls({
             {comparison && (
               <p className={styles.comparisonLine}>
                 <span className={styles.promptSymbol}>&gt;</span> +
-                <span className={styles.numberHighlight}>{comparison.extraMinutes}</span>{' '}
-                min · +<span className={styles.numberHighlight}>{comparison.extraTrees}</span> trees · +
                 <span className={styles.numberHighlight}>{comparison.extraShadePct}</span>% shade · +
-                {highlightNumber(formatDistance(comparison.extraLengthM))}
+                <span className={styles.numberHighlight}>{comparison.extraMinutes}</span>{' '}
+                min · +{highlightNumber(formatDistance(comparison.extraLengthM))}
               </p>
             )}
           </div>
