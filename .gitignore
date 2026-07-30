@@ -29,6 +29,10 @@ web/dist/
 # Don't narrow this to /CLAUDE.md.
 CLAUDE.md
 
-# Personal project plan/notes — not shared
+# Personal project plan/notes — not shared. HISTORY.md is an index into
+# history/, which holds the split-out parts (see HISTORY.md's own map) —
+# ignore the whole directory, not individual files, so new parts are covered
+# without editing this.
 PLAN.md
 HISTORY.md
+history/
