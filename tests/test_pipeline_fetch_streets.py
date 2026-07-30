@@ -356,6 +356,24 @@ def test_walk_filter_excludes_sidewalk_but_not_crossing():
     assert "crossing" not in excluded
 
 
+def test_walk_filter_admits_bridleway():
+    # NYC's bridle paths are walked and run on daily -- Central Park's
+    # reservoir loop, Prospect Park's bridle path (100% of that park's
+    # fixable coverage gap) -- and a citywide tag survey found ZERO of the
+    # city's 32.45km tagged foot=no, with 37% carrying no foot tag at all.
+    # That's why bridleway sits in this broad allowlist rather than getting
+    # a narrow foot=designated-only query like CYCLEWAY_FILTER: narrowing
+    # would silently drop ~12km of real walkable path. Pinned so a future
+    # "why is a horse path in the walk filter?" cleanup has to read the
+    # reasoning first.
+    highway_clause = re.search(r'\["highway"~"([^"]+)"\]', streets.WALK_FILTER)
+    assert highway_clause is not None
+    assert "bridleway" in highway_clause.group(1).split("|")
+    # The restricted mileage is excluded by access, not by omission -- so
+    # that clause has to stay for admitting bridleway to remain safe.
+    assert '["access"!~"private|no"]' in streets.WALK_FILTER
+
+
 def test_cycleway_filter_requires_foot_designated():
     # Scoped tightly on purpose: broadening this to admit every cycleway
     # (not just explicitly shared-use ones) would start routing

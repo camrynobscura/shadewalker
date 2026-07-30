@@ -53,8 +53,9 @@ _TO_METRIC_CRS = Transformer.from_crs("EPSG:4326", METRIC_CRS, always_xy=True).t
 # footway=sidewalk were being dropped alongside real unnamed street
 # sidewalks; v9: added the ANY_SIDEWALK_FILTER union, geometry-filtered to
 # park reach -- the same park paths that are UNNAMED in OSM, which v8's
-# name test can't rescue) -- it's baked into the cache filename, so old
-# cached graphs are ignored rather than silently reused.
+# name test can't rescue -- and added bridleway to WALK_FILTER's highway
+# allowlist, both shipping in one re-fetch) -- it's baked into the cache
+# filename, so old cached graphs are ignored rather than silently reused.
 GRAPH_CACHE_VERSION = 9
 
 # Overpass's public instance drops connections intermittently under sustained
@@ -69,9 +70,24 @@ FETCH_RETRY_BACKOFF_S = 5
 # Each ["key"~"regex"] clause requires a match; ["key"!~"regex"] excludes
 # (and also passes ways that lack the key entirely).
 WALK_FILTER = (
-    # street/path types a pedestrian can use — note no motorways/trunks
+    # street/path types a pedestrian can use — note no motorways/trunks.
+    # bridleway is here rather than in a narrow foot=designated-only query
+    # of its own (the CYCLEWAY_FILTER pattern) on the strength of a
+    # citywide tag survey: of 32.45km of NYC bridleway across 113 ways,
+    # ZERO is tagged foot=no -- nobody has marked a single one
+    # pedestrian-prohibited -- while 37% (12.03km) carries no foot tag at
+    # all. CYCLEWAY_FILTER is deliberately narrow because most cycleways
+    # really are bike-only; bridleways here are the opposite, so narrowing
+    # to the explicitly-tagged 58% would silently drop ~12km of paths New
+    # Yorkers walk and run on daily (Central Park's reservoir loop,
+    # Prospect Park's bridle path -- the latter being 100% of that park's
+    # fixable coverage gap). The 1.74km that IS restricted is tagged
+    # access=private, which the access clause below already excludes --
+    # and deliberately NOT also added to FOOT_OVERRIDES_ACCESS_FILTER,
+    # since that query needs an explicit foot=designated|yes to override
+    # access, and this restricted mileage carries no foot tag at all.
     '["highway"~"primary|primary_link|secondary|secondary_link|tertiary|tertiary_link'
-    '|unclassified|residential|living_street|pedestrian|footway|path|steps|service"]'
+    '|unclassified|residential|living_street|pedestrian|footway|path|steps|service|bridleway"]'
     '["area"!~"yes"]'                                  # skip plaza *areas* (not lines)
     '["foot"!~"no"]'                                   # explicitly closed to pedestrians
     '["access"!~"private|no"]'                         # gated/private ways
