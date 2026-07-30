@@ -69,6 +69,12 @@ def test_run_fetches_with_a_bbox_padded_past_the_tiles_edges(monkeypatch):
     monkeypatch.setattr(run_tile.boundary, "clip_to_nyc", lambda graph, nyc_shape: graph)
     monkeypatch.setattr(run_tile.centerline, "build_edge_table", lambda graph: (None, fake_edges))
     monkeypatch.setattr(run_tile.tree_scoring, "score_and_join", lambda edges, rows: None)
+    # Whether the real (gitignored, manually-downloaded) canopy raster
+    # happens to exist on the machine running this test is not this test's
+    # concern -- stub it out the same way every other compute stage above
+    # is, so the fetch-bbox wiring this test actually checks can't flip
+    # pass/fail based on local disk contents.
+    monkeypatch.setattr(run_tile.canopy_scoring, "raster_available", lambda: False)
     monkeypatch.setattr(run_tile.export, "write_tile", lambda tile_id, nodes, edges: None)
 
     run_tile.run("pilot")

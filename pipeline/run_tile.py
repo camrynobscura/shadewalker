@@ -17,6 +17,7 @@ import argparse
 from pipeline import config, export
 from pipeline.fetch import boundaries, streets, trees
 from pipeline.graph import boundary, centerline
+from pipeline.scoring import canopy as canopy_scoring
 from pipeline.scoring import trees as tree_scoring
 
 
@@ -100,6 +101,16 @@ def run(tile_id: str, refresh_trees: bool = False) -> None:
     tree_rows = trees.fetch_trees(tree_bbox, tile_id, refresh=refresh_trees)
 
     edges = tree_scoring.score_and_join(edges, tree_rows)
+
+    # Park-edge reach rule (see PLAN.md's Park-canopy section): supplements
+    # Forestry with the 2021 canopy raster for real park polygons, since
+    # Forestry doesn't cover Conservancy-managed park trees at all. Skips
+    # itself gracefully (edges unchanged) when the raster isn't present
+    # locally -- it's a large, gitignored, manually-downloaded file, so the
+    # pilot tile and CI must keep working without it.
+    if canopy_scoring.raster_available():
+        edges = canopy_scoring.apply_park_canopy(edges, canopy_scoring.citywide_park_shape_m())
+
     export.write_tile(tile_id, nodes, edges)
 
     print(f"[{tile_id}] done")

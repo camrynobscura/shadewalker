@@ -43,6 +43,35 @@ def borough_polygon(geojson: dict, borough: str) -> BaseGeometry:
     raise ValueError(f"No borough named {borough!r} in the dataset -- valid names: {valid_names}")
 
 
+def park_polygon(geojson: dict) -> BaseGeometry:
+    """The union of every real park's polygon -- excludes roadside/median
+    slivers and cemeteries (config.PARK_EXCLUDED_TYPECATEGORIES) so the
+    park canopy mask only covers actual park interiors, not traffic
+    triangles or graveyards. Pure function over the raw GeoJSON
+    FeatureCollection -- see pipeline/fetch/parks.py for the fetch.
+
+    Repairs each feature with shapely.make_valid() before unioning -- 9 of
+    the real dataset's polygons (Flagship Parks down to a Nature Area,
+    including John V. Lindsay East River Park) have self-intersecting
+    rings, a genuine defect in NYC's own GIS data, not a fetch/parsing
+    bug. A SECOND make_valid() runs on the union_all() result too:
+    confirmed live (citywide park-canopy re-score, see PLAN.md) that
+    unioning ~1,500 individually-valid polygons can still produce an
+    is_valid=False result -- floating-point robustness in the union
+    algorithm itself, not a leftover input defect -- and a later
+    .intersection() against that invalid union hit GEOS's
+    'TopologyException: side location conflict' near East River Park.
+    Validating only the inputs was NOT sufficient; the output needs its
+    own check.
+    """
+    park_shapes = [
+        shapely.make_valid(shape(feature["geometry"]))
+        for feature in geojson["features"]
+        if feature["properties"].get("typecategory") not in config.PARK_EXCLUDED_TYPECATEGORIES
+    ]
+    return shapely.make_valid(shapely.union_all(park_shapes))
+
+
 def _tile_box(tile_id: str) -> BaseGeometry:
     bbox = config.get_tile_bbox(tile_id)
     return box(bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max)
