@@ -40,10 +40,12 @@ STREETS_DIR = config.RAW_DIR / "streets"
 # CYCLEWAY_FILTER union; v6: added the FOOT_OVERRIDES_ACCESS_FILTER union;
 # v7: fetch all three filters unsimplified and simplify once after
 # composing them, instead of each filter simplifying independently before
-# the union -- see fetch_streets()'s docstring) -- it's baked into the
-# cache filename, so old cached graphs are ignored rather than silently
-# reused.
-GRAPH_CACHE_VERSION = 7
+# the union -- see fetch_streets()'s docstring; v8: added the
+# NAMED_SIDEWALK_FILTER union -- named interior park paths tagged
+# footway=sidewalk were being dropped alongside real unnamed street
+# sidewalks) -- it's baked into the cache filename, so old cached graphs
+# are ignored rather than silently reused.
+GRAPH_CACHE_VERSION = 8
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -112,6 +114,39 @@ FOOT_OVERRIDES_ACCESS_FILTER = (
     '["foot"~"designated|yes"]'
     '["access"~"private|no"]'
     '["footway"!~"sidewalk"]'
+)
+
+# A fourth query, also unioned into the main fetch: WALK_FILTER's
+# ["footway"!~"sidewalk"] clause is right for its stated purpose --
+# dropping the thousands of unnamed sidewalk fragments mapped alongside
+# ordinary streets, which duplicate a street centerline we already have
+# -- but NYC parks' own named interior paths get tagged footway=sidewalk
+# too (they ARE, technically, the "sidewalk" of the park's own internal
+# drive road, in OSM's tagging convention), and dropping those isn't
+# removing a redundant duplicate, it's removing the only representation
+# of a real, named path that exists nowhere else in the data.
+#
+# Confirmed real and load-bearing, not cosmetic: "Central Park Outer
+# Loop" (ways 153232754, 835983087, and others) is tagged
+# footway=sidewalk right at the W65th/Central Park West entrance, and
+# WALK_FILTER was dropping it there -- two points only 104m apart in
+# reality came out 787m apart in our graph, because the router had no
+# nearby way into the interior path network and had to detour to a
+# different entrance. A real street sidewalk is essentially always
+# unnamed (WALK_FILTER's own comment already says so); a footway=sidewalk
+# way that DOES have a name is exactly the "actually a real, notable path"
+# signal WALK_FILTER's allowlist structure can't express (Overpass QL
+# brackets are ANDed -- "NOT sidewalk OR has-a-name" needs its own query,
+# same as CYCLEWAY_FILTER/FOOT_OVERRIDES_ACCESS_FILTER above).
+NAMED_SIDEWALK_FILTER = (
+    '["highway"~"primary|primary_link|secondary|secondary_link|tertiary|tertiary_link'
+    '|unclassified|residential|living_street|pedestrian|footway|path|steps|service"]'
+    '["area"!~"yes"]'
+    '["foot"!~"no"]'
+    '["access"!~"private|no"]'
+    '["service"!~"private|driveway|parking_aisle"]'
+    '["footway"="sidewalk"]'
+    '["name"]'
 )
 
 # Point osmnx's internal HTTP cache into our data/ tree so everything the
@@ -223,11 +258,12 @@ def _fetch_with_retry(bbox: Bbox, custom_filter: str, tile_id: str, label: str) 
 def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph | None:
     """Return the walkable street graph for the bbox, cached per tile --
     the union of WALK_FILTER's main centerline query, CYCLEWAY_FILTER's
-    narrower foot=designated-cycleway query, and
+    narrower foot=designated-cycleway query,
     FOOT_OVERRIDES_ACCESS_FILTER's access=no/private-but-foot-designated
-    query (see all three constants' comments).
+    query, and NAMED_SIDEWALK_FILTER's named-park-path query (see all
+    four constants' comments).
 
-    Each of the three is fetched unsimplified (see _fetch_with_retry's
+    Each of the four is fetched unsimplified (see _fetch_with_retry's
     simplify=False comment for why) and composed into one graph BEFORE
     simplifying -- once, here -- so osmnx's topology simplification sees
     every filter's ways together and can correctly tell a real
@@ -265,6 +301,12 @@ def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph | None:
     )
     if access_override_graph is not None:
         graph = nx.compose(graph, access_override_graph)
+
+    named_sidewalk_graph = _fetch_with_retry(
+        bbox, NAMED_SIDEWALK_FILTER, tile_id, "named park paths tagged footway=sidewalk"
+    )
+    if named_sidewalk_graph is not None:
+        graph = nx.compose(graph, named_sidewalk_graph)
 
     graph = ox.simplification.simplify_graph(graph)
 

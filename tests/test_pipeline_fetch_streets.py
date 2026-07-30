@@ -6,12 +6,12 @@ ConnectionRefusedErrors during the Brooklyn run, each recovering within
 seconds). The two need opposite handling -- the first means skip this tile
 for good, the second means the same request would likely work if asked
 again shortly -- so each gets its own tests here. Also covers the
-CYCLEWAY_FILTER and FOOT_OVERRIDES_ACCESS_FILTER unions (fetch_streets
-now makes three real Overpass queries, not one -- see the module for
-why), and the compose-before-simplify fix (each of the three is fetched
-unsimplified and simplified once after composing, not simplified
-independently before composing -- see fetch_streets()'s own docstring for
-the real bug, High Bridge, this fixes)."""
+CYCLEWAY_FILTER, FOOT_OVERRIDES_ACCESS_FILTER, and NAMED_SIDEWALK_FILTER
+unions (fetch_streets now makes four real Overpass queries, not one --
+see the module for why), and the compose-before-simplify fix (each of the
+four is fetched unsimplified and simplified once after composing, not
+simplified independently before composing -- see fetch_streets()'s own
+docstring for the real bug, High Bridge, this fixes)."""
 
 import re
 
@@ -33,11 +33,12 @@ def _mock_fetch(monkeypatch, tmp_path, graph_from_bbox):
     monkeypatch.setattr(streets.ox, "save_graphml", lambda graph, path: None)
 
 
-def _by_filter(main_fn, cycleway_fn=None, access_override_fn=None):
-    """Dispatch a graph_from_bbox mock by which of the three real queries
+def _by_filter(main_fn, cycleway_fn=None, access_override_fn=None, named_sidewalk_fn=None):
+    """Dispatch a graph_from_bbox mock by which of the four real queries
     fetch_streets makes -- WALK_FILTER (main), CYCLEWAY_FILTER (the
-    shared-path union), or FOOT_OVERRIDES_ACCESS_FILTER (the
-    foot-designated-despite-access=no/private union). Defaults the two
+    shared-path union), FOOT_OVERRIDES_ACCESS_FILTER (the
+    foot-designated-despite-access=no/private union), or
+    NAMED_SIDEWALK_FILTER (the named-park-path union). Defaults the three
     narrower queries to "nothing here" (ValueError, the common real
     case) unless a test supplies its own function for one."""
     def dispatch(**kwargs):
@@ -49,6 +50,10 @@ def _by_filter(main_fn, cycleway_fn=None, access_override_fn=None):
             if access_override_fn is not None:
                 return access_override_fn(**kwargs)
             raise ValueError("no foot-designated access=no/private ways here")
+        if kwargs.get("custom_filter") == streets.NAMED_SIDEWALK_FILTER:
+            if named_sidewalk_fn is not None:
+                return named_sidewalk_fn(**kwargs)
+            raise ValueError("no named sidewalk-tagged park paths here")
         return main_fn(**kwargs)
     return dispatch
 
@@ -190,7 +195,7 @@ def test_fetch_streets_unions_in_foot_designated_access_override_ways(monkeypatc
     assert "a1" in result.nodes
 
 
-def test_fetch_streets_simplifies_once_after_composing_all_three_results(monkeypatch, tmp_path):
+def test_fetch_streets_simplifies_once_after_composing_all_four_results(monkeypatch, tmp_path):
     # The actual bug fix, pinned directly. Real case (High Bridge,
     # confirmed 2026-07-18): a node shared between WALK_FILTER's and
     # CYCLEWAY_FILTER's own results looks like a plain pass-through to
@@ -202,7 +207,7 @@ def test_fetch_streets_simplifies_once_after_composing_all_three_results(monkeyp
     # graph_from_bbox, so its real simplify=True behavior never runs) --
     # so this test doesn't reproduce the bug on real data, it pins the
     # mechanism of the fix: simplify_graph() is called exactly once, on
-    # the graph that already has all three filters' nodes composed in,
+    # the graph that already has all four filters' nodes composed in,
     # not once per filter before composing.
     main_graph = nx.MultiDiGraph()
     main_graph.add_node("m1", x=0.0, y=0.0)
@@ -210,6 +215,8 @@ def test_fetch_streets_simplifies_once_after_composing_all_three_results(monkeyp
     cycleway_graph.add_node("c1", x=1.0, y=1.0)
     override_graph = nx.MultiDiGraph()
     override_graph.add_node("a1", x=2.0, y=2.0)
+    named_sidewalk_graph = nx.MultiDiGraph()
+    named_sidewalk_graph.add_node("n1", x=3.0, y=3.0)
 
     calls = []
 
@@ -220,12 +227,17 @@ def test_fetch_streets_simplifies_once_after_composing_all_three_results(monkeyp
     monkeypatch.setattr(streets.ox.simplification, "simplify_graph", fake_simplify)
     _mock_fetch(
         monkeypatch, tmp_path,
-        _by_filter(lambda **kwargs: main_graph, lambda **kwargs: cycleway_graph, lambda **kwargs: override_graph),
+        _by_filter(
+            lambda **kwargs: main_graph,
+            lambda **kwargs: cycleway_graph,
+            lambda **kwargs: override_graph,
+            lambda **kwargs: named_sidewalk_graph,
+        ),
     )
     streets.fetch_streets(BBOX, "test-simplify-once-tile")
 
     assert len(calls) == 1
-    assert calls[0] == {"m1", "c1", "a1"}
+    assert calls[0] == {"m1", "c1", "a1", "n1"}
 
 
 def test_fetch_streets_works_with_no_access_override_ways_in_the_area(monkeypatch, tmp_path):
@@ -237,6 +249,48 @@ def test_fetch_streets_works_with_no_access_override_ways_in_the_area(monkeypatc
 
     _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
     result = streets.fetch_streets(BBOX, "test-no-access-override-tile")
+
+    assert list(result.nodes) == ["m1"]
+
+
+def test_fetch_streets_unions_in_named_sidewalk_tagged_park_paths(monkeypatch, tmp_path):
+    # Confirmed real: Central Park's own "Central Park Outer Loop" is
+    # tagged footway=sidewalk right at its W65th/Central Park West
+    # entrance (it IS, in OSM's tagging convention, the "sidewalk" of the
+    # park's own internal drive road) -- WALK_FILTER's blanket
+    # footway!=sidewalk exclusion was dropping it there, forcing a ~700m
+    # detour to a different entrance for two points only ~100m apart in
+    # reality (see PLAN.md). Without this union, named interior park
+    # paths tagged as a sidewalk would be missing from the fetched data
+    # entirely, same as before this fix.
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=0.0, y=0.0)
+
+    named_sidewalk_graph = nx.MultiDiGraph()
+    named_sidewalk_graph.add_node("n1", x=3.0, y=3.0)
+
+    def named_sidewalk_fn(**kwargs):
+        assert kwargs.get("custom_filter") == streets.NAMED_SIDEWALK_FILTER
+        return named_sidewalk_graph
+
+    _mock_fetch(
+        monkeypatch, tmp_path,
+        _by_filter(lambda **kwargs: main_graph, named_sidewalk_fn=named_sidewalk_fn),
+    )
+    result = streets.fetch_streets(BBOX, "test-named-sidewalk-union-tile")
+
+    assert "m1" in result.nodes
+    assert "n1" in result.nodes
+
+
+def test_fetch_streets_works_with_no_named_sidewalk_park_paths_in_the_area(monkeypatch, tmp_path):
+    # The common case: most tiles have zero named footway=sidewalk ways --
+    # that must not be treated as an error, or block the main result.
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=0.0, y=0.0)
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    result = streets.fetch_streets(BBOX, "test-no-named-sidewalk-tile")
 
     assert list(result.nodes) == ["m1"]
 
@@ -272,3 +326,12 @@ def test_foot_overrides_access_filter_requires_an_explicit_foot_override():
     # exists to keep out.
     assert '"foot"~"designated|yes"' in streets.FOOT_OVERRIDES_ACCESS_FILTER
     assert '"access"~"private|no"' in streets.FOOT_OVERRIDES_ACCESS_FILTER
+
+
+def test_named_sidewalk_filter_requires_both_sidewalk_and_a_name():
+    # Scoped tightly on purpose: this should only admit footway=sidewalk
+    # ways that ALSO have a real name -- not every sidewalk, which would
+    # reintroduce the thousands of unnamed sidewalk fragments
+    # WALK_FILTER's own footway!=sidewalk clause exists to keep out.
+    assert '"footway"="sidewalk"' in streets.NAMED_SIDEWALK_FILTER
+    assert '["name"]' in streets.NAMED_SIDEWALK_FILTER
