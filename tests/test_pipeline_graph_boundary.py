@@ -51,6 +51,56 @@ def test_borough_polygon_rejects_an_unknown_name():
         boundary.borough_polygon(TWO_SQUARES, "nonexistent")
 
 
+TWO_PARKS_ONE_EXCLUDED = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "properties": {"typecategory": "Flagship Park"},
+            "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]},
+        },
+        {
+            "properties": {"typecategory": "Parkway"},  # excluded: roadside median
+            "geometry": {"type": "Polygon", "coordinates": [[[2, 0], [3, 0], [3, 1], [2, 1], [2, 0]]]},
+        },
+    ],
+}
+
+
+def test_park_polygon_includes_a_real_park():
+    result = boundary.park_polygon(TWO_PARKS_ONE_EXCLUDED)
+    assert result.contains(Point(0.5, 0.5))
+
+
+def test_park_polygon_excludes_a_roadside_typecategory():
+    result = boundary.park_polygon(TWO_PARKS_ONE_EXCLUDED)
+    assert not result.contains(Point(2.5, 0.5))
+
+
+SELF_INTERSECTING_PARK = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            # A "bowtie" ring -- crosses itself at (1, 1), same defect
+            # shape as the 9 real Parks Properties polygons (including
+            # John V. Lindsay East River Park) that crashed a later
+            # .intersection() call with GEOS's "TopologyException: side
+            # location conflict" during the citywide park-canopy re-score.
+            "properties": {"typecategory": "Flagship Park"},
+            "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]]]},
+        },
+    ],
+}
+
+
+def test_park_polygon_repairs_a_self_intersecting_ring():
+    result = boundary.park_polygon(SELF_INTERSECTING_PARK)
+    assert result.is_valid
+    # Must survive a real intersection() call, not just return without
+    # raising -- this is the exact operation that crashed on the
+    # unrepaired geometry.
+    result.intersection(box(0, 0, 1, 1))
+
+
 def _tile_box(row: int, col: int):
     b = config.get_tile_bbox(f"r{row}c{col}")
     return box(b.lon_min, b.lat_min, b.lon_max, b.lat_max)

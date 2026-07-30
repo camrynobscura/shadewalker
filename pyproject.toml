@@ -8,6 +8,7 @@ dependencies = [
     "numpy>=2.5.1",
     "osmnx>=2.1.0",
     "python-igraph>=1.0.0",
+    "rasterio>=1.5.0",
     "requests>=2.34.2",
     "scipy>=1.18.0",
     "shapely>=2.1.2",

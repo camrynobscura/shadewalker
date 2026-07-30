@@ -6,7 +6,10 @@ changes, but "the route uses the correct street" or "gets rejected instead
 of silently mis-snapping" should hold forever.
 """
 
+import pytest
+
 from pipeline import config
+from server.graph_store import clamp_shade_monotonic
 
 
 def test_click_near_a_plaza_snaps_to_the_real_street_not_its_path_network(client):
@@ -91,3 +94,66 @@ def test_destination_outside_coverage_is_rejected_not_silently_mis_snapped(clien
     )
     assert res.status_code == 422
     assert "coverage" in res.json()["detail"].lower()
+
+
+# --- Park-canopy regressions (citywide) -------------------------------------
+# RED until the park-canopy scoring work lands (see PLAN.md). The two repro
+# ODs: at MAX, routes hug a street one block off Central Park instead of the
+# park-edge street, because the park's Conservancy-managed trees are absent
+# from the Forestry dataset, so the park edge scores near-zero shade. These
+# assert against the CLAMPED route -- what the user actually sees -- not raw
+# store.route(), which already prefers the park edge but gets reverted by the
+# monotonicity clamp. citywide-marked: they need the real Manhattan tiles and
+# skip cleanly without them.
+
+WEIGHTS = [0.0, 5.0, 15.0, 40.0]
+
+
+def _clamped_max_route(store, frm, to, month=7):
+    """The route a MAX-shade request actually returns to the user: all four
+    presets computed, then clamp_shade_monotonic applied exactly as /route
+    does."""
+    pair = store.snap_pair(frm[0], frm[1], to[0], to[1])
+    assert pair is not None, "endpoints did not snap to a shared component"
+    start, end = pair
+    routes = [store.route(start, end, tree_weight=w, month=month) for w in WEIGHTS]
+    assert all(r is not None for r in routes), "a preset failed to route"
+    return clamp_shade_monotonic(routes, WEIGHTS)[-1]
+
+
+def _length_on(route, street):
+    return sum(s["length_m"] for s in route["segments"] if s["name"] == street)
+
+
+@pytest.mark.citywide
+def test_max_shade_prefers_central_park_south_over_the_block_one_south(citywide_store):
+    """Central Park's own trees are Conservancy-managed and absent from the
+    Forestry dataset, so Central Park South scores near-zero shade; the
+    monotonicity clamp then reverts a MAX request to West 58th Street (one
+    block south), which -- by our current, park-blind data -- genuinely has
+    more street trees. Once the park's canopy is scored, a MAX walker should
+    be sent along Central Park South, under the park's edge trees, not a block
+    away. Today: 0m on CPS vs ~796m on West 58th."""
+    route = _clamped_max_route(citywide_store, (40.76359, -73.97333), (40.76979, -73.98447))
+    on_park_edge = _length_on(route, "Central Park South")
+    on_block_over = _length_on(route, "West 58th Street")
+    assert on_park_edge > on_block_over, (
+        f"MAX-shade route favors the block one over: {on_park_edge:.0f}m on Central Park South "
+        f"vs {on_block_over:.0f}m on West 58th Street (via {[s['name'] for s in route['segments']]})"
+    )
+
+
+@pytest.mark.citywide
+def test_max_shade_prefers_central_park_west_over_the_block_one_west(citywide_store):
+    """Same root cause: at MAX the route runs up Columbus Avenue (one block
+    west) and only clips ~28m of Central Park West to reach the destination,
+    because the park's canopy along CPW isn't in the score. Once park canopy
+    is scored, MAX should run substantially along Central Park West itself.
+    Today: ~28m on CPW vs the bulk on Columbus Avenue."""
+    route = _clamped_max_route(citywide_store, (40.78051, -73.97666), (40.76982, -73.98103))
+    on_park_edge = _length_on(route, "Central Park West")
+    on_block_over = _length_on(route, "Columbus Avenue")
+    assert on_park_edge > on_block_over, (
+        f"MAX-shade route favors the block one over: {on_park_edge:.0f}m on Central Park West "
+        f"vs {on_block_over:.0f}m on Columbus Avenue (via {[s['name'] for s in route['segments']]})"
+    )

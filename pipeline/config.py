@@ -315,10 +315,76 @@ SHADE_CROSSING_GAP_M = 6.0
 MAX_SNAP_DISTANCE_M = 200.0
 
 
+# ── Park canopy (raster supplement) ─────────────────────────────────────────────
+
+# 2021 NYC Land Cover raster (Zenodo record 14053441, TNC + UVM Spatial
+# Analysis Lab) -- supplements the Forestry tree dataset for parks, whose
+# Conservancy-managed trees Forestry doesn't cover (see PLAN.md's
+# Park-canopy section). 1.7GB, gitignored under data/* -- not fetched by
+# any pipeline/fetch/ script; download manually from the Zenodo record.
+CANOPY_RASTER_PATH = RAW_DIR / "canopy" / "landcover_nyc_2021_6in.tif"
+
+# The raster's own CRS (NAD83 State Plane Long Island, US survey feet) --
+# confirmed directly off the file, matches its .xml sidecar. Vectors get
+# reprojected into this for sampling; the raster itself is never resampled.
+CANOPY_RASTER_CRS = "EPSG:2263"
+
+# Land-cover class code for "tree canopy (crowns > 8ft)" in the raster's
+# 8-class legend (2=grass/shrub, 3=bare, 4=water, 5=building, 6=road,
+# 7=other impervious, 8=railroad). Confirmed via the raster's own colormap.
+CANOPY_RASTER_TREE_CLASS = 1
+
+# NYC Parks Properties `typecategory` values excluded from the park canopy
+# mask: roadside/traffic-island types (a locked scope decision -- these
+# aren't "a park" for routing purposes) plus Cemetery, deferred to a
+# future follow-on branch alongside federal/state green land (Green-Wood
+# etc. aren't even in this NYC-Parks-only dataset, so no separate filter
+# is needed for those -- see PLAN.md's Park-canopy section).
+PARK_EXCLUDED_TYPECATEGORIES = frozenset({
+    "Parkway", "Mall", "Triangle/Plaza", "Strip",  # roadside/median slivers
+    "Cemetery",                                     # deferred follow-on
+    "Buildings/Institutions", "Lot", "Operations", "Retired N/A",  # not park land
+})
+
+# Canopy fraction -> tree-density calibration (Phase 2 street audit: 750
+# ordinary streets stratified across all 5 boroughs, ~150/borough, parks
+# excluded by the real polygon). Fit: density = 0.0798*fraction + 0.0050,
+# R^2=0.40 -- moderate, not high, is expected: fraction (area-based) and
+# density (Forestry's per-tree health/size scoring) are different
+# measurements, and this audit's population is deliberately where
+# Forestry already works, not the park edges this slope gets applied to.
+#
+# Only the SLOPE carries over to the park-edge reach credit
+# (apply_park_canopy() below) -- the intercept is an ordinary street's
+# typical non-street-tree-canopy baseline (private yards, etc.), which
+# doesn't apply to "how much extra shade does the park itself contribute
+# right behind this curb": a park reach fraction of 0 (a street bordering
+# open lawn) must add zero credit, not a phantom nonzero floor.
+CANOPY_FRACTION_TO_DENSITY_SLOPE = 0.0798
+
+# Buffer for the park-edge reach rule (apply_park_canopy) -- deliberately
+# its OWN constant, not TREE_BUFFER_M. TREE_BUFFER_M is tuned to where
+# real Forestry trees stand (12.7-14m for CPS's own fence-line row); the
+# Parks Properties polygon boundary itself sits much farther from a
+# park-edge street's centerline than that -- measured directly against
+# Central Park: Central Park West's real distance is 5.9-27.7m (median
+# 16.1m, only 1% within 14m), Central Park South 11.0-24.8m, Central Park
+# North 19.5-23.5m. A 14m buffer (correct for individual trees) misses
+# the park polygon entirely for ~99% of Central Park West's edges. 30m
+# captures 100% of all three measured -- and can't over-credit the far
+# (building) side of a street regardless of how generous it is, since
+# apply_park_canopy intersects the buffered corridor with the real park
+# polygon before sampling, which excludes anything not actually park land.
+PARK_REACH_BUFFER_M = 30
+
+
 # ── Data sources ──────────────────────────────────────────────────────────────
 
 SOCRATA_BASE_URL = "https://data.cityofnewyork.us/resource"
 TREES_DATASET_ID = "hn5i-inap"      # Forestry Tree Points — the live NYC Tree Map data
+PARKS_DATASET_ID = "enfh-gkve"      # Parks Properties — one polygon per NYC Parks property,
+                                     # `typecategory` distinguishes real parkland from roadside
+                                     # slivers/cemeteries (see PARK_EXCLUDED_TYPECATEGORIES)
 BOUNDARIES_DATASET_ID = "wh2p-dxnf" # Borough Boundaries (water areas included) — see PLAN.md:
                                      # a bridge's midspan sits over water, which the water-
                                      # EXCLUDED sibling dataset (gthc-hcne) doesn't cover --
