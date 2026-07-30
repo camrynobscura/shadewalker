@@ -4,9 +4,10 @@ Find the shadiest walking route between two points in NYC, powered by the live
 [NYC Tree Map](https://data.cityofnewyork.us/Environment/Forestry-Tree-Points/hn5i-inap)
 and OpenStreetMap.
 
-**Status:** Stage 1 is done — a working, WCAG 2.2 AA–accessible app routing
-trees-only on the Carroll Gardens + Gowanus pilot tile. Stage 2 (expand the
-same trees-only routing citywide) hasn't started yet.
+**Status:** routing trees-only across **all five boroughs** — a working, WCAG
+2.2 AA–accessible app over ~489k walk-graph edges, with shade scored from
+both the live tree census and the 2021 NYC canopy raster. Not yet deployed;
+run it locally as below.
 
 ## Layout
 
