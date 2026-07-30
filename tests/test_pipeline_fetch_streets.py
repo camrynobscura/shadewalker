@@ -21,6 +21,7 @@ import pytest
 import requests
 from osmnx._errors import InsufficientResponseError
 
+from pipeline import config
 from pipeline.config import Bbox
 from pipeline.fetch import streets
 
@@ -401,6 +402,99 @@ def test_named_sidewalk_filter_requires_both_sidewalk_and_a_name():
     assert '["name"]' in streets.NAMED_SIDEWALK_FILTER
 
 
+def _cache_roundtrip(monkeypatch, tmp_path, cached_graph, recorded_bbox_signature):
+    """Put a graph in the cache with a given recorded fetch_bbox, then call
+    fetch_streets and report whether it re-fetched. Uses osmnx's real
+    save/load so the attribute genuinely survives a GraphML round trip
+    rather than being asserted against a mock's in-memory dict."""
+    monkeypatch.setattr(streets, "STREETS_DIR", tmp_path)
+    monkeypatch.setattr(streets.time, "sleep", lambda seconds: None)
+
+    if recorded_bbox_signature is not None:
+        cached_graph.graph["fetch_bbox"] = recorded_bbox_signature
+    cached_graph.graph["crs"] = "epsg:4326"
+    # Must match fetch_streets()'s own filename exactly, including the
+    # park-reach variant suffix -- this helper calls it without a
+    # park_reach, so the cache it writes has to carry that suffix too.
+    # Getting this wrong makes the "must re-fetch" tests below pass for the
+    # wrong reason (file never found at all, guard never consulted).
+    path = tmp_path / f"cachetile_v{streets.GRAPH_CACHE_VERSION}_noparkreach.graphml"
+    streets.ox.save_graphml(cached_graph, path)
+
+    fetched = {"count": 0}
+
+    def record_fetch(**kwargs):
+        fetched["count"] += 1
+        fresh = nx.MultiDiGraph()
+        fresh.add_node(2222, x=0.0, y=0.0)  # int ids: osmnx casts them on load
+        return fresh
+
+    monkeypatch.setattr(streets.ox, "graph_from_bbox", _by_filter(record_fetch))
+    result = streets.fetch_streets(BBOX, "cachetile")
+    return result, fetched["count"]
+
+
+def _cached_graph():
+    graph = nx.MultiDiGraph()
+    # Integer node id on purpose: osmnx's load_graphml casts ids to int
+    # (real OSM node ids are integers), so a string id here fails to load
+    # and every cache test would pass for the wrong reason.
+    graph.add_node(1111, x=0.0, y=0.0)
+    return graph
+
+
+def test_fetch_streets_reuses_a_cache_whose_recorded_bbox_matches(monkeypatch, tmp_path):
+    result, fetches = _cache_roundtrip(
+        monkeypatch, tmp_path, _cached_graph(), streets._bbox_signature(BBOX)
+    )
+    assert fetches == 0
+    assert 1111 in result.nodes
+
+
+def test_fetch_streets_refetches_a_cache_recorded_for_a_different_bbox(monkeypatch, tmp_path):
+    # The real failure: commit a461e36 shifted CITY_BBOX.lat_min by exactly
+    # one tile row, so r17c14's cache kept its filename while its contents
+    # became the tile one row north (South Bronx streets served as Astoria
+    # for twelve days). Same shift reproduced here.
+    shifted = Bbox(
+        lat_min=BBOX.lat_min + config.TILE_SIZE_LAT_DEG,
+        lat_max=BBOX.lat_max + config.TILE_SIZE_LAT_DEG,
+        lon_min=BBOX.lon_min,
+        lon_max=BBOX.lon_max,
+    )
+    result, fetches = _cache_roundtrip(
+        monkeypatch, tmp_path, _cached_graph(), streets._bbox_signature(shifted)
+    )
+    assert fetches > 0, "a cache for a different area must not be reused"
+    assert 1111 not in result.nodes
+
+
+def test_fetch_streets_refetches_a_cache_with_no_recorded_bbox(monkeypatch, tmp_path):
+    # Written before this check existed, so nothing ever verified the area
+    # it covers -- unverifiable has to mean re-fetch, or the guard is
+    # trivially bypassed by every pre-existing file.
+    result, fetches = _cache_roundtrip(monkeypatch, tmp_path, _cached_graph(), None)
+    assert fetches > 0
+    assert 1111 not in result.nodes
+
+
+def test_fetch_streets_records_the_fetch_bbox_it_used(monkeypatch, tmp_path):
+    # Without this the guard above can never fire on a freshly written file.
+    saved = {}
+
+    def capture(graph, path):
+        saved["fetch_bbox"] = graph.graph.get("fetch_bbox")
+
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=0.0, y=0.0)
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    monkeypatch.setattr(streets.ox, "save_graphml", capture)
+
+    streets.fetch_streets(BBOX, "test-records-bbox-tile")
+
+    assert saved["fetch_bbox"] == streets._bbox_signature(BBOX)
+
+
 def test_any_sidewalk_filter_matches_sidewalks_with_or_without_a_name():
     # The deliberate counterpart to the test above: this filter drops the
     # name requirement (a park's entrance paths are as often unnamed as
@@ -441,6 +535,33 @@ def test_fetch_streets_keeps_park_reach_sidewalks_and_drops_the_rest(monkeypatch
 
     assert {"in1", "in2"} <= set(result.nodes)
     assert not {"out1", "out2"} & set(result.nodes)
+
+
+def test_fetch_streets_survives_a_tile_where_no_sidewalk_reaches_a_park(monkeypatch, tmp_path):
+    # Not an edge case -- this is most of the city. Any tile with no park
+    # inside PARK_REACH_BUFFER_M drops every segment the sidewalk query
+    # returned, and _park_reach_sidewalks() hands back None rather than an
+    # empty graph (composing an edgeless graph in would contribute stray
+    # nodes with no edges, the same shape as the Bronx r22c19 case
+    # run_tile.py already guards against). Untested, this would have
+    # crashed on the first park-free tile of a 276-tile citywide run.
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=-73.95, y=40.05)
+
+    sidewalks = nx.MultiDiGraph()
+    sidewalks.add_node("far1", x=-73.9900, y=40.0900)
+    sidewalks.add_node("far2", x=-73.9901, y=40.0901)
+    sidewalks.add_edge("far1", "far2")
+
+    _mock_fetch(
+        monkeypatch, tmp_path,
+        _by_filter(lambda **kwargs: main_graph, any_sidewalk_fn=lambda **kwargs: sidewalks),
+    )
+    result = streets.fetch_streets(
+        BBOX, "test-parkless-tile", park_reach=_park_reach_around(-73.95, 40.05)
+    )
+
+    assert list(result.nodes) == ["m1"]
 
 
 def test_fetch_streets_narrows_sidewalks_before_simplifying_not_after(monkeypatch, tmp_path):

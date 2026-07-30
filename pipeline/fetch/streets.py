@@ -304,6 +304,30 @@ def _fetch_with_retry(bbox: Bbox, custom_filter: str, tile_id: str, label: str) 
             time.sleep(wait_s)
 
 
+def _bbox_signature(bbox: Bbox) -> str:
+    """A stable string identifying the exact area a cached graph covers.
+
+    Stored inside the GraphML and re-checked on load, because the cache
+    FILENAME is not a sufficient key: a tile id only means an area relative
+    to the current grid definition, and that definition has moved. Commit
+    a461e36 shifted CITY_BBOX.lat_min from 40.49 to 40.472 -- exactly
+    TILE_SIZE_LAT_DEG, one whole row -- so every tile id silently came to
+    mean the area one row south of what it had meant. GRAPH_CACHE_VERSION
+    should have been bumped (its own comment says "or the fetch bbox logic
+    changes," and redefining the grid changes it for every tile), but
+    wasn't, so caches written before the shift kept matching their
+    filenames while no longer matching their contents.
+
+    Two tiles survived that way for twelve days: r17c14 was serving South
+    Bronx streets and r19c13 Washington Heights, both from one row north.
+    Everything else happened to get re-fetched after the shift. Discipline
+    is what failed here, so this records the real bbox rather than relying
+    on remembering to bump a constant.
+    """
+    return (f"{bbox.lat_min:.6f},{bbox.lat_max:.6f},"
+            f"{bbox.lon_min:.6f},{bbox.lon_max:.6f}")
+
+
 def _park_reach_sidewalks(
     graph: nx.MultiDiGraph | None, park_reach: prepared.PreparedGeometry, tile_id: str
 ) -> nx.MultiDiGraph | None:
@@ -383,10 +407,20 @@ def fetch_streets(
     variant = "" if park_reach is not None else "_noparkreach"
     graphml_path = STREETS_DIR / f"{tile_id}_v{GRAPH_CACHE_VERSION}{variant}.graphml"
 
+    wanted = _bbox_signature(bbox)
     if graphml_path.exists():
         graph = ox.load_graphml(graphml_path)
-        print(f"  [streets] {tile_id}: {len(graph.nodes)} nodes, {len(graph.edges)} edges (cached)")
-        return graph
+        cached = graph.graph.get("fetch_bbox")
+        if cached == wanted:
+            print(f"  [streets] {tile_id}: {len(graph.nodes)} nodes, {len(graph.edges)} edges (cached)")
+            return graph
+        # Deliberately a cache MISS, not an error: re-fetching self-heals,
+        # and the alternative (trusting the filename) is what let two tiles
+        # publish another neighbourhood's streets for twelve days. A cache
+        # with no recorded bbox at all is equally untrustworthy -- it was
+        # written before this check existed, so nothing verified it.
+        print(f"  [streets] {tile_id}: cached graph covers {cached or 'an unrecorded area'}, "
+              f"not {wanted} -- re-fetching")
 
     street_graph = _fetch_with_retry(bbox, WALK_FILTER, tile_id, "streets")
     if street_graph is None:
@@ -422,6 +456,10 @@ def fetch_streets(
             graph = nx.compose(graph, park_sidewalk_graph)
 
     graph = ox.simplification.simplify_graph(graph)
+
+    # Record what this graph actually covers, so a later run can tell
+    # whether the filename still means the same area (see _bbox_signature).
+    graph.graph["fetch_bbox"] = wanted
 
     STREETS_DIR.mkdir(parents=True, exist_ok=True)
     ox.save_graphml(graph, graphml_path)
