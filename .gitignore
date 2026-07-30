@@ -22,6 +22,11 @@ web/dist/
 
 # Claude Code local (per-machine) state — settings, plans, scheduled-task locks
 .claude/
+
+# Every CLAUDE.md, at any depth — deliberately NOT anchored with a leading
+# slash, so nested per-area ones (web/CLAUDE.md, and any future server/ or
+# pipeline/ equivalent) are covered automatically without editing this file.
+# Don't narrow this to /CLAUDE.md.
 CLAUDE.md
 
 # Personal project plan/notes — not shared
