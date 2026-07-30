@@ -21,7 +21,7 @@ def test_run_fetches_with_a_bbox_padded_past_the_tiles_edges(monkeypatch):
     tile_bbox = config.get_tile_bbox("pilot")
     received = {}
 
-    def fake_fetch_streets(bbox, tile_id):
+    def fake_fetch_streets(bbox, tile_id, park_reach=None):
         received["streets"] = bbox
         # A real (trivial) graph, not a bare sentinel: run() now calls
         # .number_of_edges() on whatever clip_to_nyc hands back (mocked to
@@ -75,6 +75,11 @@ def test_run_fetches_with_a_bbox_padded_past_the_tiles_edges(monkeypatch):
     # is, so the fetch-bbox wiring this test actually checks can't flip
     # pass/fail based on local disk contents.
     monkeypatch.setattr(run_tile.canopy_scoring, "raster_available", lambda: False)
+    # Same reasoning one line up, for the same reason: the park-reach shape
+    # the street fetch now takes is built from a real (disk-cached, but
+    # network-backed on a cold machine) Socrata fetch, which this test has
+    # no business triggering -- fake_fetch_streets ignores the value anyway.
+    monkeypatch.setattr(run_tile.canopy_scoring, "citywide_park_reach_m", lambda: None)
     monkeypatch.setattr(run_tile.export, "write_tile", lambda tile_id, nodes, edges: None)
 
     run_tile.run("pilot")
@@ -114,7 +119,11 @@ def test_run_removes_a_stale_export_when_boundary_clipping_empties_the_tile(monk
 
     graph = nx.MultiDiGraph()
     graph.add_node(1, x=0.0, y=0.0)
-    monkeypatch.setattr(run_tile.streets, "fetch_streets", lambda bbox, tile_id: graph)
+    # run() builds the park-reach shape before fetching streets, and that
+    # walks a real Socrata fetch (disk-cached, but network-backed on a cold
+    # machine) -- not this test's concern, and the faked fetch ignores it.
+    monkeypatch.setattr(run_tile.canopy_scoring, "citywide_park_reach_m", lambda: None)
+    monkeypatch.setattr(run_tile.streets, "fetch_streets", lambda bbox, tile_id, park_reach=None: graph)
     monkeypatch.setattr(run_tile.boundaries, "fetch_borough_boundaries", lambda: {})
     monkeypatch.setattr(run_tile.boundary, "nyc_boundary", lambda geojson: None)
     # Empties the tile entirely -- the exact condition that used to leave
@@ -141,7 +150,11 @@ def test_run_skips_a_tile_left_with_edgeless_nodes_after_boundary_clipping(monke
 
     graph = nx.MultiDiGraph()
     graph.add_node(1, x=0.0, y=0.0)
-    monkeypatch.setattr(run_tile.streets, "fetch_streets", lambda bbox, tile_id: graph)
+    # run() builds the park-reach shape before fetching streets, and that
+    # walks a real Socrata fetch (disk-cached, but network-backed on a cold
+    # machine) -- not this test's concern, and the faked fetch ignores it.
+    monkeypatch.setattr(run_tile.canopy_scoring, "citywide_park_reach_m", lambda: None)
+    monkeypatch.setattr(run_tile.streets, "fetch_streets", lambda bbox, tile_id, park_reach=None: graph)
     monkeypatch.setattr(run_tile.boundaries, "fetch_borough_boundaries", lambda: {})
     monkeypatch.setattr(run_tile.boundary, "nyc_boundary", lambda geojson: None)
 

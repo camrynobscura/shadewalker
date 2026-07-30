@@ -18,7 +18,7 @@ import pytest
 import rasterio
 from pyproj import Transformer
 from rasterio.transform import from_origin
-from shapely.geometry import LineString, box
+from shapely.geometry import LineString, Point, box
 from shapely.ops import transform as shapely_transform
 
 from pipeline import config
@@ -188,3 +188,43 @@ def test_citywide_park_shape_m_is_always_valid(monkeypatch):
         assert canopy.citywide_park_shape_m().is_valid
     finally:
         canopy.citywide_park_shape_m.cache_clear()
+
+
+def test_citywide_park_reach_m_reaches_past_the_park_polygons_own_edge(monkeypatch):
+    """The reason this function exists at all, pinned. NYC's own Parks
+    Properties polygons sit a real distance off the paths they ought to
+    contain: measured directly, a 211m stretch of Central Park's Outer Loop
+    where it hugs the park's southern edge falls ~9m OUTSIDE Central Park's
+    polygon. A strict inside-the-polygon test therefore rejects exactly the
+    park-entrance paths the park-reach sidewalk rule
+    (pipeline/fetch/streets.py) is meant to find, so this must be buffered
+    -- if the buffer is ever dropped, that bug comes straight back.
+    """
+    square = {
+        "type": "FeatureCollection",
+        "features": [{
+            "properties": {"typecategory": "Flagship Park"},
+            "geometry": {"type": "Polygon", "coordinates": [[
+                [-73.99, 40.71], [-73.97, 40.71], [-73.97, 40.73], [-73.99, 40.73], [-73.99, 40.71],
+            ]]},
+        }],
+    }
+    monkeypatch.setattr(canopy.park_fetch, "fetch_park_properties", lambda refresh=False: square)
+    canopy.citywide_park_shape_m.cache_clear()
+    canopy.citywide_park_reach_m.cache_clear()
+    try:
+        park_m = canopy.citywide_park_shape_m()
+        reach = canopy.citywide_park_reach_m()
+
+        # A point just outside the polygon's own edge -- the ~9m-off case.
+        min_x, min_y, max_x, max_y = park_m.bounds
+        just_outside = Point(max_x + 9, (min_y + max_y) / 2)
+        assert not park_m.contains(just_outside)
+        assert reach.contains(just_outside)
+
+        # Still bounded, though: well past the buffer stays out, so this is
+        # a reach rule and not "every sidewalk in the city."
+        assert not reach.contains(Point(max_x + config.PARK_REACH_BUFFER_M + 50, (min_y + max_y) / 2))
+    finally:
+        canopy.citywide_park_shape_m.cache_clear()
+        canopy.citywide_park_reach_m.cache_clear()

@@ -53,10 +53,18 @@ def run(tile_id: str, refresh_trees: bool = False) -> None:
     # server load time, not here.
     fetch_bbox = config.buffered_bbox(bbox, config.FETCH_BUFFER_M)
 
+    # Park reach (all NYC parks, buffered, in meters) lets the street fetch
+    # admit park-entrance paths OSM tags as plain unnamed sidewalks --
+    # without it the router can reach a park's interior loop but not exit it
+    # efficiently, walking 1443m where the real network connects in 1287m
+    # (Central Park's south end, measured; see PLAN.md). Computed once per
+    # process, not per tile (lru_cache in canopy).
+    park_reach = canopy_scoring.citywide_park_reach_m()
+
     # fetch (cached). Streets first: a tile with no matching streets (open
     # water) needs no tree data either, so checking this first skips a
     # pointless Socrata call on top of the Overpass one.
-    street_graph = streets.fetch_streets(fetch_bbox, tile_id)
+    street_graph = streets.fetch_streets(fetch_bbox, tile_id, park_reach=park_reach)
     if street_graph is None:
         print(f"[{tile_id}] skipped -- no walkable streets in this area")
         _remove_stale_export(tile_id)
