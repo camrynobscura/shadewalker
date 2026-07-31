@@ -588,3 +588,92 @@ def test_every_edge_geometry_starts_and_ends_at_its_own_nodes(graph_store):
             f"edge {edge}: geometry endpoints {coords[0]}..{coords[-1]} don't "
             f"land on its nodes {node_u} / {node_v} -- packed buffer misaligned?"
         )
+
+
+# --- Route length can only shrink as the graph grows (citywide) -------------
+# A structural invariant, not a bug pin: every fix in fix-interior-park-paths
+# only ADMITS previously-excluded ways, and adding edges to a graph can never
+# lengthen a shortest path between two fixed nodes. Verified by hand for this
+# branch (route_invariant_check.py: 360 routes across Central Park, Prospect
+# Park, and a park-dense control area, zero got longer) -- this pins that
+# property going forward instead of re-deriving it by hand for the next
+# filter change.
+#
+# Golden-baseline, not a live before/after diff: at test time there is only
+# one graph, so the "before" side is this hardcoded table, captured from real
+# production data on 2026-07-30. A future run whose shortest path exceeds its
+# baseline either found a genuine regression (an edge/way disappeared) or
+# made a deliberate change that legitimately shortens routes further -- in
+# the latter case, re-run gen_golden_baseline.py-style and update the table,
+# the same way test_pipeline_config.py's golden grid gets updated: "last",
+# after confirming the change is intentional.
+#
+# Node ids are real OSM ids (stable across re-fetches -- fetching more ways
+# doesn't renumber existing nodes), pinned to two of the areas most affected
+# by this branch's filters. Distances are graph-shortest-path length in
+# meters (tree_weight=0 cost equals raw length), not straight-line.
+GOLDEN_ROUTE_LENGTHS_M = [
+    ("10173346255", "7792403895", 1093.2),  # Central Park
+    ("12859262636", "10168029011", 4611.8),  # Central Park
+    ("422438842", "10160790441", 2348.9),  # Central Park
+    ("3809536797", "10171089657", 1696.9),  # Central Park
+    ("10058808476", "3875114041", 1395.9),  # Central Park
+    ("7424069298", "6254630385", 1741.4),  # Central Park
+    ("9634645806", "4256322566", 1315.8),  # Central Park
+    ("8782897315", "7094731933", 1032.5),  # Central Park
+    ("10597902945", "9897810834", 2775.4),  # Central Park
+    ("42427036", "4254492560", 2176.6),  # Central Park
+    ("10172953889", "10125139627", 2211.4),  # Central Park
+    ("6746991446", "4254503840", 2818.9),  # Central Park
+    ("3998699937", "6267096939", 4608.5),  # Central Park
+    ("10042613562", "10061835802", 839.4),  # Central Park
+    ("4254513238", "42424851", 1456.8),  # Central Park
+    ("2645474860", "10617167151", 320.0),  # Prospect Park
+    ("10709356781", "8218642199", 983.2),  # Prospect Park
+    ("42487594", "6629833466", 1256.4),  # Prospect Park
+    ("4877126282", "7263499409", 809.0),  # Prospect Park
+    ("8025743455", "10291728481", 1357.0),  # Prospect Park
+    ("9876563345", "10035103116", 563.4),  # Prospect Park
+    ("42478511", "11350040314", 2048.3),  # Prospect Park
+    ("10642847745", "6913843080", 1439.3),  # Prospect Park
+    ("9370735632", "10596479306", 1513.8),  # Prospect Park
+    ("755897194", "42481443", 2326.6),  # Prospect Park
+    ("4575701548", "758811765", 3310.7),  # Prospect Park
+    ("10556968370", "541998127", 948.3),  # Prospect Park
+    ("6604177794", "2377594454", 3022.1),  # Prospect Park
+    ("42481443", "10742553722", 1829.9),  # Prospect Park
+    ("9634487166", "2645335202", 1473.7),  # Prospect Park
+]
+
+# A tiny amount of slack for floating-point accumulation in path summation,
+# not for tolerating real regressions.
+_SLACK_M = 0.5
+
+
+@pytest.mark.citywide
+def test_golden_route_lengths_never_get_longer(citywide_store):
+    """See module comment above the GOLDEN_ROUTE_LENGTHS_M table."""
+    checked = 0
+    for node_a, node_b, baseline_m in GOLDEN_ROUTE_LENGTHS_M:
+        if node_a not in citywide_store._id_to_idx or node_b not in citywide_store._id_to_idx:
+            continue  # node pruned by a real OSM edit -- not this invariant's concern
+        idx_a = citywide_store._id_to_idx[node_a]
+        idx_b = citywide_store._id_to_idx[node_b]
+        current_m = citywide_store._graph.distances(
+            source=[idx_a], target=[idx_b], weights=citywide_store._length
+        )[0][0]
+        assert current_m != float("inf"), (
+            f"{node_a} -> {node_b} used to route ({baseline_m}m) and is now unreachable "
+            "-- a fetch/filter change disconnected it"
+        )
+        assert current_m <= baseline_m + _SLACK_M, (
+            f"{node_a} -> {node_b} got LONGER: {baseline_m}m -> {current_m:.1f}m. "
+            "Adding ways should never lengthen a shortest path -- investigate before "
+            "assuming this baseline just needs bumping."
+        )
+        checked += 1
+
+    assert checked >= len(GOLDEN_ROUTE_LENGTHS_M) - 3, (
+        f"only {checked}/{len(GOLDEN_ROUTE_LENGTHS_M)} golden pairs still resolve -- "
+        "too many nodes gone to trust this run; investigate rather than re-baselining blind"
+    )

@@ -57,6 +57,36 @@ def citywide_park_shape_m() -> BaseGeometry:
     return shapely.make_valid(shapely_transform(_TO_METRIC_CRS, park_shape_4326))
 
 
+@functools.lru_cache(maxsize=1)
+def citywide_park_reach_m() -> prepared.PreparedGeometry:
+    """citywide_park_shape_m() buffered out to PARK_REACH_BUFFER_M and
+    prepared for fast repeated point-in-shape tests.
+
+    Lives here rather than in pipeline/fetch/ because it shares
+    citywide_park_shape_m()'s whole fetch → union → reproject → cache
+    chain, and pipeline/graph/boundary.py is deliberately pure functions
+    over raw GeoJSON with no fetching of its own. Its consumer is the
+    fetch stage, though (pipeline/fetch/streets.py's park-reach sidewalk
+    rule), injected via run_tile.py so fetch/ takes no dependency on
+    scoring/.
+
+    The buffer is what makes this usable at all: the Parks Properties
+    polygons sit a real distance off the paths they ought to contain --
+    measured directly, a 211m stretch of Central Park's own Outer Loop
+    where it hugs the park's southern edge falls ~9m OUTSIDE Central
+    Park's polygon. A strict inside-the-polygon test therefore rejects
+    exactly the park-entrance paths this is meant to find, which is the
+    same lesson PARK_REACH_BUFFER_M was introduced for during the
+    park-canopy work (see PLAN.md).
+
+    prepared.prep() because the caller runs one containment test per
+    candidate sidewalk segment -- thousands per tile -- against a
+    ~1,500-polygon citywide union; unprepared, each test re-walks the
+    whole geometry.
+    """
+    return prepared.prep(shapely.make_valid(citywide_park_shape_m().buffer(config.PARK_REACH_BUFFER_M)))
+
+
 def raster_available(path: Path = config.CANOPY_RASTER_PATH) -> bool:
     """Whether the (large, gitignored, manually-downloaded) canopy raster is
     present. Callers that must survive its absence -- the pilot tile

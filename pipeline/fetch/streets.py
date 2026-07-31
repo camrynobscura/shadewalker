@@ -27,11 +27,19 @@ import time
 import networkx as nx
 import osmnx as ox
 import requests
+from pyproj import Transformer
+from shapely import prepared
+from shapely.geometry import Point
 
 from pipeline import config
 from pipeline.config import Bbox
+from pipeline.graph.centerline import METRIC_CRS
 
 STREETS_DIR = config.RAW_DIR / "streets"
+
+# Park-reach shapes are measured in meters (see _park_reach_sidewalks) --
+# the one place this fetch module needs to leave lon/lat degrees.
+_TO_METRIC_CRS = Transformer.from_crs("EPSG:4326", METRIC_CRS, always_xy=True).transform
 
 # Bump this whenever WALK_FILTER changes, or the fetch bbox logic changes
 # (v3: run_tile.py started passing a FETCH_BUFFER_M-padded bbox instead of
@@ -40,10 +48,15 @@ STREETS_DIR = config.RAW_DIR / "streets"
 # CYCLEWAY_FILTER union; v6: added the FOOT_OVERRIDES_ACCESS_FILTER union;
 # v7: fetch all three filters unsimplified and simplify once after
 # composing them, instead of each filter simplifying independently before
-# the union -- see fetch_streets()'s docstring) -- it's baked into the
-# cache filename, so old cached graphs are ignored rather than silently
-# reused.
-GRAPH_CACHE_VERSION = 7
+# the union -- see fetch_streets()'s docstring; v8: added the
+# NAMED_SIDEWALK_FILTER union -- named interior park paths tagged
+# footway=sidewalk were being dropped alongside real unnamed street
+# sidewalks; v9: added the ANY_SIDEWALK_FILTER union, geometry-filtered to
+# park reach -- the same park paths that are UNNAMED in OSM, which v8's
+# name test can't rescue -- and added bridleway to WALK_FILTER's highway
+# allowlist, both shipping in one re-fetch) -- it's baked into the cache
+# filename, so old cached graphs are ignored rather than silently reused.
+GRAPH_CACHE_VERSION = 9
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -57,9 +70,24 @@ FETCH_RETRY_BACKOFF_S = 5
 # Each ["key"~"regex"] clause requires a match; ["key"!~"regex"] excludes
 # (and also passes ways that lack the key entirely).
 WALK_FILTER = (
-    # street/path types a pedestrian can use — note no motorways/trunks
+    # street/path types a pedestrian can use — note no motorways/trunks.
+    # bridleway is here rather than in a narrow foot=designated-only query
+    # of its own (the CYCLEWAY_FILTER pattern) on the strength of a
+    # citywide tag survey: of 32.45km of NYC bridleway across 113 ways,
+    # ZERO is tagged foot=no -- nobody has marked a single one
+    # pedestrian-prohibited -- while 37% (12.03km) carries no foot tag at
+    # all. CYCLEWAY_FILTER is deliberately narrow because most cycleways
+    # really are bike-only; bridleways here are the opposite, so narrowing
+    # to the explicitly-tagged 58% would silently drop ~12km of paths New
+    # Yorkers walk and run on daily (Central Park's reservoir loop,
+    # Prospect Park's bridle path -- the latter being 100% of that park's
+    # fixable coverage gap). The 1.74km that IS restricted is tagged
+    # access=private, which the access clause below already excludes --
+    # and deliberately NOT also added to FOOT_OVERRIDES_ACCESS_FILTER,
+    # since that query needs an explicit foot=designated|yes to override
+    # access, and this restricted mileage carries no foot tag at all.
     '["highway"~"primary|primary_link|secondary|secondary_link|tertiary|tertiary_link'
-    '|unclassified|residential|living_street|pedestrian|footway|path|steps|service"]'
+    '|unclassified|residential|living_street|pedestrian|footway|path|steps|service|bridleway"]'
     '["area"!~"yes"]'                                  # skip plaza *areas* (not lines)
     '["foot"!~"no"]'                                   # explicitly closed to pedestrians
     '["access"!~"private|no"]'                         # gated/private ways
@@ -113,6 +141,62 @@ FOOT_OVERRIDES_ACCESS_FILTER = (
     '["access"~"private|no"]'
     '["footway"!~"sidewalk"]'
 )
+
+# A fourth query, also unioned into the main fetch: WALK_FILTER's
+# ["footway"!~"sidewalk"] clause is right for its stated purpose --
+# dropping the thousands of unnamed sidewalk fragments mapped alongside
+# ordinary streets, which duplicate a street centerline we already have
+# -- but NYC parks' own named interior paths get tagged footway=sidewalk
+# too (they ARE, technically, the "sidewalk" of the park's own internal
+# drive road, in OSM's tagging convention), and dropping those isn't
+# removing a redundant duplicate, it's removing the only representation
+# of a real, named path that exists nowhere else in the data.
+#
+# Confirmed real and load-bearing, not cosmetic: "Central Park Outer
+# Loop" (ways 153232754, 835983087, and others) is tagged
+# footway=sidewalk right at the W65th/Central Park West entrance, and
+# WALK_FILTER was dropping it there -- two points only 104m apart in
+# reality came out 787m apart in our graph, because the router had no
+# nearby way into the interior path network and had to detour to a
+# different entrance. A real street sidewalk is essentially always
+# unnamed (WALK_FILTER's own comment already says so); a footway=sidewalk
+# way that DOES have a name is exactly the "actually a real, notable path"
+# signal WALK_FILTER's allowlist structure can't express (Overpass QL
+# brackets are ANDed -- "NOT sidewalk OR has-a-name" needs its own query,
+# same as CYCLEWAY_FILTER/FOOT_OVERRIDES_ACCESS_FILTER above).
+NAMED_SIDEWALK_FILTER = (
+    '["highway"~"primary|primary_link|secondary|secondary_link|tertiary|tertiary_link'
+    '|unclassified|residential|living_street|pedestrian|footway|path|steps|service"]'
+    '["area"!~"yes"]'
+    '["foot"!~"no"]'
+    '["access"!~"private|no"]'
+    '["service"!~"private|driveway|parking_aisle"]'
+    '["footway"="sidewalk"]'
+    '["name"]'
+)
+
+# A fifth query -- NAMED_SIDEWALK_FILTER without the ["name"] requirement,
+# so it matches EVERY walkable footway=sidewalk way. On its own that would
+# re-admit the thousands of duplicate street sidewalks WALK_FILTER exists
+# to exclude, so it is never unioned in whole: _park_reach_sidewalks()
+# keeps only the segments that actually reach a real park polygon (see
+# fetch_streets()) and discards the rest.
+#
+# Why the name test alone wasn't enough: measured over a unified graph of
+# Central Park's south end -- one graph, no tiling, so tile-boundary
+# effects were impossible by construction -- the router still walked 1443m
+# between two points the true network connects in 1287m. The missing
+# stretch is the UNNAMED footway=sidewalk mesh linking the Outer Loop to
+# the street grid at Grand Army Plaza; a park's entrance paths are exactly
+# as likely to be unnamed in OSM as named, and NAMED_SIDEWALK_FILTER can
+# only see the named half. Admitting all sidewalks citywide instead does
+# fix the route, but cost +59% edges in a dense park-free stretch of the
+# Upper East Side and pushed unnamed edges from 47% to 67% of the graph
+# (route descriptions read from those names). Filtering to park reach hits
+# the same 1286m route for +10% edges near parks and, because the filter
+# runs BEFORE the single simplify pass, +0% -- byte-identical output --
+# where there are no parks. See PLAN.md.
+ANY_SIDEWALK_FILTER = NAMED_SIDEWALK_FILTER.replace('["name"]', '')
 
 # Point osmnx's internal HTTP cache into our data/ tree so everything the
 # pipeline ever downloads lives under one gitignored roof.
@@ -220,32 +304,138 @@ def _fetch_with_retry(bbox: Bbox, custom_filter: str, tile_id: str, label: str) 
             time.sleep(wait_s)
 
 
-def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph | None:
+def _bbox_signature(bbox: Bbox) -> str:
+    """A stable string identifying the exact area a cached graph covers.
+
+    Stored inside the GraphML and re-checked on load, because the cache
+    FILENAME is not a sufficient key: a tile id only means an area relative
+    to the current grid definition, and that definition has moved. Commit
+    a461e36 shifted CITY_BBOX.lat_min from 40.49 to 40.472 -- exactly
+    TILE_SIZE_LAT_DEG, one whole row -- so every tile id silently came to
+    mean the area one row south of what it had meant. GRAPH_CACHE_VERSION
+    should have been bumped (its own comment says "or the fetch bbox logic
+    changes," and redefining the grid changes it for every tile), but
+    wasn't, so caches written before the shift kept matching their
+    filenames while no longer matching their contents.
+
+    Two tiles survived that way for twelve days: r17c14 was serving South
+    Bronx streets and r19c13 Washington Heights, both from one row north.
+    Everything else happened to get re-fetched after the shift. Discipline
+    is what failed here, so this records the real bbox rather than relying
+    on remembering to bump a constant.
+    """
+    return (f"{bbox.lat_min:.6f},{bbox.lat_max:.6f},"
+            f"{bbox.lon_min:.6f},{bbox.lon_max:.6f}")
+
+
+def _park_reach_sidewalks(
+    graph: nx.MultiDiGraph | None, park_reach: prepared.PreparedGeometry, tile_id: str
+) -> nx.MultiDiGraph | None:
+    """Keep only the ANY_SIDEWALK_FILTER edges that reach a real park,
+    dropping the duplicate-of-a-street-centerline majority. None (here or
+    passed in) means nothing survived, which fetch_streets() treats the
+    same as a filter matching nothing at all.
+
+    Tests each edge's MIDPOINT for containment rather than measuring what
+    fraction of its length falls inside, because a lone containment check is
+    what prepared geometry can actually accelerate (prep() speeds up
+    predicates, not .intersection()).
+
+    An earlier version of this comment justified that by calling these
+    segments "short enough that the midpoint and a length-fraction test
+    agree." The first half of that is false and was never measured: they come
+    from an unsimplified fetch, so each is one straight run between
+    consecutive OSM nodes, and a straight 250m sidewalk with two nodes is one
+    250m segment. Measured on r16c11: median 8.5m, but p90 87m, p99 249m, and
+    24.6% longer than 60m -- against a 30m buffer.
+    The conclusion happens to hold anyway, which is why this still uses the
+    midpoint: running both rules over the same 6,266 segments, they disagreed
+    on **12** (0.2%), all admitted by midpoint and rejected by fraction, and
+    the resulting routes were indistinguishable. Long segments here are
+    almost always wholly inside or wholly outside park reach, not straddling.
+    So this is a cheap approximation that was verified rather than assumed --
+    switching to the exact test would cost a full re-fetch (it changes graph
+    content, so GRAPH_CACHE_VERSION would have to bump) to move 0.2% of
+    admitted segments. That 12 is r16c11's count, not a citywide one; the
+    citywide number was never measured, only the rate.
+
+    park_reach is in METRIC_CRS, so midpoints reproject into it before
+    testing -- the dual-CRS rule: the buffer that built park_reach is only
+    meaningful in meters, and comparing a degree-space point against it
+    would silently mean something else entirely.
+    """
+    if graph is None:
+        return None
+
+    keep_edges = []
+    for u, v, key in graph.edges(keys=True):
+        mid_lon = (graph.nodes[u]["x"] + graph.nodes[v]["x"]) / 2
+        mid_lat = (graph.nodes[u]["y"] + graph.nodes[v]["y"]) / 2
+        if park_reach.contains(Point(_TO_METRIC_CRS(mid_lon, mid_lat))):
+            keep_edges.append((u, v, key))
+
+    dropped = graph.number_of_edges() - len(keep_edges)
+    print(f"  [streets] {tile_id}: park-reach sidewalks: kept {len(keep_edges)}, "
+          f"dropped {dropped} duplicate-of-street segments")
+    if not keep_edges:
+        return None
+
+    return graph.edge_subgraph(keep_edges).copy()
+
+
+def fetch_streets(
+    bbox: Bbox, tile_id: str, park_reach: prepared.PreparedGeometry | None = None
+) -> nx.MultiDiGraph | None:
     """Return the walkable street graph for the bbox, cached per tile --
     the union of WALK_FILTER's main centerline query, CYCLEWAY_FILTER's
-    narrower foot=designated-cycleway query, and
+    narrower foot=designated-cycleway query,
     FOOT_OVERRIDES_ACCESS_FILTER's access=no/private-but-foot-designated
-    query (see all three constants' comments).
+    query, NAMED_SIDEWALK_FILTER's named-park-path query, and
+    ANY_SIDEWALK_FILTER's any-sidewalk query narrowed to park reach (see
+    all five constants' comments).
 
-    Each of the three is fetched unsimplified (see _fetch_with_retry's
-    simplify=False comment for why) and composed into one graph BEFORE
-    simplifying -- once, here -- so osmnx's topology simplification sees
-    every filter's ways together and can correctly tell a real
-    intersection between two different filters' matches apart from a
-    genuine dead end, instead of each filter's own simplification pass
-    guessing from an incomplete picture.
+    Each is fetched unsimplified (see _fetch_with_retry's simplify=False
+    comment for why) and composed into one graph BEFORE simplifying --
+    once, here -- so osmnx's topology simplification sees every filter's
+    ways together and can correctly tell a real intersection between two
+    different filters' matches apart from a genuine dead end, instead of
+    each filter's own simplification pass guessing from an incomplete
+    picture. ANY_SIDEWALK_FILTER's park-reach narrowing likewise happens
+    before that single simplify pass, not after: measured both ways, the
+    same fix costs +0% edges in a park-free area when filtered first
+    versus +14% when filtered afterwards, because sidewalks present at
+    simplify time preserve intersection nodes that would otherwise
+    collapse -- and deleting the edges later leaves those nodes stranded.
+
+    park_reach (METRIC_CRS, from canopy.citywide_park_reach_m()) is
+    optional: without it the ANY_SIDEWALK_FILTER query is skipped
+    entirely, so the pilot tile and CI keep working with no parks dataset
+    available. Whether it was supplied is part of the cache filename --
+    the two results genuinely differ, and a graph built one way must never
+    be silently reused for the other.
 
     None means the bbox has no OSM ways matching WALK_FILTER at all -- real
     for grid tiles that only clip a borough's real coastline at their
     edge (a tile can intersect a borough's polygon by a sliver that's
     still mostly open water; see PLAN.md), not a bug to retry.
     """
-    graphml_path = STREETS_DIR / f"{tile_id}_v{GRAPH_CACHE_VERSION}.graphml"
+    variant = "" if park_reach is not None else "_noparkreach"
+    graphml_path = STREETS_DIR / f"{tile_id}_v{GRAPH_CACHE_VERSION}{variant}.graphml"
 
+    wanted = _bbox_signature(bbox)
     if graphml_path.exists():
         graph = ox.load_graphml(graphml_path)
-        print(f"  [streets] {tile_id}: {len(graph.nodes)} nodes, {len(graph.edges)} edges (cached)")
-        return graph
+        cached = graph.graph.get("fetch_bbox")
+        if cached == wanted:
+            print(f"  [streets] {tile_id}: {len(graph.nodes)} nodes, {len(graph.edges)} edges (cached)")
+            return graph
+        # Deliberately a cache MISS, not an error: re-fetching self-heals,
+        # and the alternative (trusting the filename) is what let two tiles
+        # publish another neighbourhood's streets for twelve days. A cache
+        # with no recorded bbox at all is equally untrustworthy -- it was
+        # written before this check existed, so nothing verified it.
+        print(f"  [streets] {tile_id}: cached graph covers {cached or 'an unrecorded area'}, "
+              f"not {wanted} -- re-fetching")
 
     street_graph = _fetch_with_retry(bbox, WALK_FILTER, tile_id, "streets")
     if street_graph is None:
@@ -266,7 +456,25 @@ def fetch_streets(bbox: Bbox, tile_id: str) -> nx.MultiDiGraph | None:
     if access_override_graph is not None:
         graph = nx.compose(graph, access_override_graph)
 
+    named_sidewalk_graph = _fetch_with_retry(
+        bbox, NAMED_SIDEWALK_FILTER, tile_id, "named park paths tagged footway=sidewalk"
+    )
+    if named_sidewalk_graph is not None:
+        graph = nx.compose(graph, named_sidewalk_graph)
+
+    if park_reach is not None:
+        any_sidewalk_graph = _fetch_with_retry(
+            bbox, ANY_SIDEWALK_FILTER, tile_id, "sidewalk-tagged ways near parks"
+        )
+        park_sidewalk_graph = _park_reach_sidewalks(any_sidewalk_graph, park_reach, tile_id)
+        if park_sidewalk_graph is not None:
+            graph = nx.compose(graph, park_sidewalk_graph)
+
     graph = ox.simplification.simplify_graph(graph)
+
+    # Record what this graph actually covers, so a later run can tell
+    # whether the filename still means the same area (see _bbox_signature).
+    graph.graph["fetch_bbox"] = wanted
 
     STREETS_DIR.mkdir(parents=True, exist_ok=True)
     ox.save_graphml(graph, graphml_path)

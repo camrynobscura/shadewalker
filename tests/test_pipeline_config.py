@@ -25,6 +25,69 @@ def test_get_tile_bbox_parses_grid_ids_relative_to_city_bbox():
     assert bbox.lon_max == pytest.approx(config.CITY_BBOX.lon_min + config.TILE_SIZE_LON_DEG)
 
 
+# ---------------------------------------------------------------------------
+# The grid's absolute position, pinned to literal coordinates on purpose.
+#
+# Every other test in this file states the grid RELATIVE to CITY_BBOX and
+# TILE_SIZE_*_DEG ("r0c0 starts where CITY_BBOX starts"). Those are true by
+# construction and stay true no matter where the grid is moved to -- so when
+# commit a461e36 shifted CITY_BBOX.lat_min from 40.49 to 40.472 (exactly
+# TILE_SIZE_LAT_DEG, one whole row), every assertion above shifted with it
+# and the entire suite stayed green. Meanwhile every tile id quietly came to
+# mean the area one row south of what it had meant, and two tiles whose
+# fetch caches predated the shift kept serving another neighbourhood's
+# streets under their old filenames for twelve days: r17c14 published South
+# Bronx as Astoria, r19c13 published Washington Heights.
+#
+# A relative test cannot catch that class of change. These absolute ones
+# can: they fail the moment the grid's origin or cell size moves, which is
+# the signal that every cached fetch and every exported tile keyed by tile
+# id has just been invalidated.
+#
+# IF THIS TEST FAILS because you deliberately changed the grid:
+#   1. Bump GRAPH_CACHE_VERSION in pipeline/fetch/streets.py -- its own
+#      comment already says to do this when "the fetch bbox logic changes,"
+#      and redefining the grid changes it for every tile at once.
+#   2. Bump TREE_CACHE_VERSION in pipeline/fetch/trees.py too; tree data is
+#      cached per tile id and is just as misattributed by a shift.
+#   3. Re-run every borough -- existing exports in data/tiles/ are keyed by
+#      tile id and are now wrong.
+#   4. THEN update the literals below to the new expected values.
+# Updating the literals first defeats the point of the test existing.
+# ---------------------------------------------------------------------------
+
+def test_grid_origin_is_where_it_is_expected_to_be():
+    origin = config.get_tile_bbox("r0c0")
+    assert (origin.lat_min, origin.lon_min) == (40.472, -74.26)
+
+
+def test_grid_cell_size_is_unchanged():
+    assert config.TILE_SIZE_LAT_DEG == 0.018
+    assert config.TILE_SIZE_LON_DEG == 0.024
+
+
+def test_a_known_mid_grid_tile_still_covers_its_known_real_place():
+    # r16c11 covers the south end of Central Park -- the tile every
+    # park-path routing regression on this branch was verified against, so
+    # if the grid moves under it those verifications silently stop meaning
+    # what they say.
+    bbox = config.get_tile_bbox("r16c11")
+    assert bbox.lat_min == pytest.approx(40.760)
+    assert bbox.lat_max == pytest.approx(40.778)
+    assert bbox.lon_min == pytest.approx(-73.996)
+    assert bbox.lon_max == pytest.approx(-73.972)
+
+
+def test_the_two_tiles_that_were_misattributed_map_where_they_should():
+    # Regression coverage for the real incident: under the pre-a461e36 grid
+    # these ids meant one row north of these coordinates, and stale caches
+    # under those names went unnoticed because nothing pinned the mapping.
+    r17c14 = config.get_tile_bbox("r17c14")
+    assert r17c14.lat_min == pytest.approx(40.778)  # NOT 40.796 (the old grid)
+    r19c13 = config.get_tile_bbox("r19c13")
+    assert r19c13.lat_min == pytest.approx(40.814)  # NOT 40.832 (the old grid)
+
+
 def test_get_tile_bbox_grid_ids_tile_without_gaps_or_overlap():
     # r0c0's north edge should be exactly r1c0's south edge.
     below = config.get_tile_bbox("r0c0")
