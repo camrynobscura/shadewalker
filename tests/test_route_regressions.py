@@ -6,6 +6,8 @@ changes, but "the route uses the correct street" or "gets rejected instead
 of silently mis-snapping" should hold forever.
 """
 
+import random
+
 import pytest
 
 from pipeline import config
@@ -156,4 +158,79 @@ def test_max_shade_prefers_central_park_west_over_the_block_one_west(citywide_st
     assert on_park_edge > on_block_over, (
         f"MAX-shade route favors the block one over: {on_park_edge:.0f}m on Central Park West "
         f"vs {on_block_over:.0f}m on Columbus Avenue (via {[s['name'] for s in route['segments']]})"
+    )
+
+
+# --- Route-description regression (citywide) ---------------------------------
+# `fix-interior-park-paths` admits unnamed park sidewalks (ANY_SIDEWALK_FILTER,
+# a14ffa8) so the router can enter parks at all -- but every one of those
+# edges reports as "unnamed path" in turn-by-turn directions, which feed the
+# frontend's aria-live region (a WCAG 2.2 AA requirement). Measured effect on
+# this exact 4-tile area, same OD-sampling approach, before vs after the
+# branch: mean share of route length on unnamed edges went 13.3% -> 27.4%.
+# That's a real, roughly 2x regression -- but it's geographically
+# concentrated. A citywide-random-OD sample over the WHOLE graph only
+# averages ~3.7%, because most trips barely touch a park; scoping this test
+# to the park itself is what makes the regression visible at all.
+#
+# The ceiling below is deliberately loose (measured mean was 27.7% against
+# real production data on 2026-07-30) -- this guards against the next filter
+# widening making it much worse, not against small legitimate drift.
+
+
+def _unnamed_share_pct(route: dict) -> float | None:
+    total = sum(s["length_m"] for s in route["segments"])
+    if total == 0:
+        return None
+    unnamed = sum(s["length_m"] for s in route["segments"] if s["name"] == "unnamed path")
+    return 100 * unnamed / total
+
+
+@pytest.mark.citywide
+def test_central_park_area_route_descriptions_stay_mostly_named(citywide_store):
+    """Fastest-route (tree_weight=0, matching the originally reported "even at
+    NONE priority" bug) descriptions around Central Park shouldn't drift much
+    further toward "unnamed path" than they already have. Random but SEEDED
+    for determinism; restricted to the same 4-tile area
+    (`confidence_checks.py`) where the regression was actually measured, since
+    a citywide-wide sample dilutes it past visibility (see module comment)."""
+    tiles = ["r16c11", "r16c12", "r17c11", "r17c12"]
+    lat_min = min(config.get_tile_bbox(t).lat_min for t in tiles)
+    lat_max = max(config.get_tile_bbox(t).lat_max for t in tiles)
+    lon_min = min(config.get_tile_bbox(t).lon_min for t in tiles)
+    lon_max = max(config.get_tile_bbox(t).lon_max for t in tiles)
+
+    largest = set(max(citywide_store._graph.connected_components(mode="weak"), key=len))
+    in_area = [
+        i for i in largest
+        if lon_min <= citywide_store._node_lonlat[i][0] <= lon_max
+        and lat_min <= citywide_store._node_lonlat[i][1] <= lat_max
+    ]
+    assert len(in_area) > 100, "Central Park area barely loaded -- citywide tiles missing?"
+
+    rng = random.Random(20260730)
+    shares = []
+    attempts = 0
+    while len(shares) < 100 and attempts < 100 * 10:
+        attempts += 1
+        a = citywide_store._node_lonlat[rng.choice(in_area)]
+        b = citywide_store._node_lonlat[rng.choice(in_area)]
+        pair = citywide_store.snap_pair(a[1], a[0], b[1], b[0])
+        if pair is None:
+            continue
+        start, end = pair
+        route = citywide_store.route(start, end, tree_weight=0.0, month=7)
+        if route is None:
+            continue
+        share = _unnamed_share_pct(route)
+        if share is not None:
+            shares.append(share)
+
+    assert len(shares) >= 50, f"too few routed pairs to trust the mean ({len(shares)})"
+    mean_share = sum(shares) / len(shares)
+    assert mean_share <= 45.0, (
+        f"mean unnamed-path share around Central Park rose to {mean_share:.1f}% "
+        f"over {len(shares)} routes (baseline 27.7% on 2026-07-30) -- likely a "
+        "fetch-filter change admitting more unnamed edges; see PLAN.md's "
+        "'route descriptions lean unnamed' note before assuming this is fine"
     )
