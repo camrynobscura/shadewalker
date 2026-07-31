@@ -32,7 +32,10 @@ CLAUDE.md
 # Personal project plan/notes — not shared. HISTORY.md is an index into
 # history/, which holds the split-out parts (see HISTORY.md's own map) —
 # ignore the whole directory, not individual files, so new parts are covered
-# without editing this.
+# without editing this. FIXES.md is a running punch list of known bugs/
+# design issues not yet addressed, separate from PLAN.md's broader
+# current-state/next-steps.
 PLAN.md
 HISTORY.md
 history/
+FIXES.md
