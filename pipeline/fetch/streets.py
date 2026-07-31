@@ -337,12 +337,27 @@ def _park_reach_sidewalks(
     same as a filter matching nothing at all.
 
     Tests each edge's MIDPOINT for containment rather than measuring what
-    fraction of its length falls inside: these edges come straight from an
-    unsimplified fetch, so every one is a single straight segment between
-    two consecutive OSM nodes -- short enough that the midpoint and a
-    length-fraction test agree, and a lone containment check is what
-    prepared geometry can actually accelerate (prep() speeds up predicates,
-    not .intersection()).
+    fraction of its length falls inside, because a lone containment check is
+    what prepared geometry can actually accelerate (prep() speeds up
+    predicates, not .intersection()).
+
+    An earlier version of this comment justified that by calling these
+    segments "short enough that the midpoint and a length-fraction test
+    agree." The first half of that is false and was never measured: they come
+    from an unsimplified fetch, so each is one straight run between
+    consecutive OSM nodes, and a straight 250m sidewalk with two nodes is one
+    250m segment. Measured on r16c11: median 8.5m, but p90 87m, p99 249m, and
+    24.6% longer than 60m -- against a 30m buffer.
+    The conclusion happens to hold anyway, which is why this still uses the
+    midpoint: running both rules over the same 6,266 segments, they disagreed
+    on **12** (0.2%), all admitted by midpoint and rejected by fraction, and
+    the resulting routes were indistinguishable. Long segments here are
+    almost always wholly inside or wholly outside park reach, not straddling.
+    So this is a cheap approximation that was verified rather than assumed --
+    switching to the exact test would cost a full re-fetch (it changes graph
+    content, so GRAPH_CACHE_VERSION would have to bump) to move 0.2% of
+    admitted segments. That 12 is r16c11's count, not a citywide one; the
+    citywide number was never measured, only the rate.
 
     park_reach is in METRIC_CRS, so midpoints reproject into it before
     testing -- the dual-CRS rule: the buffer that built park_reach is only
