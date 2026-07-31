@@ -127,6 +127,45 @@ def _length_on(route, street):
     return sum(s["length_m"] for s in route["segments"] if s["name"] == street)
 
 
+# --- The actual reported bug: fastest route wouldn't enter the park ---------
+# The user's own report: 25 Central Park W -> 18 E 60th St, compared against
+# Google Maps (which offers both an along-the-street route AND a through-the-
+# park route at the same distance). Our app sent this route along Central
+# Park South even at NONE shade priority -- i.e. the FASTEST route wouldn't
+# use the park at all, which is what led to finding the three sidewalk/
+# bridleway filter bugs above (7c46bca, a14ffa8, 94ffb29). Unlike the two
+# tests above, this isn't about shade preference -- tree_weight=0 is the
+# plain shortest path, so this is a pure connectivity/graph-content check.
+
+
+@pytest.mark.citywide
+def test_fastest_route_from_the_reported_bug_now_enters_the_park(citywide_store):
+    """Pinned to the exact coordinates from the original bug report, at
+    tree_weight=0 (NONE priority, the "even at NONE" complaint) -- not the
+    clamped multi-preset route, since NONE is never touched by
+    clamp_shade_monotonic (nothing is lower than it to fall back to).
+
+    Confirmed against the live restarted server 2026-07-31: this route now
+    spends 808 of its 1292m on "Central Park Outer Loop", vs 0m on "Central
+    Park South". Asserting the park path beats the street it used to run
+    along instead, not an exact length -- exact numbers will legitimately
+    shift as the graph keeps changing."""
+    pair = citywide_store.snap_pair(40.77008, -73.98069, 40.76426, -73.97086)
+    assert pair is not None, "endpoints did not snap to a shared component"
+    start, end = pair
+    route = citywide_store.route(start, end, tree_weight=0.0, month=7)
+    assert route is not None, "the reported route no longer resolves at all"
+
+    on_park_path = _length_on(route, "Central Park Outer Loop")
+    on_the_street_it_used_to_take = _length_on(route, "Central Park South")
+    assert on_park_path > on_the_street_it_used_to_take, (
+        f"the fastest route from the original bug report isn't using the park: "
+        f"{on_park_path:.0f}m on Central Park Outer Loop vs "
+        f"{on_the_street_it_used_to_take:.0f}m on Central Park South "
+        f"(via {[s['name'] for s in route['segments']]})"
+    )
+
+
 @pytest.mark.citywide
 def test_max_shade_prefers_central_park_south_over_the_block_one_south(citywide_store):
     """Central Park's own trees are Conservancy-managed and absent from the
