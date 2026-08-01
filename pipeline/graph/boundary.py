@@ -45,9 +45,11 @@ def borough_polygon(geojson: dict, borough: str) -> BaseGeometry:
 
 def park_polygon(geojson: dict) -> BaseGeometry:
     """The union of every real park's polygon -- excludes roadside/median
-    slivers and cemeteries (config.PARK_EXCLUDED_TYPECATEGORIES) so the
+    slivers and non-park land (config.PARK_EXCLUDED_TYPECATEGORIES) so the
     park canopy mask only covers actual park interiors, not traffic
-    triangles or graveyards. Pure function over the raw GeoJSON
+    triangles or parking lots. Cemeteries are included (as of 2026-07-31):
+    no external routing engine special-cases them, so keeping them out was
+    a data gap, not a real distinction. Pure function over the raw GeoJSON
     FeatureCollection -- see pipeline/fetch/parks.py for the fetch.
 
     Repairs each feature with shapely.make_valid() before unioning -- 9 of

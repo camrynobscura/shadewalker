@@ -335,14 +335,22 @@ CANOPY_RASTER_CRS = "EPSG:2263"
 CANOPY_RASTER_TREE_CLASS = 1
 
 # NYC Parks Properties `typecategory` values excluded from the park canopy
-# mask: roadside/traffic-island types (a locked scope decision -- these
-# aren't "a park" for routing purposes) plus Cemetery, deferred to a
-# future follow-on branch alongside federal/state green land (Green-Wood
-# etc. aren't even in this NYC-Parks-only dataset, so no separate filter
-# is needed for those -- see PLAN.md's Park-canopy section).
+# mask AND the park-reach routing rule (both share citywide_park_shape_m())
+# -- roadside/traffic-island types, a locked scope decision: these aren't
+# "a park" for either purpose. Cemetery was excluded here too until
+# 2026-07-31: NONE-priority routes through two real cemeteries came back
+# 3.7-6.7% longer than OSRM/Valhalla/BRouter, all three of which route
+# straight through cemetery interior footways with no special-casing --
+# confirmed by inspecting all three engines' turn-by-turn (mostly-to-
+# entirely unnamed `highway=footway`, no access restriction). No routing
+# engine treats a cemetery path differently from a park path, so excluding
+# them here was a data gap, not a real product decision -- reclassified
+# from "deferred" to "just include them." Federal/state green land
+# (Green-Wood etc.) is a separate, still-open gap: those aren't even in
+# this NYC-Parks-only dataset, so no filter change here helps them -- see
+# PLAN.md's Park-canopy section.
 PARK_EXCLUDED_TYPECATEGORIES = frozenset({
     "Parkway", "Mall", "Triangle/Plaza", "Strip",  # roadside/median slivers
-    "Cemetery",                                     # deferred follow-on
     "Buildings/Institutions", "Lot", "Operations", "Retired N/A",  # not park land
 })
 
@@ -384,7 +392,7 @@ SOCRATA_BASE_URL = "https://data.cityofnewyork.us/resource"
 TREES_DATASET_ID = "hn5i-inap"      # Forestry Tree Points — the live NYC Tree Map data
 PARKS_DATASET_ID = "enfh-gkve"      # Parks Properties — one polygon per NYC Parks property,
                                      # `typecategory` distinguishes real parkland from roadside
-                                     # slivers/cemeteries (see PARK_EXCLUDED_TYPECATEGORIES)
+                                     # slivers/non-park land (see PARK_EXCLUDED_TYPECATEGORIES)
 BOUNDARIES_DATASET_ID = "wh2p-dxnf" # Borough Boundaries (water areas included) — see PLAN.md:
                                      # a bridge's midspan sits over water, which the water-
                                      # EXCLUDED sibling dataset (gthc-hcne) doesn't cover --

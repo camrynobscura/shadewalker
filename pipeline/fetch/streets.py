@@ -54,9 +54,14 @@ _TO_METRIC_CRS = Transformer.from_crs("EPSG:4326", METRIC_CRS, always_xy=True).t
 # sidewalks; v9: added the ANY_SIDEWALK_FILTER union, geometry-filtered to
 # park reach -- the same park paths that are UNNAMED in OSM, which v8's
 # name test can't rescue -- and added bridleway to WALK_FILTER's highway
-# allowlist, both shipping in one re-fetch) -- it's baked into the cache
+# allowlist, both shipping in one re-fetch; v10: cemetery interior paths
+# are no longer excluded from park_reach (config.PARK_EXCLUDED_TYPECATEGORIES)
+# -- the cache filename doesn't vary with park_reach's actual polygon
+# content, only whether one was supplied at all, so this needs its own
+# bump or every already-cached tile keeps silently reusing its
+# cemetery-excluding graph) -- it's baked into the cache
 # filename, so old cached graphs are ignored rather than silently reused.
-GRAPH_CACHE_VERSION = 9
+GRAPH_CACHE_VERSION = 10
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
