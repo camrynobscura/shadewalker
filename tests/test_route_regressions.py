@@ -166,6 +166,39 @@ def test_fastest_route_from_the_reported_bug_now_enters_the_park(citywide_store)
     )
 
 
+# --- Ozone Park: a real gap between two near-coincident nodes ---------------
+# RED until the KNOWN_NODE_GAPS batch from the citywide audit lands (see
+# FIXES.md). Found 2026-07-31 via the OSRM/Valhalla/BRouter sanity check:
+# this NONE-priority route came back 1239.4m, while OSRM/Valhalla/BRouter
+# all agreed with each other within ~5m around 1156-1161m. Root-caused to
+# two real, distinct OSM nodes only ~15m apart in reality that needed a
+# ~350m round trip to connect, because nothing in the graph linked them
+# directly -- not a missing street, not a park/cemetery exclusion, just two
+# nearby points that were never wired together.
+
+
+@pytest.mark.citywide
+def test_ozone_park_route_no_longer_detours_around_a_disconnected_stub(citywide_store):
+    """Pinned to the exact coordinates from the 2026-07-31 sanity-check
+    finding, at tree_weight=0 (NONE priority, the plain shortest path --
+    this is a pure connectivity check, not a shade-preference one).
+
+    1180m leaves real slack above the ~1156-1161m three-engine consensus
+    for legitimate path-choice variance, while staying well below the
+    1239.4m the disconnected stub was forcing before the fix."""
+    pair = citywide_store.snap_pair(40.67346, -73.85500, 40.67845, -73.84710)
+    assert pair is not None, "endpoints did not snap to a shared component"
+    start, end = pair
+    route = citywide_store.route(start, end, tree_weight=0.0, month=7)
+    assert route is not None, "the Ozone Park route no longer resolves at all"
+
+    assert route["length_m"] < 1180.0, (
+        f"Ozone Park route still detouring around the disconnected stub: "
+        f"{route['length_m']:.1f}m (external engines agree around 1156-1161m) "
+        f"via {[s['name'] for s in route['segments']]}"
+    )
+
+
 @pytest.mark.citywide
 def test_max_shade_prefers_central_park_south_over_the_block_one_south(citywide_store):
     """Central Park's own trees are Conservancy-managed and absent from the

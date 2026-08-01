@@ -156,3 +156,52 @@ def test_load_bridges_a_second_known_node_gap_entry(tmp_path, monkeypatch):
     components = store._graph.connected_components(mode="weak")
     assert len(components) == 1
     assert SECOND_GAP_NAME in store._names
+
+
+# The 2026-08-01 near-coincident-node sweep found ~14k more real gaps --
+# too many to stay a Python list literal the way the curated batch above
+# does, so they load from a separate committed JSON file instead. The
+# curated batch (with its per-entry provenance comments) stays inline;
+# only the bulk-verified batch moves to a file.
+
+
+def test_known_node_gaps_load_from_an_external_file(tmp_path):
+    data_path = tmp_path / "gaps.json"
+    data_path.write_text(json.dumps([["111", "222", "Test Gap"]]))
+
+    loaded = graph_store._load_known_node_gaps(data_path)
+
+    assert loaded == [("111", "222", "Test Gap")]
+
+
+def test_load_prints_one_summary_line_not_one_per_gap(tmp_path, monkeypatch, capsys):
+    # Regression guard for a real problem the bulk batch would otherwise
+    # cause: the old per-entry print (fine at 25 entries) would print
+    # ~14,000 lines at every server startup once the bulk batch is loaded.
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
+    _write_tile(tmp_path / "island.json.gz", ISLAND_NODES, ISLAND_EDGES)
+
+    store = GraphStore()
+    store.load()
+
+    captured = capsys.readouterr()
+    gap_lines = [line for line in captured.out.splitlines() if "known node gap" in line]
+    assert len(gap_lines) == 1, f"expected one summary line, got {gap_lines!r}"
+    assert GAP_NODE_A not in gap_lines[0]
+    assert GAP_NODE_B not in gap_lines[0]
+
+
+def test_bulk_verified_gaps_load_from_file_with_a_plain_label():
+    # The curated batch is hand-named (Cross Bay Bridge, Pulaski Bridge,
+    # ...); the bulk-verified batch isn't individually named at all, so it
+    # gets the same plain label the app already shows for any other
+    # anonymous segment (server/graph_store.py's `self._names[e] or
+    # "unnamed path"` fallback) rather than an invented debug string that
+    # would otherwise leak into a real user-facing route description.
+    curated_names = {name for _, _, name in graph_store._CURATED_KNOWN_NODE_GAPS}
+    assert "unnamed path" not in curated_names
+
+    loaded_from_file = graph_store.KNOWN_NODE_GAPS[len(graph_store._CURATED_KNOWN_NODE_GAPS):]
+    assert loaded_from_file, "expected the bulk-verified batch to be present"
+    assert all(name == "unnamed path" for _, _, name in loaded_from_file)

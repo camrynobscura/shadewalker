@@ -29,6 +29,7 @@ import json
 import math
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 
 import igraph
 import numpy as np
@@ -196,7 +197,7 @@ def _save_cached_coverage_rings(cache_path, fingerprint: str, rings: list[list[l
 # between two different real things (a foot=no roadway and a
 # separately-mapped sidewalk that doesn't touch these nodes), not a
 # path split in two.
-KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
+_CURATED_KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
     # Cross Bay Bridge's shared foot+bike path (its Rockaway-side
     # landing) <-> East 21st Road, Broad Channel/Rockaway -- ~12m apart
     # in OSM's own data, confirmed via a direct Overpass query: the same
@@ -244,6 +245,23 @@ KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
     ("608491459", "6382627345", "Jamaica Bay Greenway"),
     ("42830977", "608478724", "Cross Bay Bridge"),
 ]
+
+
+def _load_known_node_gaps(path: Path) -> list[tuple[str, str, str]]:
+    """Load the bulk-verified batch from its own committed JSON file --
+    a flat array of [node_a, node_b, name] triples. Kept separate from
+    _CURATED_KNOWN_NODE_GAPS above: at ~14k entries this can't stay a
+    Python list literal the way the curated batch does, and unlike the
+    curated batch it has no individual per-entry story worth a comment --
+    each entry passed the 2026-08-01 near-coincident-node sweep's
+    building/barrier/PLUTO/Osmose checks, not a one-off manual lookup."""
+    entries = json.loads(path.read_text())
+    return [(a, b, name) for a, b, name in entries]
+
+
+KNOWN_NODE_GAPS: list[tuple[str, str, str]] = _CURATED_KNOWN_NODE_GAPS + _load_known_node_gaps(
+    Path(__file__).parent / "known_node_gaps.json"
+)
 
 
 def _local_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -392,6 +410,7 @@ class GraphStore:
                 names.append(edge["name"])
                 coords_per_edge.append(edge["coords"])
 
+        bridged_count = 0
         for node_a, node_b, gap_name in KNOWN_NODE_GAPS:
             if node_a not in self._id_to_idx or node_b not in self._id_to_idx:
                 continue  # not in this dataset (e.g. the pilot-only test tile) -- skip quietly
@@ -405,7 +424,12 @@ class GraphStore:
             counts.append(0)
             names.append(gap_name)
             coords_per_edge.append([[lon_a, lat_a], [lon_b, lat_b]])
-            print(f"[graph_store] bridged known node gap: {node_a} <-> {node_b} ({gap_name})")
+            bridged_count += 1
+        # One line per entry was fine at 28 hand-curated entries; the bulk
+        # batch (server/known_node_gaps.json) makes that ~14k lines on every
+        # startup instead -- a single count is all a normal boot needs.
+        if bridged_count:
+            print(f"[graph_store] bridged {bridged_count} known node gap(s)")
 
         self._names = names
         self._node_lonlat = np.array(node_lonlat)
