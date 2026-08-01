@@ -203,9 +203,18 @@ NAMED_SIDEWALK_FILTER = (
 # where there are no parks. See PLAN.md.
 ANY_SIDEWALK_FILTER = NAMED_SIDEWALK_FILTER.replace('["name"]', '')
 
-# Point osmnx's internal HTTP cache into our data/ tree so everything the
-# pipeline ever downloads lives under one gitignored roof.
-ox.settings.cache_folder = config.RAW_DIR / "osmnx_cache"
+# osmnx's own HTTP-response cache is disabled -- it has no expiration and
+# no connection to GRAPH_CACHE_VERSION below, so it can silently keep
+# serving a stale or incomplete Overpass response forever, even after a
+# deliberate version bump asks for a fresh refetch. Confirmed real: the
+# Bronx East 147th Street bug (FIXES.md) was exactly this -- a one-off
+# incomplete Overpass response, permanently frozen by this cache, that
+# no amount of "re-fetch this tile" ever actually re-asked Overpass for.
+# GRAPH_CACHE_VERSION's own .graphml cache below already does the caching
+# we actually want (skip re-fetching a tile that hasn't changed), tied to
+# a version we control -- this second, hidden, unversioned cache underneath
+# it doesn't add anything in normal operation, only risk.
+ox.settings.use_cache = False
 
 # osmnx's default User-Agent/referer is the same generic string every
 # osmnx user on the planet sends ('OSMnx Python package (...)') --

@@ -199,6 +199,43 @@ def test_ozone_park_route_no_longer_detours_around_a_disconnected_stub(citywide_
     )
 
 
+# --- Bronx (Melrose/Mott Haven): a stale, incomplete tile fetch -------------
+# Found via the same OSRM/Valhalla/BRouter sanity check as Ozone Park above:
+# this NONE-priority route came back 925.9m, while all three engines agreed
+# with each other within 2m around 618-620m. Root cause was different from
+# Ozone Park's, though -- not a missing KNOWN_NODE_GAPS entry, but osmnx's
+# own HTTP-response cache (separate from and invisible to
+# GRAPH_CACHE_VERSION) silently freezing a one-off incomplete Overpass
+# response for tile r18c14 forever: bumping our own cache version and
+# re-fetching kept replaying that same stale answer no matter how many
+# times it ran, since osmnx's cache doesn't know our version changed.
+# Fixed two ways: pipeline/fetch/streets.py now disables osmnx's cache
+# entirely (ox.settings.use_cache = False), and tile r18c14 was re-fetched
+# for real under the fix.
+
+
+@pytest.mark.citywide
+def test_bronx_route_no_longer_detours_around_a_stale_incomplete_fetch(citywide_store):
+    """Pinned to the exact coordinates from the reported bug, at
+    tree_weight=0 (NONE priority -- a pure connectivity check, not a
+    shade-preference one).
+
+    650m leaves real slack above the ~618-620m three-engine consensus for
+    legitimate path-choice variance, while staying well below the 925.9m
+    the stale/incomplete fetch was forcing before the fix."""
+    pair = citywide_store.snap_pair(40.8105, -73.9051, 40.8127, -73.9104)
+    assert pair is not None, "endpoints did not snap to a shared component"
+    start, end = pair
+    route = citywide_store.route(start, end, tree_weight=0.0, month=7)
+    assert route is not None, "the Bronx route no longer resolves at all"
+
+    assert route["length_m"] < 650.0, (
+        f"Bronx route still detouring around the stale/incomplete fetch: "
+        f"{route['length_m']:.1f}m (external engines agree around 618-620m) "
+        f"via {[s['name'] for s in route['segments']]}"
+    )
+
+
 @pytest.mark.citywide
 def test_max_shade_prefers_central_park_south_over_the_block_one_south(citywide_store):
     """Central Park's own trees are Conservancy-managed and absent from the
