@@ -66,8 +66,18 @@ _TO_METRIC_CRS = Transformer.from_crs("EPSG:4326", METRIC_CRS, always_xy=True).t
 # Roosevelt Park, Brooklyn Botanic Garden, Grand Army Plaza, and Ocean
 # Parkway Malls were being wrongly excluded from park_reach under those
 # labels (FIXES.md item 1d) -- same "baked into park_reach, not the cache
-# filename" reasoning as v10, so this needs its own bump too.
-GRAPH_CACHE_VERSION = 11
+# filename" reasoning as v10, so this needs its own bump too;
+# v12: added the PARKING_AISLE_FILTER union -- real through-path parking
+# aisles (a lot connecting to the street network at 2+ points, not a
+# dead-end spur) are no longer excluded outright (FIXES.md item 1b).
+# _through_path_parking_aisles() decides real vs. dead-end from graph
+# connectivity, baked into the fetched graph the same way park_reach is,
+# so this needs its own bump too;
+# v13: PARKING_AISLE_FILTER excludes tunnel=building_passage -- a private
+# indoor/underground garage lane running through a building, not a real
+# open-lot shortcut (38 ways citywide, confirmed near a Times Square
+# hotel). Same "baked into the fetched graph" reasoning as v12.
+GRAPH_CACHE_VERSION = 13
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -208,6 +218,39 @@ NAMED_SIDEWALK_FILTER = (
 # runs BEFORE the single simplify pass, +0% -- byte-identical output --
 # where there are no parks. See PLAN.md.
 ANY_SIDEWALK_FILTER = NAMED_SIDEWALK_FILTER.replace('["name"]', '')
+
+# A sixth query: every parking_aisle way, the one WALK_FILTER's own
+# service clause excludes outright (FIXES.md item 1b). Most are real
+# duplicates or dead-end spurs into a single row of parking spaces, but a
+# real through-path across a large lot is common enough to matter --
+# 646 substantial lots citywide save a real, measured detour. On its own
+# this would re-admit every dead-end aisle too, so it's never unioned in
+# whole: _through_path_parking_aisles() (see fetch_streets()) keeps only
+# the clusters that connect to the surrounding street network at 2+
+# distinct points and discards the rest.
+#
+# Deliberately no access clause, unlike every other filter above --
+# checked directly against 8 real, confirmed through-path lots (Lowe's
+# Gowanus, several Staten Island big-box stores, Aviator Sports/Floyd
+# Bennett Field): 6 of 8 carry access=private/customers on at least some
+# aisles, one (a Home Depot) on every single aisle way, despite being an
+# obvious, heavily-used public shortcut. Gating on it would exclude most
+# of the real cases this filter exists to find. foot=no is kept as an
+# exclusion -- a much more direct pedestrian-specific signal than a
+# general access restriction.
+#
+# tunnel=building_passage IS excluded, unlike access -- 38 ways citywide
+# (confirmed 2026-08-08), real but rare. This tag means the aisle runs
+# through or under a building: a private indoor/underground garage lane
+# (confirmed example: a motor_vehicle-only lane tunneling under a Times
+# Square hotel), categorically different from an open lot's through-path
+# regardless of how many street connections it has -- it's almost always
+# just a driveway into a building, not a public-feeling shortcut.
+PARKING_AISLE_FILTER = (
+    '["highway"="service"]["service"="parking_aisle"]'
+    '["foot"!~"no"]'
+    '["tunnel"!~"building_passage"]'
+)
 
 # osmnx's own HTTP-response cache is disabled -- it has no expiration and
 # no connection to GRAPH_CACHE_VERSION below, so it can silently keep
@@ -403,6 +446,53 @@ def _park_reach_sidewalks(
     return graph.edge_subgraph(keep_edges).copy()
 
 
+def _through_path_parking_aisles(
+    graph: nx.MultiDiGraph, aisle_graph: nx.MultiDiGraph | None, tile_id: str
+) -> nx.MultiDiGraph | None:
+    """Keep only parking_aisle edges that form a real through-path,
+    dropping dead-end aisles that only reach a single row of parking
+    spaces (FIXES.md item 1b). None (here or passed in) means nothing
+    survived, matching _park_reach_sidewalks()'s convention.
+
+    A real through-path is a connectivity question, not a tag lookup --
+    unlike 1a/1d, nothing in OSM or the NYC Planimetric Database marks an
+    aisle as "this one goes somewhere." Instead: group aisle_graph's edges
+    into connected clusters (undirected -- a parking aisle is walkable
+    both ways regardless of its OSM digitized direction), and keep a whole
+    cluster only if 2+ of its nodes already exist in `graph`. That means
+    the cluster touches the real street network at two separate places --
+    walk in one side, out the other -- not just one entrance you'd have to
+    double back out of. Validated directly against 8 real lots (Lowe's
+    Gowanus, several Staten Island big-box stores, Aviator Sports/Floyd
+    Bennett Field): every one connects at 2+ points once composed with the
+    surrounding streets.
+
+    Deliberately ignores access=private/customers on the aisle ways
+    themselves -- see PARKING_AISLE_FILTER's own comment for why gating on
+    it would exclude most of the real cases this exists for.
+    """
+    if aisle_graph is None:
+        return None
+
+    undirected_aisles = aisle_graph.to_undirected(as_view=True)
+    existing_nodes = set(graph.nodes)
+
+    keep_edges = []
+    dropped_clusters = 0
+    for component in nx.connected_components(undirected_aisles):
+        if len(component & existing_nodes) >= 2:
+            keep_edges.extend(aisle_graph.subgraph(component).edges(keys=True))
+        else:
+            dropped_clusters += 1
+
+    print(f"  [streets] {tile_id}: parking aisles: kept {len(keep_edges)} through-path edges, "
+          f"dropped {dropped_clusters} dead-end clusters")
+    if not keep_edges:
+        return None
+
+    return aisle_graph.edge_subgraph(keep_edges).copy()
+
+
 def fetch_streets(
     bbox: Bbox, tile_id: str, park_reach: prepared.PreparedGeometry | None = None
 ) -> nx.MultiDiGraph | None:
@@ -410,9 +500,10 @@ def fetch_streets(
     the union of WALK_FILTER's main centerline query, CYCLEWAY_FILTER's
     narrower foot=designated-cycleway query,
     FOOT_OVERRIDES_ACCESS_FILTER's access=no/private-but-foot-designated
-    query, NAMED_SIDEWALK_FILTER's named-park-path query, and
-    ANY_SIDEWALK_FILTER's any-sidewalk query narrowed to park reach (see
-    all five constants' comments).
+    query, NAMED_SIDEWALK_FILTER's named-park-path query,
+    ANY_SIDEWALK_FILTER's any-sidewalk query narrowed to park reach, and
+    PARKING_AISLE_FILTER's every-parking-aisle query narrowed to
+    through-paths (see all six constants' comments).
 
     Each is fetched unsimplified (see _fetch_with_retry's simplify=False
     comment for why) and composed into one graph BEFORE simplifying --
@@ -489,6 +580,16 @@ def fetch_streets(
         park_sidewalk_graph = _park_reach_sidewalks(any_sidewalk_graph, park_reach, tile_id)
         if park_sidewalk_graph is not None:
             graph = nx.compose(graph, park_sidewalk_graph)
+
+    # Checked against `graph` as composed so far (every other filter
+    # already unioned in), same "filter before the single simplify pass"
+    # ordering as park-reach sidewalks above -- filtering afterwards would
+    # strand intersection nodes the same way, see _park_reach_sidewalks()'s
+    # own measured comment on this.
+    parking_aisle_graph = _fetch_with_retry(bbox, PARKING_AISLE_FILTER, tile_id, "parking aisles")
+    through_path_aisles = _through_path_parking_aisles(graph, parking_aisle_graph, tile_id)
+    if through_path_aisles is not None:
+        graph = nx.compose(graph, through_path_aisles)
 
     graph = ox.simplification.simplify_graph(graph)
 

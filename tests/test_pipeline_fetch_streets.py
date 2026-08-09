@@ -41,15 +41,17 @@ def _by_filter(
     access_override_fn=None,
     named_sidewalk_fn=None,
     any_sidewalk_fn=None,
+    parking_aisle_fn=None,
 ):
-    """Dispatch a graph_from_bbox mock by which of the five real queries
+    """Dispatch a graph_from_bbox mock by which of the six real queries
     fetch_streets makes -- WALK_FILTER (main), CYCLEWAY_FILTER (the
     shared-path union), FOOT_OVERRIDES_ACCESS_FILTER (the
     foot-designated-despite-access=no/private union), NAMED_SIDEWALK_FILTER
-    (the named-park-path union), or ANY_SIDEWALK_FILTER (every sidewalk,
-    narrowed to park reach afterwards). Defaults the four narrower queries
-    to "nothing here" (ValueError, the common real case) unless a test
-    supplies its own function for one."""
+    (the named-park-path union), ANY_SIDEWALK_FILTER (every sidewalk,
+    narrowed to park reach afterwards), or PARKING_AISLE_FILTER (every
+    parking aisle, narrowed to through-paths afterwards). Defaults the five
+    narrower queries to "nothing here" (ValueError, the common real case)
+    unless a test supplies its own function for one."""
     def dispatch(**kwargs):
         if kwargs.get("custom_filter") == streets.CYCLEWAY_FILTER:
             if cycleway_fn is not None:
@@ -67,6 +69,10 @@ def _by_filter(
             if any_sidewalk_fn is not None:
                 return any_sidewalk_fn(**kwargs)
             raise ValueError("no sidewalk-tagged ways here")
+        if kwargs.get("custom_filter") == streets.PARKING_AISLE_FILTER:
+            if parking_aisle_fn is not None:
+                return parking_aisle_fn(**kwargs)
+            raise ValueError("no parking aisles here")
         return main_fn(**kwargs)
     return dispatch
 
@@ -402,6 +408,37 @@ def test_named_sidewalk_filter_requires_both_sidewalk_and_a_name():
     assert '["name"]' in streets.NAMED_SIDEWALK_FILTER
 
 
+def test_parking_aisle_filter_matches_service_parking_aisle():
+    assert '"service"="parking_aisle"' in streets.PARKING_AISLE_FILTER
+
+
+def test_parking_aisle_filter_does_not_exclude_by_access():
+    # Deliberately broader than WALK_FILTER's own access clause: checked
+    # directly against 8 real, confirmed through-path lots citywide
+    # (2026-08-08) -- 6 of 8 carry access=private/customers on at least
+    # some aisles, one (a Home Depot) on every single aisle way, despite
+    # being an obvious, heavily-used public shortcut. Gating on access here
+    # would exclude most of the real cases this filter exists to find --
+    # _through_path_parking_aisles()'s own connectivity check is what
+    # decides real vs. dead-end, not this tag.
+    assert "access" not in streets.PARKING_AISLE_FILTER
+
+
+def test_parking_aisle_filter_excludes_building_passages():
+    # tunnel=building_passage means the aisle runs through or under a
+    # building -- a private indoor/underground garage lane, not an open
+    # lot. Real and citywide (38 ways, confirmed 2026-08-08 near Times
+    # Square: a private, motor_vehicle-only lane tunneling under a hotel),
+    # but categorically different from the open-air through-paths this
+    # filter exists to find -- a building's internal driveway isn't a
+    # public-feeling shortcut the way a Home Depot parking lot is,
+    # regardless of how many street connections it has.
+    assert '"tunnel"!~"building_passage"' in streets.PARKING_AISLE_FILTER
+    # Still excludes explicitly foot-prohibited aisles -- a much more
+    # direct pedestrian-specific signal than access=private/customers.
+    assert '"foot"!~"no"' in streets.PARKING_AISLE_FILTER
+
+
 def _cache_roundtrip(monkeypatch, tmp_path, cached_graph, recorded_bbox_signature):
     """Put a graph in the cache with a given recorded fetch_bbox, then call
     fetch_streets and report whether it re-fetched. Uses osmnx's real
@@ -644,3 +681,145 @@ def test_fetch_streets_caches_park_reach_and_plain_results_under_different_names
 
     assert len(saved) == 2
     assert saved[0] != saved[1]
+
+
+# FIXES.md item 1b: parking_aisle ways are excluded from WALK_FILTER
+# entirely (real duplicates/dead-ends are the common case), but some form
+# a real through-path across a large lot -- confirmed citywide (646
+# substantial lots) and validated directly against 8 real examples
+# (2026-08-08): Lowe's Gowanus, several Staten Island big-box stores, and
+# Aviator Sports/Floyd Bennett Field all connect to the surrounding street
+# network at 2+ distinct points. _through_path_parking_aisles() is the
+# connectivity check that tells a real through-path apart from a dead-end
+# spur into a single row of parking spaces -- a graph-topology question,
+# not a tag lookup, unlike 1a/1d.
+
+def test_through_path_parking_aisles_keeps_a_cluster_touching_the_street_twice():
+    graph = nx.MultiDiGraph()
+    graph.add_node("street_a")
+    graph.add_node("street_b")
+
+    aisles = nx.MultiDiGraph()
+    aisles.add_edge("street_a", "mid")
+    aisles.add_edge("mid", "street_b")
+
+    result = streets._through_path_parking_aisles(graph, aisles, "test-tile")
+
+    assert set(result.edges()) == {("street_a", "mid"), ("mid", "street_b")}
+
+
+def test_through_path_parking_aisles_drops_a_dead_end_cluster():
+    # Only one attachment point (street_a) -- street_a to a "dead_end"
+    # node with no other exit is a spur, not a shortcut.
+    graph = nx.MultiDiGraph()
+    graph.add_node("street_a")
+
+    aisles = nx.MultiDiGraph()
+    aisles.add_edge("street_a", "mid")
+    aisles.add_edge("mid", "dead_end")
+
+    assert streets._through_path_parking_aisles(graph, aisles, "test-tile") is None
+
+
+def test_through_path_parking_aisles_drops_a_cluster_with_no_street_connection():
+    graph = nx.MultiDiGraph()
+    graph.add_node("street_a")
+
+    aisles = nx.MultiDiGraph()
+    aisles.add_edge("isolated_1", "isolated_2")
+
+    assert streets._through_path_parking_aisles(graph, aisles, "test-tile") is None
+
+
+def test_through_path_parking_aisles_evaluates_each_cluster_independently():
+    # Two unrelated lots in the same fetched aisle graph: one a real
+    # through-path (street_a <-> street_b), the other a dead-end off
+    # street_c. Only the real one's edges should survive.
+    graph = nx.MultiDiGraph()
+    graph.add_node("street_a")
+    graph.add_node("street_b")
+    graph.add_node("street_c")
+
+    aisles = nx.MultiDiGraph()
+    aisles.add_edge("street_a", "mid1")
+    aisles.add_edge("mid1", "street_b")
+    aisles.add_edge("street_c", "mid2")
+    aisles.add_edge("mid2", "dead_end")
+
+    result = streets._through_path_parking_aisles(graph, aisles, "test-tile")
+
+    assert set(result.edges()) == {("street_a", "mid1"), ("mid1", "street_b")}
+    assert "dead_end" not in result.nodes
+
+
+def test_through_path_parking_aisles_returns_none_when_given_none():
+    graph = nx.MultiDiGraph()
+    assert streets._through_path_parking_aisles(graph, None, "test-tile") is None
+
+
+def test_fetch_streets_unions_in_through_path_parking_aisles(monkeypatch, tmp_path):
+    # street_a and street_b are deliberately NOT connected within the main
+    # street graph itself -- each sits on its own separate little edge, so
+    # any path between them can only come from the aisle union. "mid" is a
+    # plain degree-2 chain node that simplify_graph() correctly collapses
+    # into a single street_a<->street_b edge, same as it would for any real
+    # intermediate OSM node -- hence checking connectivity, not that
+    # specific node, survived.
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("street_a", x=-73.95, y=40.05)
+    main_graph.add_node("other_a", x=-73.949, y=40.049)
+    main_graph.add_edge("street_a", "other_a")
+    main_graph.add_node("street_b", x=-73.951, y=40.051)
+    main_graph.add_node("other_b", x=-73.952, y=40.052)
+    main_graph.add_edge("street_b", "other_b")
+
+    aisles = nx.MultiDiGraph()
+    aisles.add_node("street_a", x=-73.95, y=40.05)
+    aisles.add_node("mid", x=-73.9505, y=40.0505)
+    aisles.add_node("street_b", x=-73.951, y=40.051)
+    aisles.add_edge("street_a", "mid")
+    aisles.add_edge("mid", "street_b")
+
+    _mock_fetch(
+        monkeypatch, tmp_path,
+        _by_filter(lambda **kwargs: main_graph, parking_aisle_fn=lambda **kwargs: aisles),
+    )
+    result = streets.fetch_streets(BBOX, "test-aisle-tile")
+
+    # street_a/mid/street_b are themselves plain degree-2 pass-through
+    # points once composed (each with exactly one neighbor on either
+    # side), so simplify_graph() collapses the whole chain into a single
+    # edge and none of them necessarily survive as nodes -- other_a and
+    # other_b are the real endpoints (degree 1), guaranteed to survive,
+    # and connectivity between them can only exist via the aisle path.
+    assert nx.has_path(result.to_undirected(), "other_a", "other_b")
+
+
+def test_fetch_streets_works_with_no_parking_aisles_in_the_area(monkeypatch, tmp_path):
+    # Most tiles have none -- the common real case, same as every other
+    # narrower query.
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=-73.95, y=40.05)
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    result = streets.fetch_streets(BBOX, "test-no-aisle-tile")
+
+    assert list(result.nodes) == ["m1"]
+
+
+def test_fetch_streets_drops_dead_end_parking_aisles(monkeypatch, tmp_path):
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("street_a", x=-73.95, y=40.05)
+
+    aisles = nx.MultiDiGraph()
+    aisles.add_node("street_a", x=-73.95, y=40.05)
+    aisles.add_node("dead_end", x=-73.9505, y=40.0505)
+    aisles.add_edge("street_a", "dead_end")
+
+    _mock_fetch(
+        monkeypatch, tmp_path,
+        _by_filter(lambda **kwargs: main_graph, parking_aisle_fn=lambda **kwargs: aisles),
+    )
+    result = streets.fetch_streets(BBOX, "test-dead-end-aisle-tile")
+
+    assert "dead_end" not in result.nodes
