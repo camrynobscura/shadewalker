@@ -42,16 +42,19 @@ def _by_filter(
     named_sidewalk_fn=None,
     any_sidewalk_fn=None,
     parking_aisle_fn=None,
+    barrier_fn=None,
 ):
-    """Dispatch a graph_from_bbox mock by which of the six real queries
+    """Dispatch a graph_from_bbox mock by which of the seven real queries
     fetch_streets makes -- WALK_FILTER (main), CYCLEWAY_FILTER (the
     shared-path union), FOOT_OVERRIDES_ACCESS_FILTER (the
     foot-designated-despite-access=no/private union), NAMED_SIDEWALK_FILTER
     (the named-park-path union), ANY_SIDEWALK_FILTER (every sidewalk,
-    narrowed to park reach afterwards), or PARKING_AISLE_FILTER (every
-    parking aisle, narrowed to through-paths afterwards). Defaults the five
-    narrower queries to "nothing here" (ValueError, the common real case)
-    unless a test supplies its own function for one."""
+    narrowed to park reach afterwards), PARKING_AISLE_FILTER (every
+    parking aisle, narrowed to through-paths afterwards), or BARRIER_FILTER
+    (fence/wall/hedge ways, used to veto an interior-sidewalk connection
+    that would cross one). Defaults the six narrower queries to "nothing
+    here" (ValueError, the common real case) unless a test supplies its
+    own function for one."""
     def dispatch(**kwargs):
         if kwargs.get("custom_filter") == streets.CYCLEWAY_FILTER:
             if cycleway_fn is not None:
@@ -73,6 +76,10 @@ def _by_filter(
             if parking_aisle_fn is not None:
                 return parking_aisle_fn(**kwargs)
             raise ValueError("no parking aisles here")
+        if kwargs.get("custom_filter") == getattr(streets, "BARRIER_FILTER", object()):
+            if barrier_fn is not None:
+                return barrier_fn(**kwargs)
+            raise ValueError("no barrier ways here")
         return main_fn(**kwargs)
     return dispatch
 
@@ -823,3 +830,294 @@ def test_fetch_streets_drops_dead_end_parking_aisles(monkeypatch, tmp_path):
     result = streets.fetch_streets(BBOX, "test-dead-end-aisle-tile")
 
     assert "dead_end" not in result.nodes
+
+
+# FIXES.md item 1a: NYC's Interior Sidewalk Centerline data (real off-ROW
+# walking paths in parks, NYCHA, hospital/school campuses, and ordinary
+# residential complexes) arrives as independently-digitized line segments
+# from an ArcGIS source, not OSM ways -- so there's no shared node id to
+# rely on the way the other five filters above get for free. Three
+# functions handle this: _interior_sidewalks_for_tile() narrows the
+# citywide cache to one tile, _build_interior_sidewalk_graph() stitches
+# that tile's segments into one shape (merging endpoints that coincide
+# within INTERIOR_SIDEWALK_MERGE_TOLERANCE_M, since two segments meeting
+# at the same real point don't necessarily share a coordinate exactly),
+# and _snap_interior_sidewalks() connects the result's loose ends onto the
+# real street network.
+#
+# The snap distance (INTERIOR_SIDEWALK_SNAP_MAX_M = 5.0) and the decision
+# to check for a real barrier (fence/wall/hedge) crossing the connection
+# were both settled against real data, not guessed: median real distance
+# from a loose end to the nearest street is 0.6m, 95% are within 5m, and
+# the two datasets are independently digitized enough that snapping to
+# the nearest existing NODE instead of the nearest EDGE would misplace
+# 63% of real connections by >3m (confirmed live, Holmes Towers, NYCHA,
+# Manhattan). The barrier check is real but known-incomplete -- OSM's
+# fence/wall tagging is crowdsourced and nowhere near complete, and no
+# professionally-surveyed dataset covers ordinary fencing (checked; only
+# a narrow "Retaining Wall" layer exists) -- so 5m was chosen specifically
+# to keep the unverifiable "invisible fence" risk small, not to maximize
+# how many real connections get captured.
+
+def _segment_feature(coords):
+    return {"type": "Feature", "properties": {}, "geometry": {"type": "LineString", "coordinates": coords}}
+
+
+def test_interior_sidewalks_for_tile_keeps_segments_inside_the_bbox():
+    geojson = {"type": "FeatureCollection", "features": [
+        _segment_feature([[-73.95, 40.05], [-73.949, 40.051]]),
+    ]}
+
+    result = streets._interior_sidewalks_for_tile(geojson, BBOX)
+
+    assert result == [[(-73.95, 40.05), (-73.949, 40.051)]]
+
+
+def test_interior_sidewalks_for_tile_drops_segments_outside_the_bbox():
+    geojson = {"type": "FeatureCollection", "features": [
+        _segment_feature([[10.0, 10.0], [10.001, 10.001]]),  # nowhere near BBOX
+    ]}
+
+    assert streets._interior_sidewalks_for_tile(geojson, BBOX) == []
+
+
+def test_interior_sidewalks_for_tile_keeps_a_segment_crossing_the_boundary():
+    # One end outside BBOX (lon_max=-73.9), one end inside -- a real
+    # segment straddling a tile edge should still count as belonging here,
+    # same reasoning WALK_FILTER's own tile fetches rely on.
+    geojson = {"type": "FeatureCollection", "features": [
+        _segment_feature([[-73.95, 40.05], [-73.8, 40.05]]),
+    ]}
+
+    assert streets._interior_sidewalks_for_tile(geojson, BBOX) != []
+
+
+def test_build_interior_sidewalk_graph_returns_none_for_no_segments():
+    assert streets._build_interior_sidewalk_graph([], "test-tile") is None
+
+
+def test_build_interior_sidewalk_graph_merges_exactly_touching_endpoints():
+    segments = [
+        [(-73.95, 40.05), (-73.949, 40.05)],
+        [(-73.949, 40.05), (-73.948, 40.05)],  # shares an exact coordinate
+    ]
+
+    result = streets._build_interior_sidewalk_graph(segments, "test-tile")
+
+    assert result.number_of_nodes() == 3  # not 4 -- the shared point is one node
+    assert nx.is_connected(result.to_undirected())
+
+
+def test_build_interior_sidewalk_graph_merges_endpoints_within_tolerance():
+    # ~0.3m apart (well under INTERIOR_SIDEWALK_MERGE_TOLERANCE_M=1.0) --
+    # independently-digitized segments meeting at the same real point
+    # essentially never share an exact coordinate.
+    segments = [
+        [(-73.95, 40.05), (-73.949, 40.05)],
+        [(-73.949, 40.0500027), (-73.948, 40.05)],
+    ]
+
+    result = streets._build_interior_sidewalk_graph(segments, "test-tile")
+
+    assert result.number_of_nodes() == 3
+    assert nx.is_connected(result.to_undirected())
+
+
+def test_build_interior_sidewalk_graph_does_not_merge_endpoints_beyond_tolerance():
+    # ~5m apart -- clearly beyond the 1m tolerance, so these are two real,
+    # separate loose ends, not one shared point.
+    segments = [
+        [(-73.95, 40.05), (-73.949, 40.05)],
+        [(-73.949, 40.05005), (-73.948, 40.05)],
+    ]
+
+    result = streets._build_interior_sidewalk_graph(segments, "test-tile")
+
+    assert result.number_of_nodes() == 4
+    assert not nx.is_connected(result.to_undirected())
+
+
+def _street_graph_with_one_edge():
+    graph = nx.MultiDiGraph()
+    graph.add_node("s1", x=-73.9500, y=40.0500)
+    graph.add_node("s2", x=-73.9490, y=40.0500)
+    graph.add_edge("s1", "s2")
+    return graph
+
+
+def _interior_graph_with_one_loose_end(lon, lat):
+    interior = nx.MultiDiGraph()
+    interior.add_node("loose_end", x=lon, y=lat)
+    interior.add_node("anchor", x=lon, y=lat + 0.001)  # far away, not near any street
+    interior.add_edge("loose_end", "anchor")
+    return interior
+
+
+def test_snap_interior_sidewalks_connects_a_loose_end_within_range():
+    # ~3.3m from the s1-s2 edge -- comfortably under the 5m snap distance.
+    graph = _street_graph_with_one_edge()
+    interior = _interior_graph_with_one_loose_end(-73.9495, 40.05003)
+
+    result = streets._snap_interior_sidewalks(graph, interior, None, "test-tile")
+
+    undirected = result.to_undirected()
+    assert nx.has_path(undirected, "loose_end", "s1")
+    assert nx.has_path(undirected, "loose_end", "s2")
+
+
+def test_snap_interior_sidewalks_leaves_a_far_loose_end_disconnected():
+    # ~22m from the s1-s2 edge -- well beyond the 5m snap distance, a real
+    # digitization gap rather than something to force-connect.
+    graph = _street_graph_with_one_edge()
+    interior = _interior_graph_with_one_loose_end(-73.9495, 40.05020)
+
+    result = streets._snap_interior_sidewalks(graph, interior, None, "test-tile")
+
+    undirected = result.to_undirected()
+    assert not nx.has_path(undirected, "loose_end", "s1")
+    assert "loose_end" in result.nodes  # kept, just not connected to the street
+
+
+def test_snap_interior_sidewalks_skips_a_connection_blocked_by_a_real_barrier():
+    # Same geometry as the "connects" case above, but a fence crosses the
+    # straight line between the loose end and its snap point -- known
+    # incomplete data (OSM's own fence tagging is crowdsourced), but a
+    # real, mapped barrier here is real evidence the two points aren't
+    # actually walkably connected, distance notwithstanding.
+    graph = _street_graph_with_one_edge()
+    interior = _interior_graph_with_one_loose_end(-73.9495, 40.05003)
+
+    barriers = nx.MultiDiGraph()
+    barriers.add_node("b1", x=-73.9496, y=40.050015)
+    barriers.add_node("b2", x=-73.9494, y=40.050015)
+    barriers.add_edge("b1", "b2")
+
+    result = streets._snap_interior_sidewalks(graph, interior, barriers, "test-tile")
+
+    assert not nx.has_path(result.to_undirected(), "loose_end", "s1")
+
+
+def test_snap_interior_sidewalks_evaluates_each_loose_end_independently():
+    # close and far are two SEPARATE, unconnected little interior paths
+    # (not two ends of the same one) -- a single shared edge between them
+    # would make this test unsatisfiable by construction: once "close"
+    # snaps to the street, "far" would become transitively connected to it
+    # regardless of what the snapping logic actually does.
+    graph = _street_graph_with_one_edge()
+    interior = nx.MultiDiGraph()
+    interior.add_node("close", x=-73.9495, y=40.05003)
+    interior.add_node("close_anchor", x=-73.9495, y=40.052)
+    interior.add_edge("close", "close_anchor")
+    interior.add_node("far", x=-73.9495, y=40.05020)
+    interior.add_node("far_anchor", x=-73.9495, y=40.052)
+    interior.add_edge("far", "far_anchor")
+
+    result = streets._snap_interior_sidewalks(graph, interior, None, "test-tile")
+
+    undirected = result.to_undirected()
+    assert nx.has_path(undirected, "close", "s1")
+    assert not nx.has_path(undirected, "far", "s1")
+
+
+def test_snap_interior_sidewalks_splits_the_same_street_edge_for_two_different_loose_ends():
+    # Two unrelated interior paths (e.g. two separate courtyard entrances
+    # onto the same block) both land near the s1-s2 edge, at two different
+    # points along it. The second split must not silently ignore or
+    # overwrite the first -- both connections need to survive
+    # independently, and the two loose ends should also end up connected
+    # to each other via the (now twice-split) street edge.
+    graph = _street_graph_with_one_edge()
+    interior = nx.MultiDiGraph()
+    interior.add_node("close_1", x=-73.9497, y=40.05003)
+    interior.add_node("anchor_1", x=-73.9497, y=40.052)
+    interior.add_edge("close_1", "anchor_1")
+    interior.add_node("close_2", x=-73.9493, y=40.05003)
+    interior.add_node("anchor_2", x=-73.9493, y=40.052)
+    interior.add_edge("close_2", "anchor_2")
+
+    result = streets._snap_interior_sidewalks(graph, interior, None, "test-tile")
+
+    undirected = result.to_undirected()
+    assert nx.has_path(undirected, "close_1", "s1")
+    assert nx.has_path(undirected, "close_1", "s2")
+    assert nx.has_path(undirected, "close_2", "s1")
+    assert nx.has_path(undirected, "close_2", "s2")
+    assert nx.has_path(undirected, "close_1", "close_2")
+
+
+def test_fetch_streets_unions_in_interior_sidewalks(monkeypatch, tmp_path):
+    # street_a and street_b are deliberately NOT connected within the main
+    # street graph itself (each on its own separate stub edge to
+    # other_a/other_b), same test shape as the parking-aisle union test
+    # above -- so any connectivity between other_a and other_b can only
+    # come from the interior-sidewalk union + snap.
+    from pipeline.fetch import interior_sidewalks
+
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("street_a", x=-73.9500, y=40.0500)
+    main_graph.add_node("other_a", x=-73.9501, y=40.0499)
+    main_graph.add_edge("street_a", "other_a")
+    main_graph.add_node("street_b", x=-73.9490, y=40.0500)
+    main_graph.add_node("other_b", x=-73.9489, y=40.0499)
+    main_graph.add_edge("street_b", "other_b")
+
+    # One interior segment running roughly parallel to the (nonexistent)
+    # street_a<->street_b connection, ~3.3m offset -- comfortably within
+    # the 5m snap distance at both ends.
+    interior_geojson = {"type": "FeatureCollection", "features": [
+        _segment_feature([[-73.9500, 40.05003], [-73.9490, 40.05003]]),
+    ]}
+    monkeypatch.setattr(interior_sidewalks, "fetch_interior_sidewalks", lambda **kwargs: interior_geojson)
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    result = streets.fetch_streets(BBOX, "test-interior-sidewalk-tile")
+
+    assert nx.has_path(result.to_undirected(), "other_a", "other_b")
+
+
+def test_fetch_streets_works_with_no_interior_sidewalks_in_the_area(monkeypatch, tmp_path):
+    # Most tiles have none -- the common real case, same as every other
+    # narrower query.
+    from pipeline.fetch import interior_sidewalks
+
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=-73.95, y=40.05)
+
+    monkeypatch.setattr(
+        interior_sidewalks, "fetch_interior_sidewalks",
+        lambda **kwargs: {"type": "FeatureCollection", "features": []},
+    )
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    result = streets.fetch_streets(BBOX, "test-no-interior-sidewalk-tile")
+
+    assert list(result.nodes) == ["m1"]
+
+
+def test_fetch_streets_leaves_a_too_far_interior_sidewalk_unconnected(monkeypatch, tmp_path):
+    # A real digitization gap (~22m from the nearest street, well beyond
+    # the 5m snap distance) should still be added to the graph, just not
+    # wired into the surrounding street network -- same treatment as a
+    # dead-end parking aisle cluster, not silently dropped and not
+    # force-connected.
+    from pipeline.fetch import interior_sidewalks
+
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("street_a", x=-73.9500, y=40.0500)
+    main_graph.add_node("street_b", x=-73.9490, y=40.0500)
+    main_graph.add_edge("street_a", "street_b")
+
+    interior_geojson = {"type": "FeatureCollection", "features": [
+        _segment_feature([[-73.9495, 40.05020], [-73.9495, 40.06]]),
+    ]}
+    monkeypatch.setattr(interior_sidewalks, "fetch_interior_sidewalks", lambda **kwargs: interior_geojson)
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    result = streets.fetch_streets(BBOX, "test-far-interior-sidewalk-tile")
+
+    # The interior segment's nodes get synthetic ids assigned internally
+    # (see _build_interior_sidewalk_graph), so identify them by set
+    # difference rather than a name this test doesn't control.
+    new_nodes = set(result.nodes) - set(main_graph.nodes)
+    assert new_nodes  # the far segment was still added, not dropped
+    undirected = result.to_undirected()
+    assert not any(nx.has_path(undirected, node, "street_a") for node in new_nodes)

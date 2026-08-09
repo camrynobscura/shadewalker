@@ -29,10 +29,13 @@ import osmnx as ox
 import requests
 from pyproj import Transformer
 from shapely import prepared
-from shapely.geometry import Point
+from shapely.geometry import LineString, Point, box
+from shapely.ops import substring
+from shapely.strtree import STRtree
 
 from pipeline import config
 from pipeline.config import Bbox
+from pipeline.fetch import interior_sidewalks
 from pipeline.graph.centerline import METRIC_CRS
 
 STREETS_DIR = config.RAW_DIR / "streets"
@@ -40,6 +43,10 @@ STREETS_DIR = config.RAW_DIR / "streets"
 # Park-reach shapes are measured in meters (see _park_reach_sidewalks) --
 # the one place this fetch module needs to leave lon/lat degrees.
 _TO_METRIC_CRS = Transformer.from_crs("EPSG:4326", METRIC_CRS, always_xy=True).transform
+# The inverse -- needed only for interior-sidewalk snapping, which invents
+# new points in METRIC_CRS (splitting a street edge at a real meters-based
+# distance) that then need to go back into the graph's own lon/lat degrees.
+_FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True).transform
 
 # Bump this whenever WALK_FILTER changes, or the fetch bbox logic changes
 # (v3: run_tile.py started passing a FETCH_BUFFER_M-padded bbox instead of
@@ -77,7 +84,14 @@ _TO_METRIC_CRS = Transformer.from_crs("EPSG:4326", METRIC_CRS, always_xy=True).t
 # indoor/underground garage lane running through a building, not a real
 # open-lot shortcut (38 ways citywide, confirmed near a Times Square
 # hotel). Same "baked into the fetched graph" reasoning as v12.
-GRAPH_CACHE_VERSION = 13
+# v14: added NYC's Interior Sidewalk Centerline data (pipeline.fetch.
+# interior_sidewalks), snapped onto the street network wherever a real
+# off-ROW walking path (park interior, NYCHA campus, hospital/school
+# campus, ordinary residential complex) comes within
+# INTERIOR_SIDEWALK_SNAP_MAX_M of it (FIXES.md item 1a). Also added the
+# BARRIER_FILTER union used to veto a connection that would cross a real
+# fence/wall. Same "baked into the fetched graph" reasoning as v10-v13.
+GRAPH_CACHE_VERSION = 14
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -251,6 +265,45 @@ PARKING_AISLE_FILTER = (
     '["foot"!~"no"]'
     '["tunnel"!~"building_passage"]'
 )
+
+# Fence/wall/hedge ways, used to veto an interior-sidewalk connection
+# whose straight line to the street would cross one (see
+# _snap_interior_sidewalks, FIXES.md item 1a). Known incomplete -- OSM's
+# barrier tagging is crowdsourced and nowhere near complete (confirmed:
+# 103 real barrier features in a single small NYCHA sample area alone),
+# and no professionally-surveyed dataset fills the gap either (checked
+# the full NYC Planimetric catalog: only a narrow "Retaining Wall" layer
+# exists, not general fencing) -- but a real, mapped barrier is still
+# real evidence against a connection, worth checking rather than
+# ignoring. Deliberately excludes "kerb" (blocks nobody) and
+# "gate"/"lift_gate"/"bollard" (those mark an intentional passage point,
+# not a permanent block).
+BARRIER_FILTER = '["barrier"~"fence|wall|hedge|retaining_wall|chain|city_wall"]'
+
+# How close two interior-sidewalk segments' endpoints need to be to count
+# as the same real point when stitching a tile's segments together (see
+# _build_interior_sidewalk_graph) -- independently digitized segments
+# meeting at the same real point essentially never share an exact
+# coordinate.
+INTERIOR_SIDEWALK_MERGE_TOLERANCE_M = 1.0
+
+# How close a loose end needs to be to the real street network to connect
+# (see _snap_interior_sidewalks). Chosen from real data, not guessed:
+# median real distance from a genuine loose end to the nearest street is
+# 0.6m, 95% are within 5m (confirmed live, Holmes Towers, NYCHA,
+# Manhattan). Deliberately on the small side rather than maximizing how
+# many real connections get captured: since BARRIER_FILTER's own coverage
+# is known incomplete, a shorter distance is the one lever available to
+# keep the unverifiable "connects through an unmapped obstacle" risk
+# small.
+INTERIOR_SIDEWALK_SNAP_MAX_M = 5.0
+
+# A split landing within this distance of an edge's existing endpoint is
+# treated as landing ON that endpoint, not a fraction of a meter away --
+# a real case (a loose end can snap right where the original edge already
+# meets an intersection), and also avoids handing substring() a
+# zero-length span, which can't build a valid LineString from it.
+_MIN_SPLIT_GAP_M = 1e-6
 
 # osmnx's own HTTP-response cache is disabled -- it has no expiration and
 # no connection to GRAPH_CACHE_VERSION below, so it can silently keep
@@ -493,6 +546,222 @@ def _through_path_parking_aisles(
     return aisle_graph.edge_subgraph(keep_edges).copy()
 
 
+def _interior_sidewalks_for_tile(geojson: dict, bbox: Bbox) -> list[list[tuple[float, float]]]:
+    """Interior sidewalk centerline segments (as plain coordinate lists)
+    from the citywide interior-sidewalk cache whose geometry intersects
+    this tile's bbox (FIXES.md item 1a).
+    interior_sidewalks.fetch_interior_sidewalks() always returns the whole
+    city -- each tile filters its own slice out in memory here, same
+    division of labor as parks.py's whole-city cache + per-tile canopy
+    lookups."""
+    tile_box = box(bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max)
+    segments = []
+    for feature in geojson["features"]:
+        coords = [tuple(point) for point in feature["geometry"]["coordinates"]]
+        if tile_box.intersects(LineString(coords)):
+            segments.append(coords)
+    return segments
+
+
+def _build_interior_sidewalk_graph(
+    segments: list[list[tuple[float, float]]], tile_id: str
+) -> nx.MultiDiGraph | None:
+    """Turn one tile's interior sidewalk segments into a small graph
+    (FIXES.md item 1a). Unlike OSM ways, these segments arrive
+    independently digitized -- two segments meeting at the same real-world
+    point don't necessarily share a coordinate -- so endpoints within
+    INTERIOR_SIDEWALK_MERGE_TOLERANCE_M of an already-placed point are
+    merged into that same node instead of kept as separate touching
+    points.
+
+    Synthetic node ids are negative ints: real OSM node ids are always
+    large positive ints (confirmed against real cached tiles), so nothing
+    here can collide with a real osmid once composed with the street
+    graph.
+
+    None if segments is empty.
+    """
+    if not segments:
+        return None
+
+    graph = nx.MultiDiGraph()
+    placed: list[tuple[int, Point]] = []
+    next_id = -1
+
+    def node_for(lon: float, lat: float) -> int:
+        nonlocal next_id
+        point_m = Point(_TO_METRIC_CRS(lon, lat))
+        for node_id, placed_point_m in placed:
+            if point_m.distance(placed_point_m) <= INTERIOR_SIDEWALK_MERGE_TOLERANCE_M:
+                return node_id
+        node_id = next_id
+        next_id -= 1
+        placed.append((node_id, point_m))
+        graph.add_node(node_id, x=lon, y=lat)
+        return node_id
+
+    for coords in segments:
+        node_ids = [node_for(lon, lat) for lon, lat in coords]
+        for a, b in zip(node_ids, node_ids[1:]):
+            if a != b:
+                graph.add_edge(a, b)
+
+    print(f"  [streets] {tile_id}: interior sidewalks: {graph.number_of_nodes()} points "
+          f"from {len(segments)} segments")
+    return graph
+
+
+def _edge_line_m(g: nx.MultiDiGraph, u, v, k) -> LineString:
+    """A graph edge's real geometry (or a straight line between its two
+    endpoint nodes, if it has none), reprojected into METRIC_CRS."""
+    data = g.edges[u, v, k]
+    if "geometry" in data:
+        coords = list(data["geometry"].coords)
+    else:
+        coords = [(g.nodes[u]["x"], g.nodes[u]["y"]), (g.nodes[v]["x"], g.nodes[v]["y"])]
+    return LineString([_TO_METRIC_CRS(lon, lat) for lon, lat in coords])
+
+
+def _to_lonlat(line_m: LineString) -> LineString:
+    return LineString([_FROM_METRIC_CRS(x, y) for x, y in line_m.coords])
+
+
+def _apply_edge_splits(
+    result: nx.MultiDiGraph,
+    graph: nx.MultiDiGraph,
+    u, v, k,
+    splits: list[tuple[float, object, Point]],
+    next_id: int,
+) -> int:
+    """Replace one street edge with a chain of sub-edges, one new node per
+    real interior-sidewalk connection landing on it (FIXES.md item 1a).
+    Applied for every loose end snapping onto the SAME original edge
+    together, in one call, sorted by position along it -- splitting one at
+    a time as each loose end is found would let a second split silently
+    work from a stale picture of the edge the first one already cut in
+    two.
+
+    Returns the next available synthetic node id, so a caller splitting
+    several different edges keeps one running counter across all of them.
+    """
+    splits = sorted(splits, key=lambda item: item[0])
+    original_line_m = _edge_line_m(graph, u, v, k)
+
+    result.remove_edge(u, v, k)
+
+    chain_start = u
+    prev_distance = 0.0
+    for distance_along, loose_end_node, snap_point_m in splits:
+        if distance_along <= prev_distance + _MIN_SPLIT_GAP_M:
+            # The snap point lands right on top of chain_start itself (a
+            # real case: a loose end can snap to right where the original
+            # edge meets an existing intersection) -- connect directly
+            # instead of inserting a zero-length duplicate node, which
+            # substring() below can't build a valid LineString from anyway.
+            result.add_edge(chain_start, loose_end_node)
+            continue
+
+        split_node = next_id
+        next_id -= 1
+        lon, lat = _FROM_METRIC_CRS(snap_point_m.x, snap_point_m.y)
+        result.add_node(split_node, x=lon, y=lat)
+
+        sub_geometry = substring(original_line_m, prev_distance, distance_along)
+        result.add_edge(chain_start, split_node, geometry=_to_lonlat(sub_geometry))
+        result.add_edge(split_node, loose_end_node)
+
+        chain_start = split_node
+        prev_distance = distance_along
+
+    if prev_distance >= original_line_m.length - _MIN_SPLIT_GAP_M:
+        # Symmetric case: the last split landed right at v's own end of
+        # the edge.
+        if chain_start != v:
+            result.add_edge(chain_start, v)
+    else:
+        final_geometry = substring(original_line_m, prev_distance, original_line_m.length)
+        result.add_edge(chain_start, v, geometry=_to_lonlat(final_geometry))
+    return next_id
+
+
+def _snap_interior_sidewalks(
+    graph: nx.MultiDiGraph,
+    interior_graph: nx.MultiDiGraph,
+    barrier_graph: nx.MultiDiGraph | None,
+    tile_id: str,
+) -> nx.MultiDiGraph:
+    """Attach interior_graph onto graph (FIXES.md item 1a), splitting the
+    nearest street edge at the real snap point for each interior loose end
+    (a node with no other interior-sidewalk connection) within
+    INTERIOR_SIDEWALK_SNAP_MAX_M. Confirmed live that snapping to the
+    nearest existing NODE instead would misplace 63% of real connections
+    by >3m, since these paths typically touch a street mid-block, not at
+    an intersection -- so this always finds the nearest EDGE and inserts a
+    new node there, never reuses an existing one.
+
+    A loose end farther than the threshold, or whose straight-line
+    connection crosses a real barrier_graph way, is left unconnected -- a
+    real digitization gap or a genuine obstacle, not a bug to
+    force-connect. barrier_graph is optional and known incomplete (see
+    BARRIER_FILTER's own comment); None just means the barrier check is
+    skipped entirely, same as if none matched.
+
+    Unlike _park_reach_sidewalks/_through_path_parking_aisles, this can't
+    just return edges for the caller to nx.compose() in: splitting an
+    existing street edge mutates graph's own structure, not just adds to
+    it. So this returns the whole resulting graph, and the caller
+    reassigns rather than conditionally composes.
+    """
+    result = nx.compose(graph, interior_graph)
+
+    undirected_interior = interior_graph.to_undirected(as_view=True)
+    loose_ends = [n for n in interior_graph.nodes if undirected_interior.degree(n) == 1]
+
+    edge_keys = list(graph.edges(keys=True))
+    if not edge_keys:
+        print(f"  [streets] {tile_id}: interior sidewalks: no street edges to connect "
+              f"{len(loose_ends)} loose ends to")
+        return result
+
+    edge_lines_m = [_edge_line_m(graph, u, v, k) for u, v, k in edge_keys]
+    edge_tree = STRtree(edge_lines_m)
+
+    barrier_lines_m = []
+    if barrier_graph is not None:
+        barrier_lines_m = [
+            _edge_line_m(barrier_graph, u, v, k) for u, v, k in barrier_graph.edges(keys=True)
+        ]
+
+    splits_by_edge: dict[tuple, list[tuple[float, object, Point]]] = {}
+    connected_count = 0
+    for node in loose_ends:
+        point_m = Point(_TO_METRIC_CRS(interior_graph.nodes[node]["x"], interior_graph.nodes[node]["y"]))
+        edge_idx = edge_tree.nearest(point_m)
+        nearest_line = edge_lines_m[edge_idx]
+        if point_m.distance(nearest_line) > INTERIOR_SIDEWALK_SNAP_MAX_M:
+            continue
+
+        distance_along = nearest_line.project(point_m)
+        snap_point_m = nearest_line.interpolate(distance_along)
+
+        connection = LineString([point_m, snap_point_m])
+        if any(connection.crosses(barrier) for barrier in barrier_lines_m):
+            continue
+
+        splits_by_edge.setdefault(edge_keys[edge_idx], []).append((distance_along, node, snap_point_m))
+        connected_count += 1
+
+    existing_negative_ids = [n for n in interior_graph.nodes if isinstance(n, int) and n < 0]
+    next_id = (min(existing_negative_ids) - 1) if existing_negative_ids else -1
+    for (u, v, k), splits in splits_by_edge.items():
+        next_id = _apply_edge_splits(result, graph, u, v, k, splits, next_id)
+
+    dropped = len(loose_ends) - connected_count
+    print(f"  [streets] {tile_id}: interior sidewalks: connected {connected_count} loose ends "
+          f"to the street network, left {dropped} unconnected (too far or blocked by a barrier)")
+    return result
+
+
 def fetch_streets(
     bbox: Bbox, tile_id: str, park_reach: prepared.PreparedGeometry | None = None
 ) -> nx.MultiDiGraph | None:
@@ -501,9 +770,13 @@ def fetch_streets(
     narrower foot=designated-cycleway query,
     FOOT_OVERRIDES_ACCESS_FILTER's access=no/private-but-foot-designated
     query, NAMED_SIDEWALK_FILTER's named-park-path query,
-    ANY_SIDEWALK_FILTER's any-sidewalk query narrowed to park reach, and
+    ANY_SIDEWALK_FILTER's any-sidewalk query narrowed to park reach,
     PARKING_AISLE_FILTER's every-parking-aisle query narrowed to
-    through-paths (see all six constants' comments).
+    through-paths, and NYC's Interior Sidewalk Centerline data (a
+    separate ArcGIS source, not an Overpass query) snapped onto the
+    street network wherever it comes close enough (see all six filter
+    constants' comments, plus INTERIOR_SIDEWALK_SNAP_MAX_M and
+    BARRIER_FILTER).
 
     Each is fetched unsimplified (see _fetch_with_retry's simplify=False
     comment for why) and composed into one graph BEFORE simplifying --
@@ -590,6 +863,17 @@ def fetch_streets(
     through_path_aisles = _through_path_parking_aisles(graph, parking_aisle_graph, tile_id)
     if through_path_aisles is not None:
         graph = nx.compose(graph, through_path_aisles)
+
+    # Not an Overpass query -- interior_sidewalks.fetch_interior_sidewalks()
+    # fetches NYC's own ArcGIS-hosted survey data instead, cached whole
+    # citywide (see that module) and filtered down to this tile here.
+    # Same "before the single simplify pass" ordering as above.
+    interior_geojson = interior_sidewalks.fetch_interior_sidewalks()
+    interior_segments = _interior_sidewalks_for_tile(interior_geojson, bbox)
+    interior_graph = _build_interior_sidewalk_graph(interior_segments, tile_id)
+    if interior_graph is not None:
+        barrier_graph = _fetch_with_retry(bbox, BARRIER_FILTER, tile_id, "barrier ways")
+        graph = _snap_interior_sidewalks(graph, interior_graph, barrier_graph, tile_id)
 
     graph = ox.simplification.simplify_graph(graph)
 
