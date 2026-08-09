@@ -91,7 +91,11 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # INTERIOR_SIDEWALK_SNAP_MAX_M of it (FIXES.md item 1a). Also added the
 # BARRIER_FILTER union used to veto a connection that would cross a real
 # fence/wall. Same "baked into the fetched graph" reasoning as v10-v13.
-GRAPH_CACHE_VERSION = 14
+# v15: FOOT_OVERRIDES_ACCESS_FILTER excludes golf-tagged ways -- real
+# private golf-course cart paths were being admitted as if foot=designated
+# meant public access, confirmed already live in production for one real
+# Marine Park case (FIXES.md item 1e's follow-up).
+GRAPH_CACHE_VERSION = 15
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -168,6 +172,19 @@ CYCLEWAY_FILTER = '["highway"="cycleway"]["foot"="designated"]'
 # regex can only inspect one tag), so this mirrors CYCLEWAY_FILTER's
 # approach: a separate query for exactly the case WALK_FILTER's own
 # allowlist can't express, unioned into the result instead.
+#
+# Excludes golf-tagged ways (FIXES.md item 1e's follow-up, 2026-08-09):
+# checked every real citywide match (222 ways) and found 29 carry a
+# "golf" tag (golf=path/cartpath) -- real cart paths on golf courses,
+# where foot=designated/yes marks the walking lane of the path (as
+# opposed to the cart lane), not "the general public may enter" the way
+# it does on Queensboro Bridge. Confirmed one of these was already live
+# in production (a Marine Park golf cart path, data/tiles/r7c14.json.gz)
+# before this exclusion existed. The other 193 matches don't carry a golf
+# tag and are real, correct overrides (the original Queensboro Bridge
+# case, Columbia's College Walk, Fulton Mall, gated communities that
+# block cars but explicitly admit pedestrians) -- narrowing to exclude
+# only "golf" rather than dropping the whole foot-override mechanism.
 FOOT_OVERRIDES_ACCESS_FILTER = (
     '["highway"~"primary|primary_link|secondary|secondary_link|tertiary|tertiary_link'
     '|unclassified|residential|living_street|pedestrian|footway|path|steps|service"]'
@@ -175,6 +192,7 @@ FOOT_OVERRIDES_ACCESS_FILTER = (
     '["foot"~"designated|yes"]'
     '["access"~"private|no"]'
     '["footway"!~"sidewalk"]'
+    '["golf"!~"."]'
 )
 
 # A fourth query, also unioned into the main fetch: WALK_FILTER's

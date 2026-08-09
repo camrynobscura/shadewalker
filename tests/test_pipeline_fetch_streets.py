@@ -406,6 +406,21 @@ def test_foot_overrides_access_filter_requires_an_explicit_foot_override():
     assert '"access"~"private|no"' in streets.FOOT_OVERRIDES_ACCESS_FILTER
 
 
+def test_foot_overrides_access_filter_excludes_golf_ways():
+    # Confirmed real citywide (FIXES.md item 1e's follow-up, 2026-08-09):
+    # of 222 ways this filter matches citywide, 29 carry a "golf" tag
+    # (golf=path/cartpath) -- real golf-course cart paths, where
+    # foot=designated/yes marks the walking lane of the path (as opposed
+    # to the cart lane), not "the general public may enter." One of these
+    # (a Marine Park golf cart path) was already confirmed live in
+    # data/tiles/r7c14.json.gz -- an access=private golf course path
+    # routable in production. The other 193 matches (the original
+    # Queensboro Bridge case, Columbia's College Walk, Fulton Mall, gated
+    # communities that block cars but explicitly admit pedestrians) don't
+    # carry a golf tag and should stay admitted.
+    assert '"golf"!~"."' in streets.FOOT_OVERRIDES_ACCESS_FILTER
+
+
 def test_named_sidewalk_filter_requires_both_sidewalk_and_a_name():
     # Scoped tightly on purpose: this should only admit footway=sidewalk
     # ways that ALSO have a real name -- not every sidewalk, which would
