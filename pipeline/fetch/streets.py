@@ -60,8 +60,14 @@ _TO_METRIC_CRS = Transformer.from_crs("EPSG:4326", METRIC_CRS, always_xy=True).t
 # content, only whether one was supplied at all, so this needs its own
 # bump or every already-cached tile keeps silently reusing its
 # cemetery-excluding graph) -- it's baked into the cache
-# filename, so old cached graphs are ignored rather than silently reused.
-GRAPH_CACHE_VERSION = 10
+# filename, so old cached graphs are ignored rather than silently reused;
+# v11: park_polygon() no longer excludes a property by typecategory alone
+# for Buildings/Institutions, Triangle/Plaza, and Mall -- Theodore
+# Roosevelt Park, Brooklyn Botanic Garden, Grand Army Plaza, and Ocean
+# Parkway Malls were being wrongly excluded from park_reach under those
+# labels (FIXES.md item 1d) -- same "baked into park_reach, not the cache
+# filename" reasoning as v10, so this needs its own bump too.
+GRAPH_CACHE_VERSION = 11
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during

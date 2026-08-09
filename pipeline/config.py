@@ -349,9 +349,41 @@ CANOPY_RASTER_TREE_CLASS = 1
 # (Green-Wood etc.) is a separate, still-open gap: those aren't even in
 # this NYC-Parks-only dataset, so no filter change here helps them -- see
 # PLAN.md's Park-canopy section.
+#
+# Blanket-excluded regardless of any property on the feature -- checked
+# directly against the real dataset (2026-08-08): Parkway in particular
+# still carries several properties whose OWN subcategory reads "Large
+# Park" or "Neighborhood Park" (Belt Parkway/Shore Parkway, 760 acres;
+# Richmond Parkway, 351 acres; Pelham/Mosholu/Eastern Parkway) -- real
+# highway medians, not walkable park interior, despite the park-like
+# label. The subcategory override below (PARK_LIKE_SUBCATEGORIES) does
+# NOT apply to these -- it would wrongly rescue ~1,300 acres of median.
 PARK_EXCLUDED_TYPECATEGORIES = frozenset({
-    "Parkway", "Mall", "Triangle/Plaza", "Strip",  # roadside/median slivers
-    "Buildings/Institutions", "Lot", "Operations", "Retired N/A",  # not park land
+    "Parkway", "Strip",  # highway medians/rights-of-way
+    "Lot", "Operations", "Retired N/A",  # not park land, no bundling error found
+})
+
+# Typecategories where a real bundling error WAS found (2026-08-08,
+# FIXES.md item 1d): actual park land filed under a label meant for
+# something else (Theodore Roosevelt Park and Brooklyn Botanic Garden
+# under "Buildings/Institutions"; Grand Army Plaza under "Triangle/
+# Plaza"; Ocean Parkway Malls under "Mall"). For exactly these three,
+# park_polygon() checks the property's own `subcategory` instead of
+# excluding the whole typecategory outright -- see PARK_LIKE_SUBCATEGORIES.
+PARK_TYPECATEGORIES_NEEDING_SUBCATEGORY_CHECK = frozenset({
+    "Buildings/Institutions", "Triangle/Plaza", "Mall",
+})
+
+# `subcategory` values confirmed (2026-08-08) to mean real, walkable park
+# land wherever they appear on the typecategories above -- deliberately
+# narrow, only labels with an unambiguous real-park meaning (checked
+# directly against the dataset, not guessed). Excludes e.g. "Sitting
+# Area/Triangle/Mall" (the genuine traffic triangles Triangle/Plaza mostly
+# is), "Building"/"Recreation Center"/"Concession" (genuine buildings),
+# and ambiguous one-off labels ("Type 1", "Undeveloped", "REDEC") that
+# have no confirmed real-park example behind them.
+PARK_LIKE_SUBCATEGORIES = frozenset({
+    "Large Park", "Neighborhood Park", "Flagship Park", "Garden", "Neighborhood Plgd",
 })
 
 # Canopy fraction -> tree-density calibration (Phase 2 street audit: 750
