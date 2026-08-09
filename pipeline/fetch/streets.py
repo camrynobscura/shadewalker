@@ -95,7 +95,13 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # private golf-course cart paths were being admitted as if foot=designated
 # meant public access, confirmed already live in production for one real
 # Marine Park case (FIXES.md item 1e's follow-up).
-GRAPH_CACHE_VERSION = 15
+# v16: interior-sidewalk edges (_build_interior_sidewalk_graph,
+# _apply_edge_splits) now carry osmid and length -- both were missing
+# entirely, which crashed centerline.build_edge_table() the first time
+# the full pipeline ran end-to-end on a real tile with a real interior-
+# sidewalk connection (confirmed live, Marine Park/r7c14, while validating
+# v15 above). Same "baked into the fetched graph" reasoning as v10-v15.
+GRAPH_CACHE_VERSION = 16
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -605,6 +611,7 @@ def _build_interior_sidewalk_graph(
     graph = nx.MultiDiGraph()
     placed: list[tuple[int, Point]] = []
     next_id = -1
+    next_edge_osmid = -1
 
     def node_for(lon: float, lat: float) -> int:
         nonlocal next_id
@@ -622,7 +629,18 @@ def _build_interior_sidewalk_graph(
         node_ids = [node_for(lon, lat) for lon, lat in coords]
         for a, b in zip(node_ids, node_ids[1:]):
             if a != b:
-                graph.add_edge(a, b)
+                # These segments come from ArcGIS, not OSM, so there's no
+                # real osmid to carry over -- centerline.build_edge_table()
+                # requires one on every edge (real bug, 2026-08-09: a
+                # missing one here crashed osmnx's own to_undirected() the
+                # first time this ran on a real tile). Negative, same
+                # reasoning as the node ids above. length is required too
+                # (same function, one step further) -- real meters between
+                # the two endpoints, not inherited from anything.
+                graph.add_edge(
+                    a, b, osmid=next_edge_osmid, length=_node_distance_m(graph, a, b)
+                )
+                next_edge_osmid -= 1
 
     print(f"  [streets] {tile_id}: interior sidewalks: {graph.number_of_nodes()} points "
           f"from {len(segments)} segments")
@@ -644,13 +662,25 @@ def _to_lonlat(line_m: LineString) -> LineString:
     return LineString([_FROM_METRIC_CRS(x, y) for x, y in line_m.coords])
 
 
+def _node_distance_m(g: nx.MultiDiGraph, a, b) -> float:
+    """Real straight-line distance between two of g's nodes, in meters --
+    needed on every synthetic edge (centerline.build_edge_table() requires
+    a real `length` on every edge, same as `osmid`; real bug, 2026-08-09:
+    a missing one here crashed the pipeline one step past the osmid fix,
+    on the exact same real tile)."""
+    point_a = Point(_TO_METRIC_CRS(g.nodes[a]["x"], g.nodes[a]["y"]))
+    point_b = Point(_TO_METRIC_CRS(g.nodes[b]["x"], g.nodes[b]["y"]))
+    return point_a.distance(point_b)
+
+
 def _apply_edge_splits(
     result: nx.MultiDiGraph,
     graph: nx.MultiDiGraph,
     u, v, k,
     splits: list[tuple[float, object, Point]],
     next_id: int,
-) -> int:
+    next_edge_osmid: int,
+) -> tuple[int, int]:
     """Replace one street edge with a chain of sub-edges, one new node per
     real interior-sidewalk connection landing on it (FIXES.md item 1a).
     Applied for every loose end snapping onto the SAME original edge
@@ -659,11 +689,25 @@ def _apply_edge_splits(
     work from a stale picture of the edge the first one already cut in
     two.
 
-    Returns the next available synthetic node id, so a caller splitting
-    several different edges keeps one running counter across all of them.
+    Every new sub-edge needs an osmid and a length (centerline.
+    build_edge_table() requires both on every edge; real bug, 2026-08-09:
+    missing ones here crashed the pipeline -- first on osmid, then, one
+    line further, on length -- the first time this ran on a real tile). A
+    geometry-bearing sub-segment is still genuinely part of the original
+    street, so it keeps that street's real osmid, and its length is
+    recomputed from its own (shorter) geometry, not inherited from the
+    original edge's full length. The plain connector edges to a loose end
+    never existed in OSM at all, so they each get their own synthetic
+    osmid instead (same negative-int reasoning as the synthetic node ids)
+    and a real length computed from their own two endpoints.
+
+    Returns the next available (synthetic node id, synthetic edge osmid),
+    so a caller splitting several different edges keeps one running
+    counter of each across all of them.
     """
     splits = sorted(splits, key=lambda item: item[0])
     original_line_m = _edge_line_m(graph, u, v, k)
+    original_osmid = graph.edges[u, v, k].get("osmid")
 
     result.remove_edge(u, v, k)
 
@@ -676,7 +720,11 @@ def _apply_edge_splits(
             # edge meets an existing intersection) -- connect directly
             # instead of inserting a zero-length duplicate node, which
             # substring() below can't build a valid LineString from anyway.
-            result.add_edge(chain_start, loose_end_node)
+            result.add_edge(
+                chain_start, loose_end_node, osmid=next_edge_osmid,
+                length=_node_distance_m(result, chain_start, loose_end_node),
+            )
+            next_edge_osmid -= 1
             continue
 
         split_node = next_id
@@ -685,8 +733,15 @@ def _apply_edge_splits(
         result.add_node(split_node, x=lon, y=lat)
 
         sub_geometry = substring(original_line_m, prev_distance, distance_along)
-        result.add_edge(chain_start, split_node, geometry=_to_lonlat(sub_geometry))
-        result.add_edge(split_node, loose_end_node)
+        result.add_edge(
+            chain_start, split_node, geometry=_to_lonlat(sub_geometry),
+            osmid=original_osmid, length=sub_geometry.length,
+        )
+        result.add_edge(
+            split_node, loose_end_node, osmid=next_edge_osmid,
+            length=_node_distance_m(result, split_node, loose_end_node),
+        )
+        next_edge_osmid -= 1
 
         chain_start = split_node
         prev_distance = distance_along
@@ -695,11 +750,18 @@ def _apply_edge_splits(
         # Symmetric case: the last split landed right at v's own end of
         # the edge.
         if chain_start != v:
-            result.add_edge(chain_start, v)
+            result.add_edge(
+                chain_start, v, osmid=next_edge_osmid,
+                length=_node_distance_m(result, chain_start, v),
+            )
+            next_edge_osmid -= 1
     else:
         final_geometry = substring(original_line_m, prev_distance, original_line_m.length)
-        result.add_edge(chain_start, v, geometry=_to_lonlat(final_geometry))
-    return next_id
+        result.add_edge(
+            chain_start, v, geometry=_to_lonlat(final_geometry),
+            osmid=original_osmid, length=final_geometry.length,
+        )
+    return next_id, next_edge_osmid
 
 
 def _snap_interior_sidewalks(
@@ -771,8 +833,11 @@ def _snap_interior_sidewalks(
 
     existing_negative_ids = [n for n in interior_graph.nodes if isinstance(n, int) and n < 0]
     next_id = (min(existing_negative_ids) - 1) if existing_negative_ids else -1
+    next_edge_osmid = -1
     for (u, v, k), splits in splits_by_edge.items():
-        next_id = _apply_edge_splits(result, graph, u, v, k, splits, next_id)
+        next_id, next_edge_osmid = _apply_edge_splits(
+            result, graph, u, v, k, splits, next_id, next_edge_osmid
+        )
 
     dropped = len(loose_ends) - connected_count
     print(f"  [streets] {tile_id}: interior sidewalks: connected {connected_count} loose ends "

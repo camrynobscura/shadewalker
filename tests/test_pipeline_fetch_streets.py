@@ -952,11 +952,33 @@ def test_build_interior_sidewalk_graph_does_not_merge_endpoints_beyond_tolerance
     assert not nx.is_connected(result.to_undirected())
 
 
+def test_build_interior_sidewalk_graph_gives_every_edge_a_synthetic_osmid():
+    # Real bug (2026-08-09): these edges came from ArcGIS data, not OSM, so
+    # they never had an osmid at all -- osmnx's own to_undirected()
+    # (centerline.build_edge_table, called later in the real pipeline)
+    # requires one on every edge, and crashed with a bare KeyError the
+    # first time this ran end-to-end on a real tile (Marine Park, r7c14).
+    # Distinct per edge, and negative -- real OSM ids are always large
+    # positive ints, confirmed against real cached tiles -- so nothing
+    # here can collide with a real osmid once composed with the street
+    # graph, same reasoning as this function's synthetic node ids.
+    segments = [
+        [(-73.95, 40.05), (-73.949, 40.05)],
+        [(-73.949, 40.05), (-73.948, 40.05)],
+    ]
+
+    result = streets._build_interior_sidewalk_graph(segments, "test-tile")
+
+    osmids = [data["osmid"] for _, _, data in result.edges(data=True)]
+    assert all(isinstance(osmid, int) and osmid < 0 for osmid in osmids)
+    assert len(set(osmids)) == len(osmids)  # each edge gets its own, not shared
+
+
 def _street_graph_with_one_edge():
     graph = nx.MultiDiGraph()
     graph.add_node("s1", x=-73.9500, y=40.0500)
     graph.add_node("s2", x=-73.9490, y=40.0500)
-    graph.add_edge("s1", "s2")
+    graph.add_edge("s1", "s2", osmid=555)
     return graph
 
 
@@ -964,7 +986,7 @@ def _interior_graph_with_one_loose_end(lon, lat):
     interior = nx.MultiDiGraph()
     interior.add_node("loose_end", x=lon, y=lat)
     interior.add_node("anchor", x=lon, y=lat + 0.001)  # far away, not near any street
-    interior.add_edge("loose_end", "anchor")
+    interior.add_edge("loose_end", "anchor", osmid=-1)  # as _build_interior_sidewalk_graph would set
     return interior
 
 
@@ -1058,6 +1080,57 @@ def test_snap_interior_sidewalks_splits_the_same_street_edge_for_two_different_l
     assert nx.has_path(undirected, "close_2", "s1")
     assert nx.has_path(undirected, "close_2", "s2")
     assert nx.has_path(undirected, "close_1", "close_2")
+
+
+def test_snap_interior_sidewalks_gives_every_new_edge_an_osmid():
+    # Real bug (2026-08-09): a split street sub-segment and the new
+    # connector edge to the interior sidewalk's loose end were both being
+    # added without an osmid, which crashed centerline.build_edge_table()
+    # (via osmnx's own to_undirected()) the first time this ran end-to-end
+    # on a real tile with a true parallel edge (Marine Park, r7c14) --
+    # never caught by the narrower unit tests above, which only check
+    # connectivity, not this attribute. A split sub-segment genuinely is
+    # still part of the original street (s1-s2, osmid=555 from the fixture
+    # above), so it should keep that real id; the brand-new connector edge
+    # to the interior sidewalk never existed in OSM at all, so it needs its
+    # own synthetic one instead.
+    graph = _street_graph_with_one_edge()
+    interior = _interior_graph_with_one_loose_end(-73.9495, 40.05003)
+
+    result = streets._snap_interior_sidewalks(graph, interior, None, "test-tile")
+
+    for u, v, k, data in result.edges(keys=True, data=True):
+        assert data.get("osmid") is not None, f"edge ({u}, {v}) is missing osmid"
+
+    split_segment_osmids = {
+        data["osmid"] for u, v, k, data in result.edges(keys=True, data=True)
+        if "geometry" in data
+    }
+    assert split_segment_osmids == {555}  # the real street's own id, preserved
+
+
+def test_snap_interior_sidewalks_result_survives_build_edge_table():
+    # The actual regression test for the real bug: running the snapped
+    # result through the same downstream step the real pipeline does
+    # (centerline.build_edge_table, which calls osmnx's to_undirected())
+    # must not crash. Two loose ends snapping to the same street edge
+    # (see the split test above) is what actually produces a true
+    # parallel-edge scenario like the one that crashed on r7c14.
+    from pipeline.graph.centerline import build_edge_table
+
+    graph = _street_graph_with_one_edge()
+    graph.graph["crs"] = "epsg:4326"
+    interior = nx.MultiDiGraph()
+    interior.add_node("close_1", x=-73.9497, y=40.05003)
+    interior.add_node("anchor_1", x=-73.9497, y=40.052)
+    interior.add_edge("close_1", "anchor_1", osmid=-1)
+    interior.add_node("close_2", x=-73.9493, y=40.05003)
+    interior.add_node("anchor_2", x=-73.9493, y=40.052)
+    interior.add_edge("close_2", "anchor_2", osmid=-2)
+
+    result = streets._snap_interior_sidewalks(graph, interior, None, "test-tile")
+
+    build_edge_table(result)  # must not raise
 
 
 def test_fetch_streets_unions_in_interior_sidewalks(monkeypatch, tmp_path):
