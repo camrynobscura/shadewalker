@@ -101,7 +101,17 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # the full pipeline ran end-to-end on a real tile with a real interior-
 # sidewalk connection (confirmed live, Marine Park/r7c14, while validating
 # v15 above). Same "baked into the fetched graph" reasoning as v10-v15.
-GRAPH_CACHE_VERSION = 16
+# v17: added 'track' to WALK_FILTER's highway allowlist and
+# FOOT_OVERRIDES_ACCESS_FILTER's (FIXES.md item 1f) -- a full citywide
+# tag survey found 497 real NYC highway=track ways, OSM's own pedestrian-
+# navigation guidelines classify track as a default pedestrian way (same
+# category as footway/path/steps), and manual review of every real risk
+# cluster in the newly-admitted set (Pelham Bay, Rockaway/Tilden Beach, a
+# beach-path access=customers cluster, Ocean Breeze Park) confirmed real
+# public paths. Also tightened WALK_FILTER's foot clause (foot!~"no" ->
+# foot!~"no|private") -- closes a real gap found during the same survey
+# where foot=private wasn't excluded by anything.
+GRAPH_CACHE_VERSION = 17
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -131,10 +141,30 @@ WALK_FILTER = (
     # and deliberately NOT also added to FOOT_OVERRIDES_ACCESS_FILTER,
     # since that query needs an explicit foot=designated|yes to override
     # access, and this restricted mileage carries no foot tag at all.
+    #
+    # track is here on the same reasoning (FIXES.md item 1f, 2026-08-09):
+    # OSM's own pedestrian-navigation guidelines list highway=track as a
+    # default "pedestrian (distinct) way," the same category as footway/
+    # path/steps, not something needing a special foot=yes override. A
+    # full citywide tag survey found 497 real NYC track ways; 323 (65%)
+    # already pass this filter's existing foot/access clauses unchanged.
+    # Manually checked every real risk cluster in the admitted set
+    # against satellite imagery (an untagged paved path network in Pelham
+    # Bay, Rockaway/Tilden Beach's service roads, a beach-path
+    # access=customers cluster, Ocean Breeze Park) -- all confirmed real
+    # public paths, not private facilities slipping through on a missing
+    # access tag.
     '["highway"~"primary|primary_link|secondary|secondary_link|tertiary|tertiary_link'
-    '|unclassified|residential|living_street|pedestrian|footway|path|steps|service|bridleway"]'
+    '|unclassified|residential|living_street|pedestrian|footway|path|steps|service'
+    '|bridleway|track"]'
     '["area"!~"yes"]'                                  # skip plaza *areas* (not lines)
-    '["foot"!~"no"]'                                   # explicitly closed to pedestrians
+    '["foot"!~"no|private"]'                           # explicitly closed to pedestrians
+                                                        # ("private" added 2026-08-09,
+                                                        # FIXES.md item 1f: 4 real track
+                                                        # ways found tagged foot=private,
+                                                        # which "no" alone never caught --
+                                                        # applies to every highway type
+                                                        # here, not just track)
     '["access"!~"private|no"]'                         # gated/private ways
     '["service"!~"private|driveway|parking_aisle"]'    # not real walking streets
     '["footway"!~"sidewalk"]'                          # the separately-mapped sidewalk
@@ -191,9 +221,16 @@ CYCLEWAY_FILTER = '["highway"="cycleway"]["foot"="designated"]'
 # case, Columbia's College Walk, Fulton Mall, gated communities that
 # block cars but explicitly admit pedestrians) -- narrowing to exclude
 # only "golf" rather than dropping the whole foot-override mechanism.
+#
+# Adds track to the highway allowlist too (FIXES.md item 1f, 2026-08-09):
+# one real case found during that item's citywide survey, way 1240381845
+# (40.63868,-73.87592), is tagged access=no + foot=yes + horse=yes -- the
+# exact Queensboro Bridge pattern -- but fell through untouched because
+# track wasn't in this filter's own highway list, even after being added
+# to WALK_FILTER's.
 FOOT_OVERRIDES_ACCESS_FILTER = (
     '["highway"~"primary|primary_link|secondary|secondary_link|tertiary|tertiary_link'
-    '|unclassified|residential|living_street|pedestrian|footway|path|steps|service"]'
+    '|unclassified|residential|living_street|pedestrian|footway|path|steps|service|track"]'
     '["area"!~"yes"]'
     '["foot"~"designated|yes"]'
     '["access"~"private|no"]'

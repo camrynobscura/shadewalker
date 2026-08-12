@@ -388,6 +388,43 @@ def test_walk_filter_admits_bridleway():
     assert '["access"!~"private|no"]' in streets.WALK_FILTER
 
 
+def test_walk_filter_admits_track():
+    # highway=track: OSM's own pedestrian-navigation guidelines
+    # (wiki.openstreetmap.org/wiki/Guidelines_for_pedestrian_navigation)
+    # list track as a default "pedestrian (distinct) way," the same
+    # category as footway/path/steps -- not something needing a special
+    # foot=yes override the way a shared carriageway does. A full
+    # citywide tag survey (FIXES.md item 1f, 2026-08-09) found 497 real
+    # NYC track ways; 323 (65%) already pass this filter's existing
+    # foot/access clauses unchanged. Manually checked every real risk
+    # cluster in that admitted set against satellite imagery (an untagged
+    # paved path network in Pelham Bay, Rockaway/Tilden Beach's service
+    # roads, a beach-path access=customers cluster, Ocean Breeze Park) --
+    # all confirmed real public paths, not private facilities slipping
+    # through on a missing access tag.
+    highway_clause = re.search(r'\["highway"~"([^"]+)"\]', streets.WALK_FILTER)
+    assert highway_clause is not None
+    assert "track" in highway_clause.group(1).split("|")
+    # Same safety net bridleway's own test re-asserts above: admitting a
+    # new type only stays safe as long as this clause keeps excluding
+    # genuinely private/gated ways.
+    assert '["access"!~"private|no"]' in streets.WALK_FILTER
+
+
+def test_walk_filter_excludes_foot_private():
+    # Found during the highway=track survey (FIXES.md item 1f,
+    # 2026-08-09): 4 real ways (near Marine Park/Bergen Beach) are
+    # tagged foot=private -- explicitly not public for pedestrians -- but
+    # this clause only ever excluded foot=no, so these would have slipped
+    # straight through untouched. Applies to every highway type this
+    # filter admits, not just track.
+    foot_clause = re.search(r'\["foot"!~"([^"]+)"\]', streets.WALK_FILTER)
+    assert foot_clause is not None
+    excluded = foot_clause.group(1).split("|")
+    assert "no" in excluded
+    assert "private" in excluded
+
+
 def test_cycleway_filter_requires_foot_designated():
     # Scoped tightly on purpose: broadening this to admit every cycleway
     # (not just explicitly shared-use ones) would start routing
@@ -419,6 +456,18 @@ def test_foot_overrides_access_filter_excludes_golf_ways():
     # communities that block cars but explicitly admit pedestrians) don't
     # carry a golf tag and should stay admitted.
     assert '"golf"!~"."' in streets.FOOT_OVERRIDES_ACCESS_FILTER
+
+
+def test_foot_overrides_access_filter_admits_track():
+    # One real case found during the highway=track survey (FIXES.md item
+    # 1f, 2026-08-09): way 1240381845 (40.63868,-73.87592) is tagged
+    # access=no + foot=yes + horse=yes -- the exact Queensboro Bridge
+    # pattern this filter exists for -- but fell through untouched
+    # because track wasn't in this filter's own highway allowlist,
+    # even after being added to WALK_FILTER's.
+    highway_clause = re.search(r'\["highway"~"([^"]+)"\]', streets.FOOT_OVERRIDES_ACCESS_FILTER)
+    assert highway_clause is not None
+    assert "track" in highway_clause.group(1).split("|")
 
 
 def test_named_sidewalk_filter_requires_both_sidewalk_and_a_name():
