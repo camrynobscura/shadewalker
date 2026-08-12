@@ -425,6 +425,11 @@ TREES_DATASET_ID = "hn5i-inap"      # Forestry Tree Points — the live NYC Tree
 PARKS_DATASET_ID = "enfh-gkve"      # Parks Properties — one polygon per NYC Parks property,
                                      # `typecategory` distinguishes real parkland from roadside
                                      # slivers/non-park land (see PARK_EXCLUDED_TYPECATEGORIES)
+PARK_TRAILS_DATASET_ID = "vjbm-hsyr" # NYC Parks Trails — official park-interior trail
+                                     # centerlines, some missing from OSM entirely
+                                     # (FIXES.md item 1g); `class` distinguishes real,
+                                     # obvious paths (Class IV/V) from an unreliable
+                                     # lower tier (see PARK_TRAIL_CLASSES in streets.py)
 BOUNDARIES_DATASET_ID = "wh2p-dxnf" # Borough Boundaries (water areas included) — see PLAN.md:
                                      # a bridge's midspan sits over water, which the water-
                                      # EXCLUDED sibling dataset (gthc-hcne) doesn't cover --

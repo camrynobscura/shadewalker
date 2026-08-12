@@ -29,13 +29,13 @@ import osmnx as ox
 import requests
 from pyproj import Transformer
 from shapely import prepared
-from shapely.geometry import LineString, Point, box
-from shapely.ops import substring
+from shapely.geometry import LineString, Point, box, shape
+from shapely.ops import substring, transform, unary_union
 from shapely.strtree import STRtree
 
 from pipeline import config
 from pipeline.config import Bbox
-from pipeline.fetch import interior_sidewalks
+from pipeline.fetch import interior_sidewalks, park_trails
 from pipeline.graph.centerline import METRIC_CRS
 
 STREETS_DIR = config.RAW_DIR / "streets"
@@ -111,7 +111,19 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # public paths. Also tightened WALK_FILTER's foot clause (foot!~"no" ->
 # foot!~"no|private") -- closes a real gap found during the same survey
 # where foot=private wasn't excluded by anything.
-GRAPH_CACHE_VERSION = 17
+# v18: added NYC Parks' own Trails data (pipeline.fetch.park_trails), a
+# real coverage gap rather than an exclusion bug (FIXES.md item 1g) --
+# trails don't exist in OSM at all yet, not "OSM has them and something
+# filtered them out". Only Class IV ("Highly Developed")/Class V ("Fully
+# Developed") are admitted: a manual spot-check across three real parks
+# (Alley Pond, Prospect, Van Cortlandt) found every Class IV/V segment
+# checked was a real, obvious path, while Class III and below was
+# unreliable -- no other field predicts which of those are real trails
+# and which are nothing on the ground. Each trail is trimmed down to only
+# the portion not already within PARK_TRAIL_OVERLAP_BUFFER_M of the walk
+# graph built so far (most of a real trail typically duplicates a path
+# OSM already has), then snapped on the same way interior sidewalks are.
+GRAPH_CACHE_VERSION = 18
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -365,6 +377,57 @@ INTERIOR_SIDEWALK_SNAP_MAX_M = 5.0
 # meets an intersection), and also avoids handing substring() a
 # zero-length span, which can't build a valid LineString from it.
 _MIN_SPLIT_GAP_M = 1e-6
+
+# Real park-trail classification tiers (NYC Parks Trails' own `class`
+# field) confirmed to mean an obvious, real, walkable path (FIXES.md item
+# 1g) -- a manual spot-check across three real parks (Alley Pond,
+# Prospect, Van Cortlandt) found every Class IV/V segment checked was a
+# real path, while Class III and below was unreliable: no other field
+# (surface, width, named vs. unnamed) predicts which of those are real
+# trails and which are nothing on the ground. Checked live (2026-08-12)
+# that these are the dataset's only two "developed" tiers and there's no
+# spelling/spacing inconsistency to worry about: 5 distinct `class`
+# values citywide, counts sum to the full 7,058-row dataset.
+PARK_TRAIL_CLASSES = frozenset({
+    "Class IV : Highly Developed",
+    "Class V : Fully Developed",
+})
+
+# How far a real trail can sit from the walk graph built so far and still
+# count as "already covered" (see _missing_park_trail_graph) -- the same
+# tolerance used throughout FIXES.md item 1g's own three-park survey.
+# Small enough that a trail running parallel to, but genuinely separate
+# from, an existing path still counts as missing.
+PARK_TRAIL_OVERLAP_BUFFER_M = 8.0
+
+# Below this length, a leftover "missing" stretch of trail (after
+# subtracting existing coverage) is digitization noise -- an 8m buffer
+# against a real, slightly wavy path clips in and out of coverage by a
+# meter or two in places that aren't a real gap (see
+# _uncovered_trail_segments) -- not a real gap worth splicing into the
+# graph.
+PARK_TRAIL_MIN_GAP_M = 15.0
+
+# Same reasoning as INTERIOR_SIDEWALK_MERGE_TOLERANCE_M, applied to trail
+# data instead: independently-digitized segments meeting at the same real
+# point essentially never share an exact coordinate. Kept as its own
+# constant rather than reusing the interior-sidewalk one -- this is a
+# different survey product, and there's no reason its own digitization
+# precision has to match.
+PARK_TRAIL_MERGE_TOLERANCE_M = 1.0
+
+# How close a missing trail sub-segment's loose end needs to be to the
+# real walk network to connect (see _snap_interior_sidewalks). Unlike
+# INTERIOR_SIDEWALK_SNAP_MAX_M (chosen from how far a real loose end
+# measures from the street network), this one is a structural lower
+# bound, not a data-driven measurement: a missing sub-segment is built by
+# cutting a trail exactly at the edge of PARK_TRAIL_OVERLAP_BUFFER_M's
+# 8m buffer, so its own endpoint can legitimately sit close to 8m from
+# the nearest covered edge by construction. Set comfortably above that
+# (8m + margin) rather than reusing INTERIOR_SIDEWALK_SNAP_MAX_M's 5m,
+# which would routinely reject a trail's own just-computed connection
+# point.
+PARK_TRAIL_SNAP_MAX_M = 10.0
 
 # osmnx's own HTTP-response cache is disabled -- it has no expiration and
 # no connection to GRAPH_CACHE_VERSION below, so it can silently keep
@@ -624,21 +687,65 @@ def _interior_sidewalks_for_tile(geojson: dict, bbox: Bbox) -> list[list[tuple[f
     return segments
 
 
+def _park_trails_for_tile(geojson: dict, bbox: Bbox) -> list[LineString]:
+    """Class IV/V ("Highly Developed"/"Fully Developed") park trail
+    segments (FIXES.md item 1g) from the citywide NYC Parks Trails cache
+    whose geometry intersects this tile's bbox -- same division of labor
+    as _interior_sidewalks_for_tile: park_trails.fetch_park_trails()
+    always returns the whole city, each tile filters its own slice out in
+    memory here.
+
+    Excludes Class I/II/III -- see PARK_TRAIL_CLASSES's own comment for
+    why: a spot-check across three real parks found no other field
+    reliably distinguishes a real trail from nothing on the ground within
+    that lower tier.
+
+    A trail's geometry can be a MultiLineString with more than one
+    disconnected part -- each part becomes its own entry here, same as if
+    it were a separate row.
+    """
+    tile_box = box(bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max)
+    lines = []
+    for feature in geojson["features"]:
+        if feature["properties"].get("class") not in PARK_TRAIL_CLASSES:
+            continue
+        geometry = shape(feature["geometry"])
+        parts = geometry.geoms if hasattr(geometry, "geoms") else [geometry]
+        for part in parts:
+            if tile_box.intersects(part):
+                lines.append(part)
+    return lines
+
+
 def _build_interior_sidewalk_graph(
-    segments: list[list[tuple[float, float]]], tile_id: str
+    segments: list[list[tuple[float, float]]],
+    tile_id: str,
+    *,
+    label: str = "interior sidewalks",
+    merge_tolerance_m: float = INTERIOR_SIDEWALK_MERGE_TOLERANCE_M,
+    start_id: int = -1,
+    start_edge_osmid: int = -1,
 ) -> nx.MultiDiGraph | None:
-    """Turn one tile's interior sidewalk segments into a small graph
-    (FIXES.md item 1a). Unlike OSM ways, these segments arrive
-    independently digitized -- two segments meeting at the same real-world
-    point don't necessarily share a coordinate -- so endpoints within
-    INTERIOR_SIDEWALK_MERGE_TOLERANCE_M of an already-placed point are
-    merged into that same node instead of kept as separate touching
-    points.
+    """Turn one tile's independently-digitized path segments into a small
+    graph -- originally built for interior sidewalks (FIXES.md item 1a),
+    now shared with park trails (FIXES.md item 1g), since both are "a
+    real path from a non-OSM NYC dataset" with the same shape of problem.
+    Unlike OSM ways, these segments arrive independently digitized -- two
+    segments meeting at the same real-world point don't necessarily share
+    a coordinate -- so endpoints within merge_tolerance_m of an
+    already-placed point are merged into that same node instead of kept
+    as separate touching points.
 
     Synthetic node ids are negative ints: real OSM node ids are always
     large positive ints (confirmed against real cached tiles), so nothing
     here can collide with a real osmid once composed with the street
-    graph.
+    graph. start_id/start_edge_osmid default to -1 (this function's
+    original, only behavior) but let a caller composing a SECOND
+    synthetic source into the same tile (park trails, after interior
+    sidewalks) continue numbering from wherever the first source's ids
+    already ended, rather than restarting at -1 and silently colliding
+    with an id that already means a different real-world point once both
+    are composed into the same graph.
 
     None if segments is empty.
     """
@@ -647,14 +754,14 @@ def _build_interior_sidewalk_graph(
 
     graph = nx.MultiDiGraph()
     placed: list[tuple[int, Point]] = []
-    next_id = -1
-    next_edge_osmid = -1
+    next_id = start_id
+    next_edge_osmid = start_edge_osmid
 
     def node_for(lon: float, lat: float) -> int:
         nonlocal next_id
         point_m = Point(_TO_METRIC_CRS(lon, lat))
         for node_id, placed_point_m in placed:
-            if point_m.distance(placed_point_m) <= INTERIOR_SIDEWALK_MERGE_TOLERANCE_M:
+            if point_m.distance(placed_point_m) <= merge_tolerance_m:
                 return node_id
         node_id = next_id
         next_id -= 1
@@ -679,7 +786,7 @@ def _build_interior_sidewalk_graph(
                 )
                 next_edge_osmid -= 1
 
-    print(f"  [streets] {tile_id}: interior sidewalks: {graph.number_of_nodes()} points "
+    print(f"  [streets] {tile_id}: {label}: {graph.number_of_nodes()} points "
           f"from {len(segments)} segments")
     return graph
 
@@ -806,28 +913,40 @@ def _snap_interior_sidewalks(
     interior_graph: nx.MultiDiGraph,
     barrier_graph: nx.MultiDiGraph | None,
     tile_id: str,
+    *,
+    snap_max_m: float = INTERIOR_SIDEWALK_SNAP_MAX_M,
+    label: str = "interior sidewalks",
 ) -> nx.MultiDiGraph:
-    """Attach interior_graph onto graph (FIXES.md item 1a), splitting the
-    nearest street edge at the real snap point for each interior loose end
-    (a node with no other interior-sidewalk connection) within
-    INTERIOR_SIDEWALK_SNAP_MAX_M. Confirmed live that snapping to the
+    """Attach interior_graph onto graph -- originally built for interior
+    sidewalks (FIXES.md item 1a), now shared with park trails (FIXES.md
+    item 1g) -- splitting the nearest street edge at the real snap point
+    for each interior loose end (a node with no other connection within
+    interior_graph) within snap_max_m. Confirmed live that snapping to the
     nearest existing NODE instead would misplace 63% of real connections
     by >3m, since these paths typically touch a street mid-block, not at
     an intersection -- so this always finds the nearest EDGE and inserts a
     new node there, never reuses an existing one.
 
-    A loose end farther than the threshold, or whose straight-line
-    connection crosses a real barrier_graph way, is left unconnected -- a
-    real digitization gap or a genuine obstacle, not a bug to
-    force-connect. barrier_graph is optional and known incomplete (see
-    BARRIER_FILTER's own comment); None just means the barrier check is
-    skipped entirely, same as if none matched.
+    A loose end farther than snap_max_m, or whose straight-line connection
+    crosses a real barrier_graph way, is left unconnected -- a real
+    digitization gap or a genuine obstacle, not a bug to force-connect.
+    barrier_graph is optional and known incomplete (see BARRIER_FILTER's
+    own comment); None just means the barrier check is skipped entirely,
+    same as if none matched.
 
     Unlike _park_reach_sidewalks/_through_path_parking_aisles, this can't
     just return edges for the caller to nx.compose() in: splitting an
     existing street edge mutates graph's own structure, not just adds to
     it. So this returns the whole resulting graph, and the caller
     reassigns rather than conditionally composes.
+
+    New split-node ids and connector-edge osmids are numbered from
+    result's OWN existing negative ids (graph composed with
+    interior_graph), not just interior_graph's -- a second call snapping
+    a different synthetic source into the same tile (park trails, called
+    after interior sidewalks) would otherwise restart at -1 and silently
+    collide with an id nx.compose would then merge into an unrelated,
+    already-placed point instead of keeping the two apart.
     """
     result = nx.compose(graph, interior_graph)
 
@@ -836,7 +955,7 @@ def _snap_interior_sidewalks(
 
     edge_keys = list(graph.edges(keys=True))
     if not edge_keys:
-        print(f"  [streets] {tile_id}: interior sidewalks: no street edges to connect "
+        print(f"  [streets] {tile_id}: {label}: no street edges to connect "
               f"{len(loose_ends)} loose ends to")
         return result
 
@@ -855,7 +974,7 @@ def _snap_interior_sidewalks(
         point_m = Point(_TO_METRIC_CRS(interior_graph.nodes[node]["x"], interior_graph.nodes[node]["y"]))
         edge_idx = edge_tree.nearest(point_m)
         nearest_line = edge_lines_m[edge_idx]
-        if point_m.distance(nearest_line) > INTERIOR_SIDEWALK_SNAP_MAX_M:
+        if point_m.distance(nearest_line) > snap_max_m:
             continue
 
         distance_along = nearest_line.project(point_m)
@@ -868,18 +987,101 @@ def _snap_interior_sidewalks(
         splits_by_edge.setdefault(edge_keys[edge_idx], []).append((distance_along, node, snap_point_m))
         connected_count += 1
 
-    existing_negative_ids = [n for n in interior_graph.nodes if isinstance(n, int) and n < 0]
+    existing_negative_ids = [n for n in result.nodes if isinstance(n, int) and n < 0]
     next_id = (min(existing_negative_ids) - 1) if existing_negative_ids else -1
-    next_edge_osmid = -1
+    existing_negative_osmids = [
+        data.get("osmid") for _, _, data in result.edges(data=True)
+        if isinstance(data.get("osmid"), int) and data["osmid"] < 0
+    ]
+    next_edge_osmid = (min(existing_negative_osmids) - 1) if existing_negative_osmids else -1
     for (u, v, k), splits in splits_by_edge.items():
         next_id, next_edge_osmid = _apply_edge_splits(
             result, graph, u, v, k, splits, next_id, next_edge_osmid
         )
 
     dropped = len(loose_ends) - connected_count
-    print(f"  [streets] {tile_id}: interior sidewalks: connected {connected_count} loose ends "
+    print(f"  [streets] {tile_id}: {label}: connected {connected_count} loose ends "
           f"to the street network, left {dropped} unconnected (too far or blocked by a barrier)")
     return result
+
+
+def _uncovered_trail_segments(
+    trail_line_m: LineString, covered_m, min_length_m: float
+) -> list[LineString]:
+    """The portion(s) of a real park-trail line (FIXES.md item 1g) not
+    already covered by the walk graph built so far -- subtracting
+    covered_m (the buffered union of every edge already in the graph)
+    from the trail's own geometry leaves only genuinely missing stretches.
+
+    A partially-covered trail doesn't always leave one clean remainder: an
+    8m buffer against a real, slightly wavy path can clip in and out of
+    coverage several times along its length, shattering the difference
+    into a handful of disconnected pieces rather than one contiguous gap
+    -- confirmed against the real three-park survey behind this fix, not
+    just a hypothetical. Each piece shorter than min_length_m is dropped
+    as digitization noise (a meter or two of buffer-edge slop), not a
+    real gap worth adding to the graph.
+
+    Both inputs and the result are in METRIC_CRS -- min_length_m is
+    meaningless in lon/lat degrees.
+    """
+    remainder = trail_line_m.difference(covered_m)
+    if remainder.is_empty:
+        return []
+    pieces = remainder.geoms if hasattr(remainder, "geoms") else [remainder]
+    return [
+        piece for piece in pieces
+        if isinstance(piece, LineString) and piece.length >= min_length_m
+    ]
+
+
+def _missing_park_trail_graph(
+    graph: nx.MultiDiGraph, trail_lines: list[LineString], tile_id: str
+) -> nx.MultiDiGraph | None:
+    """Build a small graph of the park-trail sub-segments genuinely
+    missing from `graph` (FIXES.md item 1g) -- the portions of each real
+    trail line not already within PARK_TRAIL_OVERLAP_BUFFER_M of an
+    existing edge. None if nothing survives (the common case: a tile with
+    no trails at all, or one where every trail is already fully covered).
+
+    Buffers every edge CURRENTLY in `graph`, not some earlier snapshot --
+    this runs after every other filter/source (interior sidewalks
+    included) has already been composed in, so "already covered" reflects
+    the complete walk network this tile will actually ship with.
+
+    New synthetic node/edge ids continue from graph's own existing
+    negative ids rather than restarting at -1 -- see
+    _snap_interior_sidewalks' own comment on why a second synthetic
+    source in the same tile has to avoid colliding with the first one's.
+    """
+    if not trail_lines:
+        return None
+
+    edge_lines_m = [_edge_line_m(graph, u, v, k) for u, v, k in graph.edges(keys=True)]
+    covered_m = unary_union(edge_lines_m).buffer(PARK_TRAIL_OVERLAP_BUFFER_M)
+
+    missing_segments_lonlat = []
+    for trail_line in trail_lines:
+        trail_line_m = transform(_TO_METRIC_CRS, trail_line)
+        for piece_m in _uncovered_trail_segments(trail_line_m, covered_m, PARK_TRAIL_MIN_GAP_M):
+            missing_segments_lonlat.append(list(_to_lonlat(piece_m).coords))
+
+    if not missing_segments_lonlat:
+        return None
+
+    existing_negative_ids = [n for n in graph.nodes if isinstance(n, int) and n < 0]
+    start_id = (min(existing_negative_ids) - 1) if existing_negative_ids else -1
+    existing_negative_osmids = [
+        data.get("osmid") for _, _, data in graph.edges(data=True)
+        if isinstance(data.get("osmid"), int) and data["osmid"] < 0
+    ]
+    start_edge_osmid = (min(existing_negative_osmids) - 1) if existing_negative_osmids else -1
+
+    return _build_interior_sidewalk_graph(
+        missing_segments_lonlat, tile_id,
+        label="park trails", merge_tolerance_m=PARK_TRAIL_MERGE_TOLERANCE_M,
+        start_id=start_id, start_edge_osmid=start_edge_osmid,
+    )
 
 
 def fetch_streets(
@@ -892,11 +1094,13 @@ def fetch_streets(
     query, NAMED_SIDEWALK_FILTER's named-park-path query,
     ANY_SIDEWALK_FILTER's any-sidewalk query narrowed to park reach,
     PARKING_AISLE_FILTER's every-parking-aisle query narrowed to
-    through-paths, and NYC's Interior Sidewalk Centerline data (a
-    separate ArcGIS source, not an Overpass query) snapped onto the
-    street network wherever it comes close enough (see all six filter
-    constants' comments, plus INTERIOR_SIDEWALK_SNAP_MAX_M and
-    BARRIER_FILTER).
+    through-paths, NYC's Interior Sidewalk Centerline data (a separate
+    ArcGIS source, not an Overpass query) snapped onto the street network
+    wherever it comes close enough, and NYC Parks' own Trails data (a
+    separate Socrata source) trimmed down to whatever isn't already
+    covered and snapped on the same way (see all six filter constants'
+    comments, plus INTERIOR_SIDEWALK_SNAP_MAX_M, PARK_TRAIL_SNAP_MAX_M,
+    and BARRIER_FILTER).
 
     Each is fetched unsimplified (see _fetch_with_retry's simplify=False
     comment for why) and composed into one graph BEFORE simplifying --
@@ -994,6 +1198,25 @@ def fetch_streets(
     if interior_graph is not None:
         barrier_graph = _fetch_with_retry(bbox, BARRIER_FILTER, tile_id, "barrier ways")
         graph = _snap_interior_sidewalks(graph, interior_graph, barrier_graph, tile_id)
+
+    # Also not an Overpass query -- park_trails.fetch_park_trails() fetches
+    # NYC Parks' own Trails survey instead (FIXES.md item 1g), cached whole
+    # citywide and filtered down to this tile here. Runs AFTER interior
+    # sidewalks, not before: _missing_park_trail_graph's own "already
+    # covered" check buffers whatever is CURRENTLY in `graph`, so this
+    # ordering is what lets a trail running along an interior sidewalk
+    # count as covered too, not just one running along a real OSM street.
+    # Same "before the single simplify pass" ordering as every other
+    # source above.
+    trail_geojson = park_trails.fetch_park_trails()
+    trail_lines = _park_trails_for_tile(trail_geojson, bbox)
+    trail_graph = _missing_park_trail_graph(graph, trail_lines, tile_id)
+    if trail_graph is not None:
+        barrier_graph = _fetch_with_retry(bbox, BARRIER_FILTER, tile_id, "barrier ways")
+        graph = _snap_interior_sidewalks(
+            graph, trail_graph, barrier_graph, tile_id,
+            snap_max_m=PARK_TRAIL_SNAP_MAX_M, label="park trails",
+        )
 
     graph = ox.simplification.simplify_graph(graph)
 

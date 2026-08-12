@@ -20,10 +20,11 @@ import networkx as nx
 import pytest
 import requests
 from osmnx._errors import InsufficientResponseError
+from shapely.geometry import LineString, box
 
 from pipeline import config
 from pipeline.config import Bbox
-from pipeline.fetch import streets
+from pipeline.fetch import park_trails, streets
 
 BBOX = Bbox(lat_min=40.0, lat_max=40.1, lon_min=-74.0, lon_max=-73.9)
 
@@ -33,6 +34,15 @@ def _mock_fetch(monkeypatch, tmp_path, graph_from_bbox):
     monkeypatch.setattr(streets.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(streets.ox, "graph_from_bbox", graph_from_bbox)
     monkeypatch.setattr(streets.ox, "save_graphml", lambda graph, path: None)
+    # Defaults to "no trails here" (the common real case) unless a test
+    # overrides it -- unlike interior_sidewalks.fetch_interior_sidewalks,
+    # nothing else in this suite implicitly relies on a real cache file
+    # existing on disk, so every test needs this mocked, not just the ones
+    # that care about park trails specifically.
+    monkeypatch.setattr(
+        park_trails, "fetch_park_trails",
+        lambda **kwargs: {"type": "FeatureCollection", "features": []},
+    )
 
 
 def _by_filter(
@@ -1023,6 +1033,126 @@ def test_build_interior_sidewalk_graph_gives_every_edge_a_synthetic_osmid():
     assert len(set(osmids)) == len(osmids)  # each edge gets its own, not shared
 
 
+def test_build_interior_sidewalk_graph_respects_custom_start_ids():
+    # FIXES.md item 1g needs this: once park trails are a second synthetic
+    # source composed into the same tile, its ids have to continue from
+    # wherever interior sidewalks (or any earlier source) left off, not
+    # restart at -1 and collide with an id that already means a different
+    # real-world point.
+    segments = [[(-73.95, 40.05), (-73.949, 40.05)]]
+
+    result = streets._build_interior_sidewalk_graph(
+        segments, "test-tile", start_id=-100, start_edge_osmid=-200,
+    )
+
+    assert max(result.nodes) == -100  # the first node gets exactly the given start
+    osmids = [data["osmid"] for _, _, data in result.edges(data=True)]
+    assert osmids == [-200]
+
+
+def test_build_interior_sidewalk_graph_respects_a_custom_merge_tolerance():
+    # ~5m apart -- beyond the default 1m interior-sidewalk tolerance
+    # (see test_build_interior_sidewalk_graph_does_not_merge_endpoints_
+    # beyond_tolerance above), but within a wider tolerance a different
+    # synthetic source might legitimately need.
+    segments = [
+        [(-73.95, 40.05), (-73.949, 40.05)],
+        [(-73.949, 40.05005), (-73.948, 40.05)],
+    ]
+
+    result = streets._build_interior_sidewalk_graph(segments, "test-tile", merge_tolerance_m=10.0)
+
+    assert result.number_of_nodes() == 3
+    assert nx.is_connected(result.to_undirected())
+
+
+def test_uncovered_trail_segments_returns_the_whole_line_when_nothing_covers_it():
+    trail = LineString([(0, 0), (100, 0)])
+    covered = box(500, 500, 600, 600)  # nowhere near the trail
+
+    result = streets._uncovered_trail_segments(trail, covered, min_length_m=10)
+
+    assert len(result) == 1
+    assert result[0].equals(trail)
+
+
+def test_uncovered_trail_segments_returns_empty_when_fully_covered():
+    trail = LineString([(0, 0), (100, 0)])
+    covered = box(-10, -10, 110, 10)  # comfortably contains the whole trail
+
+    assert streets._uncovered_trail_segments(trail, covered, min_length_m=10) == []
+
+
+def test_uncovered_trail_segments_splits_into_multiple_pieces_when_partially_covered():
+    # A real, not hypothetical, shape: an 8m buffer against a trail that's
+    # only covered in its middle stretch leaves two disconnected leftover
+    # pieces, not one -- FIXES.md item 1g's own three-park survey found
+    # exactly this pattern (a trail dipping in and out of OSM coverage
+    # along its length).
+    trail = LineString([(0, 0), (300, 0)])
+    covered = box(90, -5, 210, 5)  # covers the middle third only
+
+    result = streets._uncovered_trail_segments(trail, covered, min_length_m=10)
+
+    assert len(result) == 2
+    lengths = sorted(piece.length for piece in result)
+    assert lengths == pytest.approx([90, 90])
+
+
+def test_uncovered_trail_segments_drops_pieces_below_the_minimum_length():
+    # Same middle-covered shape, but one leftover end is a short 5m sliver
+    # (digitization noise -- the buffer's edge doesn't land exactly on a
+    # real gap boundary) and the other is a real 90m gap.
+    trail = LineString([(0, 0), (300, 0)])
+    covered = box(5, -5, 210, 5)  # covers everything except a 5m sliver and a 90m gap
+
+    result = streets._uncovered_trail_segments(trail, covered, min_length_m=10)
+
+    assert len(result) == 1
+    assert result[0].length == pytest.approx(90)
+
+
+def _trail_feature(coords, trail_class="Class IV : Highly Developed"):
+    return {"type": "Feature", "properties": {"class": trail_class},
+            "geometry": {"type": "LineString", "coordinates": coords}}
+
+
+def test_park_trails_for_tile_keeps_class_iv_and_v_only():
+    geojson = {"type": "FeatureCollection", "features": [
+        _trail_feature([[-73.95, 40.05], [-73.949, 40.05]], "Class IV : Highly Developed"),
+        _trail_feature([[-73.95, 40.06], [-73.949, 40.06]], "Class V : Fully Developed"),
+        _trail_feature([[-73.95, 40.07], [-73.949, 40.07]], "Class III : Developed/Improved"),
+    ]}
+
+    result = streets._park_trails_for_tile(geojson, BBOX)
+
+    assert len(result) == 2
+
+
+def test_park_trails_for_tile_drops_segments_outside_the_bbox():
+    geojson = {"type": "FeatureCollection", "features": [
+        _trail_feature([[10.0, 10.0], [10.001, 10.001]]),  # nowhere near BBOX
+    ]}
+
+    assert streets._park_trails_for_tile(geojson, BBOX) == []
+
+
+def test_park_trails_for_tile_explodes_a_multilinestring_into_separate_parts():
+    # A real shape in the raw data: one row's `shape` can be a
+    # MultiLineString with more than one disconnected part.
+    geojson = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"class": "Class IV : Highly Developed"},
+         "geometry": {"type": "MultiLineString", "coordinates": [
+             [[-73.95, 40.05], [-73.949, 40.05]],
+             [[-73.94, 40.05], [-73.939, 40.05]],
+         ]}},
+    ]}
+
+    result = streets._park_trails_for_tile(geojson, BBOX)
+
+    assert len(result) == 2
+
+
 def _street_graph_with_one_edge():
     graph = nx.MultiDiGraph()
     graph.add_node("s1", x=-73.9500, y=40.0500)
@@ -1081,6 +1211,45 @@ def test_snap_interior_sidewalks_skips_a_connection_blocked_by_a_real_barrier():
     result = streets._snap_interior_sidewalks(graph, interior, barriers, "test-tile")
 
     assert not nx.has_path(result.to_undirected(), "loose_end", "s1")
+
+
+def test_snap_interior_sidewalks_avoids_id_collision_with_a_prior_synthetic_source():
+    # FIXES.md item 1g: once park trails are snapped in AFTER interior
+    # sidewalks (a second call in the same tile), `graph` (the
+    # destination) already contains negative synthetic ids from that
+    # first pass. This call's own new split-node numbering must not
+    # restart at -1 and silently collide with an id that already means a
+    # different real-world point once composed -- nx.compose would
+    # silently merge the two into one node instead of raising anything.
+    graph = _street_graph_with_one_edge()
+    graph.add_node(-1, x=-73.9500, y=40.06)  # simulates a node an earlier
+                                              # synthetic source already placed
+    graph.add_edge("s1", -1, osmid=-1, length=1000.0)
+
+    interior = _interior_graph_with_one_loose_end(-73.9495, 40.05003)
+
+    result = streets._snap_interior_sidewalks(graph, interior, None, "test-tile")
+
+    # The pre-existing node's own identity must survive untouched -- if
+    # the new split node collided with it, this would instead read back
+    # as wherever the split landed on the s1-s2 edge (~40.05), not 40.06.
+    assert result.nodes[-1]["y"] == 40.06
+
+
+def test_snap_interior_sidewalks_respects_a_custom_snap_max():
+    # Same ~22m-away loose end that the default 5m threshold leaves
+    # disconnected (see test_snap_interior_sidewalks_leaves_a_far_loose_
+    # end_disconnected above) -- park trails need a larger threshold,
+    # since a trimmed trail's own endpoint can legitimately sit close to
+    # PARK_TRAIL_OVERLAP_BUFFER_M (8m) from the nearest covered edge by
+    # construction (see PARK_TRAIL_SNAP_MAX_M's own comment).
+    graph = _street_graph_with_one_edge()
+    interior = _interior_graph_with_one_loose_end(-73.9495, 40.05020)
+
+    result = streets._snap_interior_sidewalks(graph, interior, None, "test-tile", snap_max_m=25.0)
+
+    undirected = result.to_undirected()
+    assert nx.has_path(undirected, "loose_end", "s1")
 
 
 def test_snap_interior_sidewalks_evaluates_each_loose_end_independently():
@@ -1182,6 +1351,43 @@ def test_snap_interior_sidewalks_result_survives_build_edge_table():
     build_edge_table(result)  # must not raise
 
 
+def test_missing_park_trail_graph_returns_none_for_no_trail_lines():
+    graph = _street_graph_with_one_edge()
+
+    assert streets._missing_park_trail_graph(graph, [], "test-tile") is None
+
+
+def test_missing_park_trail_graph_returns_none_when_everything_is_already_covered():
+    graph = _street_graph_with_one_edge()  # s1 (-73.9500, 40.0500) -> s2 (-73.9490, 40.0500)
+    trail = LineString([(-73.9500, 40.0500), (-73.9490, 40.0500)])  # exactly on top of it
+
+    assert streets._missing_park_trail_graph(graph, [trail], "test-tile") is None
+
+
+def test_missing_park_trail_graph_builds_a_graph_for_a_genuinely_missing_trail():
+    graph = _street_graph_with_one_edge()
+    trail = LineString([(-73.9000, 40.1000), (-73.8990, 40.1000)])  # nowhere near the street
+
+    result = streets._missing_park_trail_graph(graph, [trail], "test-tile")
+
+    assert result is not None
+    assert result.number_of_edges() == 1
+
+
+def test_missing_park_trail_graph_continues_synthetic_ids_from_the_existing_graph():
+    # FIXES.md item 1g: if interior sidewalks already snapped a synthetic
+    # source into this tile, park trails' own new ids must continue past
+    # whatever's already there, not restart at -1 (see
+    # _snap_interior_sidewalks' own comment on the same collision risk).
+    graph = _street_graph_with_one_edge()
+    graph.add_node(-5, x=-73.8, y=40.2)  # simulates a node an earlier synthetic source placed
+    trail = LineString([(-73.9000, 40.1000), (-73.8990, 40.1000)])
+
+    result = streets._missing_park_trail_graph(graph, [trail], "test-tile")
+
+    assert all(n <= -6 for n in result.nodes)
+
+
 def test_fetch_streets_unions_in_interior_sidewalks(monkeypatch, tmp_path):
     # street_a and street_b are deliberately NOT connected within the main
     # street graph itself (each on its own separate stub edge to
@@ -1228,6 +1434,65 @@ def test_fetch_streets_works_with_no_interior_sidewalks_in_the_area(monkeypatch,
     result = streets.fetch_streets(BBOX, "test-no-interior-sidewalk-tile")
 
     assert list(result.nodes) == ["m1"]
+
+
+def test_fetch_streets_unions_in_missing_park_trail_segments(monkeypatch, tmp_path):
+    # Same test shape as test_fetch_streets_unions_in_interior_sidewalks:
+    # street_a and street_b are deliberately unconnected within the main
+    # graph, so any connectivity between other_a and other_b can only
+    # come from the trail union + snap.
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("street_a", x=-73.9500, y=40.0500)
+    main_graph.add_node("other_a", x=-73.9501, y=40.0499)
+    main_graph.add_edge("street_a", "other_a")
+    main_graph.add_node("street_b", x=-73.9490, y=40.0500)
+    main_graph.add_node("other_b", x=-73.9489, y=40.0499)
+    main_graph.add_edge("street_b", "other_b")
+
+    trail_geojson = {"type": "FeatureCollection", "features": [
+        _trail_feature([[-73.9500, 40.05003], [-73.9490, 40.05003]]),
+    ]}
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    monkeypatch.setattr(park_trails, "fetch_park_trails", lambda **kwargs: trail_geojson)
+    result = streets.fetch_streets(BBOX, "test-park-trail-tile")
+
+    assert nx.has_path(result.to_undirected(), "other_a", "other_b")
+
+
+def test_fetch_streets_works_with_no_park_trails_in_the_area(monkeypatch, tmp_path):
+    # Most tiles have none -- the common real case, same as every other
+    # narrower query. (_mock_fetch's default already covers this, but an
+    # explicit test documents the behavior same as every other source.)
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=-73.95, y=40.05)
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    result = streets.fetch_streets(BBOX, "test-no-park-trail-tile")
+
+    assert list(result.nodes) == ["m1"]
+
+
+def test_fetch_streets_does_not_duplicate_an_already_covered_park_trail(monkeypatch, tmp_path):
+    # The one behavior park trails need that interior sidewalks never
+    # did: most real trails mostly duplicate a path OSM already has
+    # (FIXES.md item 1g's own three-park survey found 82-92% overlap), so
+    # a trail sitting right on top of an existing street must NOT get
+    # spliced in as a second, redundant edge.
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("street_a", x=-73.9500, y=40.0500)
+    main_graph.add_node("street_b", x=-73.9490, y=40.0500)
+    main_graph.add_edge("street_a", "street_b")
+
+    trail_geojson = {"type": "FeatureCollection", "features": [
+        _trail_feature([[-73.9500, 40.0500], [-73.9490, 40.0500]]),  # exactly on top
+    ]}
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    monkeypatch.setattr(park_trails, "fetch_park_trails", lambda **kwargs: trail_geojson)
+    result = streets.fetch_streets(BBOX, "test-covered-park-trail-tile")
+
+    assert set(result.nodes) == {"street_a", "street_b"}
 
 
 def test_fetch_streets_leaves_a_too_far_interior_sidewalk_unconnected(monkeypatch, tmp_path):
