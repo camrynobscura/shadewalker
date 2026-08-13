@@ -1188,6 +1188,17 @@ def fetch_streets(
     if through_path_aisles is not None:
         graph = nx.compose(graph, through_path_aisles)
 
+    # Shared by both snapping passes below -- same bbox/filter either way,
+    # so fetch it once and reuse rather than asking Overpass for identical
+    # barrier data twice on every tile where both synthetic sources apply.
+    # barrier_fetched (not just "barrier_graph is None") tracks whether the
+    # fetch already happened, since _fetch_with_retry legitimately returns
+    # None too (no barrier ways in this area) -- reusing None itself as the
+    # "not fetched yet" sentinel would refetch on every tile with no real
+    # barriers nearby, which is the common case.
+    barrier_graph = None
+    barrier_fetched = False
+
     # Not an Overpass query -- interior_sidewalks.fetch_interior_sidewalks()
     # fetches NYC's own ArcGIS-hosted survey data instead, cached whole
     # citywide (see that module) and filtered down to this tile here.
@@ -1197,6 +1208,7 @@ def fetch_streets(
     interior_graph = _build_interior_sidewalk_graph(interior_segments, tile_id)
     if interior_graph is not None:
         barrier_graph = _fetch_with_retry(bbox, BARRIER_FILTER, tile_id, "barrier ways")
+        barrier_fetched = True
         graph = _snap_interior_sidewalks(graph, interior_graph, barrier_graph, tile_id)
 
     # Also not an Overpass query -- park_trails.fetch_park_trails() fetches
@@ -1212,7 +1224,9 @@ def fetch_streets(
     trail_lines = _park_trails_for_tile(trail_geojson, bbox)
     trail_graph = _missing_park_trail_graph(graph, trail_lines, tile_id)
     if trail_graph is not None:
-        barrier_graph = _fetch_with_retry(bbox, BARRIER_FILTER, tile_id, "barrier ways")
+        if not barrier_fetched:
+            barrier_graph = _fetch_with_retry(bbox, BARRIER_FILTER, tile_id, "barrier ways")
+            barrier_fetched = True
         graph = _snap_interior_sidewalks(
             graph, trail_graph, barrier_graph, tile_id,
             snap_max_m=PARK_TRAIL_SNAP_MAX_M, label="park trails",

@@ -1523,3 +1523,39 @@ def test_fetch_streets_leaves_a_too_far_interior_sidewalk_unconnected(monkeypatc
     assert new_nodes  # the far segment was still added, not dropped
     undirected = result.to_undirected()
     assert not any(nx.has_path(undirected, node, "street_a") for node in new_nodes)
+
+
+def test_fetch_streets_fetches_barrier_ways_once_for_both_interior_sidewalks_and_park_trails(monkeypatch, tmp_path):
+    # interior sidewalks (1a) and park trails (1g) each need barrier data
+    # for their own snap pass -- same bbox/filter either way, so a tile
+    # where both apply should cost one Overpass barrier-ways request, not
+    # two. Found while investigating why the v18 citywide re-fetch ran
+    # slower than v9's baseline: every tile with both sources was asking
+    # Overpass for identical data twice.
+    from pipeline.fetch import interior_sidewalks
+
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("street_a", x=-73.9500, y=40.0500)
+    main_graph.add_node("street_b", x=-73.9490, y=40.0500)
+    main_graph.add_edge("street_a", "street_b")
+
+    interior_geojson = {"type": "FeatureCollection", "features": [
+        _segment_feature([[-73.9495, 40.05020], [-73.9495, 40.06]]),
+    ]}
+    monkeypatch.setattr(interior_sidewalks, "fetch_interior_sidewalks", lambda **kwargs: interior_geojson)
+
+    trail_geojson = {"type": "FeatureCollection", "features": [
+        _trail_feature([[-73.9480, 40.0700], [-73.9470, 40.0700]]),
+    ]}
+
+    barrier_calls = {"count": 0}
+
+    def barrier_fn(**kwargs):
+        barrier_calls["count"] += 1
+        raise ValueError("no barrier ways here")
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph, barrier_fn=barrier_fn))
+    monkeypatch.setattr(park_trails, "fetch_park_trails", lambda **kwargs: trail_geojson)
+    streets.fetch_streets(BBOX, "test-shared-barrier-fetch-tile")
+
+    assert barrier_calls["count"] == 1
