@@ -275,6 +275,123 @@ def _local_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
     return math.hypot(dlat_m, dlon_m)
 
 
+# How close a synthetic node must sit to ANOTHER tile's synthetic-path line
+# to count as provably the same physical path (see
+# _cross_tile_synthetic_stitches). Deliberately tight: duplicate copies come
+# from the same citywide source dataset, so where they overlap they coincide
+# essentially exactly (6dp export rounding = ~0.11m) -- measured citywide,
+# flagged near-coincident pairs split cleanly into <=1.5m (all duplicates)
+# and >5m (genuinely separate paths, possibly fenced apart); nothing
+# ambiguous survives this cutoff, and paths 2m+ apart are never joined.
+STITCH_ON_LINE_TOLERANCE_M = 1.5
+
+# Longest bridge a stitch may add, node to nearest endpoint of the twin
+# path. Measured over every real stitchable pair citywide: median 1.1m,
+# p90 11.3m, max 24.3m -- so 25m loses nothing real, while capping how far
+# a straight bridge segment can deviate from a curvy path it shortcuts.
+STITCH_MAX_HOP_M = 25.0
+
+
+def _cross_tile_synthetic_stitches(
+    id_to_idx: dict[str, int],
+    node_lonlat: list[list[float]],
+    edge_pairs: list[tuple[int, int]],
+    coords_per_edge: list[list[list[float]]],
+) -> list[tuple[int, int]]:
+    """Node-index pairs to bridge so cross-tile duplicate copies of the same
+    synthetic path become walkable as one.
+
+    Why duplicates exist at all: every tile fetches FETCH_BUFFER_M past its
+    own edges (so neighbors overlap and real OSM border edges merge via
+    their shared, globally-unique node ids), and both neighbors build their
+    own copy of any synthetic path (interior sidewalks, park trails) in the
+    overlap band. Synthetic ids are minted per tile (namespaced
+    "r16c12:-1", see pipeline/export.py), so the copies CAN'T share ids the
+    way real border edges do -- they load as two coincident, disconnected
+    paths, and a walker standing on one "needs" a multi-hundred-meter
+    detour to reach the other, i.e. to reach where they already are.
+
+    The stitch rule: a synthetic node that lies ON a different tile's
+    synthetic-path line (within STITCH_ON_LINE_TOLERANCE_M) is provably a
+    point on the same physical path, so it gets a short bridge edge to that
+    line's nearest endpoint node (capped at STITCH_MAX_HOP_M). Same bridge
+    mechanics as KNOWN_NODE_GAPS above.
+
+    What this deliberately does NOT do:
+    - Same-tile pairs are never stitched -- within one tile the pipeline
+      already decided what connects (with barrier checks this load-time
+      pass can't replicate); its output isn't second-guessed here.
+    - Nearby-but-off-the-line pairs (>1.5m) are never stitched -- two
+      separate paths a few meters apart can have a real fence between
+      them; only exact coincidence is treated as identity.
+    - Copies aren't merged or deduplicated, just connected -- both stay
+      drawn, routing simply stops paying a phantom detour between them.
+    """
+    synth_tile = {
+        idx: node_id.split(":", 1)[0] for node_id, idx in id_to_idx.items() if ":" in node_id
+    }
+    if not synth_tile:
+        return []
+
+    candidate_edges = [
+        i for i, (u, v) in enumerate(edge_pairs) if u in synth_tile or v in synth_tile
+    ]
+    if not candidate_edges:
+        return []
+
+    lonlat = np.asarray(node_lonlat)
+    mean_lat = float(np.mean(lonlat[:, 1]))
+    lat_scale = math.cos(math.radians(mean_lat))
+    scale = np.array([lat_scale, 1.0])
+
+    # Batched LineStrings in the same cos-scaled space _build_edge_index
+    # uses, for the same reason (see its docstring).
+    points_per_edge = [len(coords_per_edge[i]) for i in candidate_edges]
+    stacked = np.concatenate(
+        [np.asarray(coords_per_edge[i], dtype=np.float64) for i in candidate_edges]
+    )
+    lines = shapely.linestrings(
+        stacked * scale, indices=np.repeat(np.arange(len(candidate_edges)), points_per_edge)
+    )
+    tree = STRtree(lines)
+
+    synth_idxs = list(synth_tile)
+    points = shapely.points(lonlat[synth_idxs] * scale)
+    radius_deg = STITCH_ON_LINE_TOLERANCE_M / METERS_PER_DEGREE_LAT
+    hits = tree.query(points, predicate="dwithin", distance=radius_deg)
+
+    # Nearest qualifying twin line per node -- a node's own tile's lines
+    # (including its own incident edges, at distance 0) never qualify.
+    best_for_node: dict[int, tuple[float, int]] = {}
+    for point_i, line_j in zip(hits[0], hits[1]):
+        node_idx = synth_idxs[point_i]
+        u, v = edge_pairs[candidate_edges[line_j]]
+        edge_tile = synth_tile.get(u) or synth_tile.get(v)
+        if edge_tile == synth_tile[node_idx]:
+            continue
+        dist_deg = float(lines[line_j].distance(points[point_i]))
+        current = best_for_node.get(node_idx)
+        if current is None or dist_deg < current[0]:
+            best_for_node[node_idx] = (dist_deg, candidate_edges[line_j])
+
+    already_connected = {(min(u, v), max(u, v)) for u, v in edge_pairs}
+    stitches: list[tuple[int, int]] = []
+    for node_idx, (_, edge_i) in best_for_node.items():
+        u, v = edge_pairs[edge_i]
+        lon_n, lat_n = lonlat[node_idx]
+        hop_u = _local_distance_m(lat_n, lon_n, lonlat[u][1], lonlat[u][0])
+        hop_v = _local_distance_m(lat_n, lon_n, lonlat[v][1], lonlat[v][0])
+        endpoint, hop_m = (u, hop_u) if hop_u <= hop_v else (v, hop_v)
+        if endpoint == node_idx or hop_m > STITCH_MAX_HOP_M:
+            continue
+        pair = (min(node_idx, endpoint), max(node_idx, endpoint))
+        if pair in already_connected:
+            continue
+        already_connected.add(pair)
+        stitches.append(pair)
+    return stitches
+
+
 @dataclass(frozen=True)
 class SnapPoint:
     """Where a clicked/geocoded point resolves onto the street network: the
@@ -431,6 +548,29 @@ class GraphStore:
         if bridged_count:
             print(f"[graph_store] bridged {bridged_count} known node gap(s)")
 
+        # Cross-tile duplicate synthetic paths (see
+        # _cross_tile_synthetic_stitches): connect each copy's nodes onto
+        # its twin where they provably coincide, with the same bridge shape
+        # KNOWN_NODE_GAPS uses. length gets a small floor -- two coincident
+        # trim points can sit at the exact same rounded coordinate, and a
+        # true zero-length edge would divide by zero in route()'s partial-
+        # edge cost math.
+        stitches = _cross_tile_synthetic_stitches(
+            self._id_to_idx, node_lonlat, edge_pairs, coords_per_edge
+        )
+        for idx_a, idx_b in stitches:
+            lon_a, lat_a = node_lonlat[idx_a]
+            lon_b, lat_b = node_lonlat[idx_b]
+            edge_pairs.append((idx_a, idx_b))
+            length.append(_local_distance_m(lat_a, lon_a, lat_b, lon_b))
+            deciduous.append(0.0)
+            evergreen.append(0.0)
+            counts.append(0)
+            names.append("")
+            coords_per_edge.append([[lon_a, lat_a], [lon_b, lat_b]])
+        if stitches:
+            print(f"[graph_store] stitched {len(stitches)} cross-tile synthetic duplicate(s)")
+
         self._names = names
         self._node_lonlat = np.array(node_lonlat)
         # The data's actual extent — whatever tiles happen to be loaded —
@@ -439,7 +579,16 @@ class GraphStore:
         lon_min, lat_min = self._node_lonlat.min(axis=0)
         lon_max, lat_max = self._node_lonlat.max(axis=0)
         self._bounds = (float(lon_min), float(lat_min), float(lon_max), float(lat_max))
-        self._length = np.array(length, dtype=np.float32)
+        # Floored at 0.01m, in ONE place for every edge source (tile files,
+        # KNOWN_NODE_GAPS bridges, synthetic stitches): 960 real exported
+        # edges have length_m 0.0 -- a sub-5cm connector rounds to 0.0 at
+        # export (pipeline/export.py rounds to 0.1m) -- and a snap landing
+        # on a zero-length edge turns route()'s partial-edge division into
+        # 0/0 -> NaN -> a crash at int(round(tree_count)). Found live: a
+        # Central Park test route did exactly this once the stitch pass
+        # changed which component snaps resolve onto. 1cm on a <5cm
+        # connector distorts nothing.
+        self._length = np.maximum(np.array(length, dtype=np.float32), 0.01)
         self._tree_deciduous = np.array(deciduous, dtype=np.float32)
         self._tree_evergreen = np.array(evergreen, dtype=np.float32)
         self._tree_count = np.array(counts, dtype=np.int32)
