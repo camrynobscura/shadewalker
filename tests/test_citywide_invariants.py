@@ -1,9 +1,13 @@
-"""Opt-in-by-default sweep of the shade-priority invariant across the FULL
-citywide graph -- real geography the pilot tile can't cover.
+"""Invariants that only exist at multi-tile scale -- the shade-priority and
+near-coincident sweeps over the FULL citywide graph, plus the merge-integrity
+invariants, which run twice: always against the committed two-tile fixture
+(tests/fixtures/merge_pair/, fast tier, CI-covered) and additionally against
+the real citywide data when it's on disk.
 
-Runs automatically whenever the real data/tiles/ data is on disk (the
-citywide_store fixture skips otherwise, so CI and a fresh clone never fail
-for lack of it). In a tight edit-test loop, skip the ~15s graph load with:
+Citywide-marked tests run automatically whenever the real data/tiles/ data
+is present (the citywide_store fixture skips otherwise, so CI and a fresh
+clone never fail for lack of it). In a tight edit-test loop, skip the ~15s
+graph load with:
 
     uv run pytest -m "not citywide"
 """
@@ -257,9 +261,22 @@ def test_no_widespread_near_coincident_disconnected_nodes(citywide_store):
 # invariant that should have caught it existed (test_route_invariants.py's
 # alignment test) but was silently narrowed to the pilot fixture on
 # 2026-07-17 -- one tile, no synthetic nodes, no merge, so the bug could not
-# appear there. These three run against the REAL merged graph
-# (citywide_store), the only scale where a merge bug exists, and are the
-# red->green proof for the fix.
+# appear there.
+#
+# Each of the three runs against BOTH multi-tile stores: the committed
+# two-tile fixture (merge_pair_store -- fast tier, so CI actually covers the
+# merge path) and, when the gitignored citywide data is on disk, the real
+# merged graph. One copy of the logic, two datasets, so the fast tier and
+# the citywide sweep can't drift apart. The fixture's own preconditions are
+# pinned separately below (test_merge_pair_fixture_...) so a regenerated
+# fixture that loses its cross-tile synthetic data fails loudly instead of
+# making all of this pass vacuously -- which is exactly how the collision
+# stayed invisible the first time.
+
+MERGE_STORES = [
+    "merge_pair_store",
+    pytest.param("citywide_store", marks=pytest.mark.citywide),
+]
 
 EDGE_LENGTH_SLACK_M = 2.0  # 6dp coord + 0.1m length rounding leaves real
 # edges violating length_m >= chord by at most rounding-scale fractions of a
@@ -280,8 +297,8 @@ GEOMETRY_ENDPOINT_TOL_M = 1.0  # metric, not the pilot test's 1e-6 deg: a few
 # clears those while a wormhole endpoint is >>25m off.
 
 
-@pytest.mark.citywide
-def test_no_edge_is_shorter_than_the_straight_line_between_its_endpoints(citywide_store):
+@pytest.mark.parametrize("store_fixture", MERGE_STORES)
+def test_no_edge_is_shorter_than_the_straight_line_between_its_endpoints(store_fixture, request):
     """Physical invariant: an edge's stored length_m can never be less than
     the straight-line distance between its own two endpoint nodes -- a path
     is at least its chord. A merge that remaps an endpoint to a different
@@ -289,7 +306,7 @@ def test_no_edge_is_shorter_than_the_straight_line_between_its_endpoints(citywid
     length_m attached to endpoints kilometers apart, which this catches
     decisively. Independent of geometry storage, so it cross-checks the
     alignment invariant below rather than restating it."""
-    store = citywide_store
+    store = request.getfixturevalue(store_fixture)
     idx_to_id = {idx: node_id for node_id, idx in store._id_to_idx.items()}
     worst = []
     for edge in range(len(store._length)):
@@ -312,15 +329,15 @@ def test_no_edge_is_shorter_than_the_straight_line_between_its_endpoints(citywid
     )
 
 
-@pytest.mark.citywide
-def test_every_edge_geometry_starts_and_ends_at_its_own_nodes_citywide(citywide_store):
-    """Citywide sibling of test_route_invariants.py's pilot-scoped alignment
-    test -- the multi-tile-merge coverage that test's own docstring promised
-    ('once Stage 2 adds more tiles it also validates the packing across the
+@pytest.mark.parametrize("store_fixture", MERGE_STORES)
+def test_every_edge_geometry_starts_and_ends_at_its_own_nodes_citywide(store_fixture, request):
+    """Multi-tile sibling of test_route_invariants.py's pilot-scoped alignment
+    test -- the merge coverage that test's own docstring promised ('once
+    Stage 2 adds more tiles it also validates the packing across the
     multi-tile merge') but never got once fixture isolation pinned it to the
     single pilot tile. Metric tolerance instead of 1e-6 deg for the same
     rounding reason as the length invariant above."""
-    store = citywide_store
+    store = request.getfixturevalue(store_fixture)
     misaligned = []
     for edge in range(len(store._length)):
         coords = store._edge_coords(edge)
@@ -346,15 +363,15 @@ def test_every_edge_geometry_starts_and_ends_at_its_own_nodes_citywide(citywide_
     )
 
 
-@pytest.mark.citywide
-def test_route_geometry_length_matches_reported_length(citywide_store):
+@pytest.mark.parametrize("store_fixture", MERGE_STORES)
+def test_route_geometry_length_matches_reported_length(store_fixture, request):
     """A returned route's drawn polyline and its reported length_m must
     describe the same path. The synthetic-id collision produced routes with
     a plausible length_m but geometry teleporting across the city -- caught
     here because the polyline summed from the returned coords then dwarfs
     length_m. The user-visible half of the invariant, complementing the
     per-edge checks above. Same sampling shape as the shade sweep."""
-    store = citywide_store
+    store = request.getfixturevalue(store_fixture)
     nodes = list(max(store._graph.connected_components(mode="weak"), key=len))
     rng = random.Random(20260813)
     checked = 0
@@ -396,4 +413,35 @@ def test_route_geometry_length_matches_reported_length(citywide_store):
             f"  reported={r:.0f}m polyline={p:.0f}m from {a} to {b}"
             for r, p, a, b in bad[:5]
         )
+    )
+
+
+def test_merge_pair_fixture_contains_cross_tile_synthetic_data(merge_pair_store):
+    """Precondition guard for the fast-tier merge fixture, NOT an invariant:
+    the merge-integrity tests above only prove anything if the data they run
+    on can actually exhibit a merge bug. A test whose fixture cannot show the
+    bug class passes vacuously -- indistinguishable from a real pass, which
+    is precisely how the synthetic-id collision survived a suite of 200+
+    green tests. If someone regenerates tests/fixtures/merge_pair/ and the
+    new tiles come out without synthetic nodes (or without the border
+    duplicates that exercise the stitch pass), this fails loudly instead of
+    letting the invariants above go quietly blind.
+
+    Floors are deliberately far below the current values (1,417 synthetic
+    nodes across the two tiles, 100+ stitches when this was pinned) -- they
+    guard against the data class disappearing, not against normal drift."""
+    store = merge_pair_store
+    synthetic_ids = [node_id for node_id in store._id_to_idx if ":" in node_id]
+    tiles = {node_id.split(":", 1)[0] for node_id in synthetic_ids}
+    assert len(tiles) >= 2, (
+        f"merge fixture has synthetic nodes from only {sorted(tiles)} -- a "
+        f"single-tile fixture cannot exhibit a cross-tile merge bug"
+    )
+    assert len(synthetic_ids) >= 100, (
+        f"merge fixture has only {len(synthetic_ids)} synthetic nodes -- too "
+        f"few to meaningfully exercise the merge path (had 1,417 when pinned)"
+    )
+    assert store._stitch_count > 0, (
+        "load() stitched nothing -- the fixture no longer contains cross-tile "
+        "duplicate synthetic paths, so the stitch pass ran unexercised"
     )

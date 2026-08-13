@@ -445,6 +445,12 @@ class GraphStore:
         self._coord_offsets = np.zeros(1, dtype=np.int64)
 
         self._graph: igraph.Graph | None = None
+        # How many cross-tile duplicate-path stitches load() added. Kept so
+        # the merge-fixture precondition test can assert the stitch pass
+        # actually exercised (a fixture without cross-tile synthetic data
+        # would make the merge-integrity tests pass vacuously -- exactly how
+        # the id-collision bug stayed invisible).
+        self._stitch_count = 0
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -568,6 +574,7 @@ class GraphStore:
             counts.append(0)
             names.append("")
             coords_per_edge.append([[lon_a, lat_a], [lon_b, lat_b]])
+        self._stitch_count = len(stitches)
         if stitches:
             print(f"[graph_store] stitched {len(stitches)} cross-tile synthetic duplicate(s)")
 

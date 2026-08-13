@@ -25,6 +25,17 @@ from server.graph_store import GraphStore
 # sorting first) into production routing.
 PILOT_FIXTURE = Path(__file__).parent / "fixtures" / "pilot.json.gz"
 
+# Two adjacent committed tiles (Central Park) that genuinely contain
+# namespaced synthetic nodes from both imported-path sources on both sides
+# of a shared border -- the smallest data that can exhibit a multi-tile
+# merge bug. The pilot fixture structurally cannot (one tile, zero
+# synthetic nodes), which is how the synthetic-id collision passed every
+# test for weeks (see history/synthetic-id-collision.md). Refresh by
+# re-running those two tiles and copying the exports here -- the
+# precondition test in test_citywide_invariants.py fails loudly if a
+# refreshed fixture loses its cross-tile synthetic data.
+MERGE_PAIR_DIR = Path(__file__).parent / "fixtures" / "merge_pair"
+
 
 @pytest.fixture(scope="session")
 def _pilot_only_tiles_dir(tmp_path_factory):
@@ -63,6 +74,30 @@ def client(_pilot_only_tiles_dir):
     lifespan hook runs, loading tile data into the app's own GraphStore."""
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture(scope="session")
+def merge_pair_store(tmp_path_factory) -> GraphStore:
+    """A GraphStore loaded from the committed two-tile merge fixture
+    (MERGE_PAIR_DIR) -- the fast-tier home of the multi-tile merge
+    invariants, so CI covers the merge path without the gitignored
+    citywide data. Copies the tiles into a temp dir like the pilot
+    fixture does, because load() writes its coverage cache beside the
+    tiles it loads -- pointed at MERGE_PAIR_DIR directly, every test run
+    would dirty the repo with that cache file. Same TILES_DIR
+    save/restore pattern as citywide_store, for the same reason: coexist
+    with the pilot-isolated fixtures without clobbering the global."""
+    isolated_dir = tmp_path_factory.mktemp("merge_pair_tiles")
+    for tile_path in sorted(MERGE_PAIR_DIR.glob("*.json.gz")):
+        shutil.copy(tile_path, isolated_dir / tile_path.name)
+    saved_tiles_dir = config.TILES_DIR
+    config.TILES_DIR = isolated_dir
+    try:
+        store = GraphStore()
+        store.load()
+    finally:
+        config.TILES_DIR = saved_tiles_dir
+    return store
 
 
 @pytest.fixture(scope="session")
