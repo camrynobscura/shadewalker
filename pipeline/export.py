@@ -19,17 +19,39 @@ import geopandas as gpd
 from pipeline import config
 
 
+def _node_id_str(node_id, tile_id: str) -> str:
+    """A node id as the string the exported file (and so the server) uses.
+
+    Real OSM ids (positive ints, globally unique) export as-is. Synthetic
+    ids (negative ints, minted per-tile from -1 by interior sidewalks/park
+    trails in pipeline/fetch/streets.py) get namespaced with the tile id —
+    "-1" → "r16c12:-1" — because the per-tile numbering means the same bare
+    id names a DIFFERENT real-world point in every tile that has one, and
+    server/graph_store.py's load() merges all tiles on this exact string,
+    first-tile-wins. Un-namespaced, one tile's "-1" swallowed every other
+    tile's "-1": 94.5k edges wired to nodes in the wrong borough, routes
+    teleporting up to 49km (see FIXES.md, 2026-08-13).
+
+    int(node_id), not isinstance(node_id, int): iterrows() yields numpy
+    int64 values, which isinstance can miss depending on platform/numpy
+    version — and a missed check here silently resurrects the collision.
+    """
+    if int(node_id) < 0:
+        return f"{tile_id}:{int(node_id)}"
+    return str(node_id)
+
+
 def write_tile(tile_id: str, nodes: gpd.GeoDataFrame, edges: gpd.GeoDataFrame) -> None:
     node_records = {}
     # nodes.iterrows() yields (node_id, row) — osmnx stores lon as x, lat as y.
     for node_id, row in nodes.iterrows():
-        node_records[str(node_id)] = [round(row["x"], 6), round(row["y"], 6)]
+        node_records[_node_id_str(node_id, tile_id)] = [round(row["x"], 6), round(row["y"], 6)]
 
     edge_records = []
     for (u, v, key), row in edges.iterrows():
         edge_records.append({
-            "u": str(u),
-            "v": str(v),
+            "u": _node_id_str(u, tile_id),
+            "v": _node_id_str(v, tile_id),
             "key": int(key),        # disambiguates rare parallel edges (same u,v)
             "side": "C",            # centerline; "L"/"R" reserved for Stage 3
             "length_m": row["length_m"],
