@@ -116,7 +116,10 @@ NEAR_NODE_MAX_M = 25.0  # matches SIBLING_MAX_SEPARATION_M -- same "how close
 # this test borrows from, so the two checks reason about the same distances.
 DETOUR_FLAG_M = 200.0
 SAMPLE_SIZE = 800
-MAX_EXPECTED_FLAGGED = 20  # current residual is 7; see comment above
+MAX_EXPECTED_FLAGGED = 20  # real-OSM pairs; residual was 7 when set, now 11
+MAX_EXPECTED_SYNTHETIC_FLAGGED = 150  # synthetic-path pairs; measured 97 on
+# 2026-08-13 -- see the budget comment inside the test for what each
+# population means and what a breach of each would indicate
 
 
 def _named_edge_lines(store, node, to_metric):
@@ -195,16 +198,54 @@ def test_no_widespread_near_coincident_disconnected_nodes(citywide_store):
                 continue
             flagged.append((node, other, real_dist, graph_dist))
 
-    assert len(flagged) <= MAX_EXPECTED_FLAGGED, (
-        f"{len(flagged)} node pair(s) sit within {NEAR_NODE_MAX_M}m of each other in "
-        f"reality but need a >{DETOUR_FLAG_M}m detour in the graph, and aren't a known "
-        f"divided-carriageway pattern -- well beyond the small, legitimately-blocked "
-        f"residual expected (<= {MAX_EXPECTED_FLAGGED}). First few:\n"
-        + "\n".join(
-            f"  nodes {a},{b}: real={real:.1f}m graph={graph:.1f}m at "
-            f"({lonlat[a][1]:.5f},{lonlat[a][0]:.5f})"
-            for a, b, real, graph in flagged[:5]
+    # Two separately-budgeted populations (2026-08-13), because they are
+    # different phenomena with different owners:
+    #
+    # REAL pairs (both nodes real OSM ids) are what this test was built and
+    # calibrated for -- missing street-corner connections, the bug class
+    # behind server/known_node_gaps.json. Residual was 7 when the cap of 20
+    # was set; currently 11.
+    #
+    # SYNTHETIC pairs (either node a namespaced synthetic id) are the ends
+    # and crossings of imported path layers (interior sidewalks 1a, park
+    # trails 1g) that the pipeline deliberately left unconnected: measured
+    # composition 71 dangling ends (too far / unverifiable), 20 mid-line
+    # crossings (paths only join at snapped ends, by design), 17 blocked by
+    # a real mapped fence (correctly unconnected). All are missing-shortcut
+    # cases, never false connections; a direct worst-case comparison against
+    # OSRM's OSM-only routing measured ZERO route degradation from them.
+    # Budgeted at 150 (measured 97 after load()'s duplicate-copy stitching):
+    # a jump back toward ~180 means the stitch pass regressed, and growth
+    # past 150 means new-path connection quality slipped -- both worth an
+    # alarm. FIXES.md's connection-audit item is the plan for shrinking the
+    # 97; tighten the budget as it lands.
+    idx_to_id = {idx: node_id for node_id, idx in store._id_to_idx.items()}
+
+    def _is_synthetic_pair(a, b):
+        return ":" in idx_to_id.get(a, "") or ":" in idx_to_id.get(b, "")
+
+    real_flagged = [f for f in flagged if not _is_synthetic_pair(f[0], f[1])]
+    synthetic_flagged = [f for f in flagged if _is_synthetic_pair(f[0], f[1])]
+
+    def _describe(pairs):
+        return "\n".join(
+            f"  nodes {idx_to_id.get(a, a)},{idx_to_id.get(b, b)}: real={real:.1f}m "
+            f"graph={graph:.1f}m at ({lonlat[a][1]:.5f},{lonlat[a][0]:.5f})"
+            for a, b, real, graph in pairs[:5]
         )
+
+    assert len(real_flagged) <= MAX_EXPECTED_FLAGGED, (
+        f"{len(real_flagged)} REAL-OSM node pair(s) sit within {NEAR_NODE_MAX_M}m of "
+        f"each other in reality but need a >{DETOUR_FLAG_M}m detour in the graph, and "
+        f"aren't a known divided-carriageway pattern -- well beyond the small, "
+        f"legitimately-blocked residual expected (<= {MAX_EXPECTED_FLAGGED}). "
+        f"First few:\n" + _describe(real_flagged)
+    )
+    assert len(synthetic_flagged) <= MAX_EXPECTED_SYNTHETIC_FLAGGED, (
+        f"{len(synthetic_flagged)} synthetic-path pair(s) flagged -- measured 97 on "
+        f"2026-08-13 with the duplicate-copy stitch working (~180 without it), so "
+        f"either the stitch pass regressed or path-connection quality slipped. "
+        f"First few:\n" + _describe(synthetic_flagged)
     )
 
 
@@ -225,6 +266,15 @@ EDGE_LENGTH_SLACK_M = 2.0  # 6dp coord + 0.1m length rounding leaves real
 # meter; a wormhole understates length_m relative to its endpoints by tens of
 # meters to kilometers, far past this.
 
+EDGE_LENGTH_SLACK_RELATIVE = 0.002  # plus 0.2% of length_m: length_m comes
+# from summed UTM-projected segment distances, the chord below from a
+# flat-earth degree approximation, and neither matches a true ellipsoid
+# distance exactly -- on a multi-km DEAD-STRAIGHT edge (real case: 2.7km
+# boardwalk-style synthetic paths, where chord == polyline) those
+# approximations disagree by ~0.15%, tripping a purely absolute slack. A
+# wormhole's length_m is short while its chord is huge, so a fraction OF
+# LENGTH_M adds essentially nothing to what a wormhole is allowed.
+
 GEOMETRY_ENDPOINT_TOL_M = 1.0  # metric, not the pilot test's 1e-6 deg: a few
 # hundred citywide edges sit rounding-scale (<=0.2m) off their nodes; 1m
 # clears those while a wormhole endpoint is >>25m off.
@@ -240,23 +290,24 @@ def test_no_edge_is_shorter_than_the_straight_line_between_its_endpoints(citywid
     decisively. Independent of geometry storage, so it cross-checks the
     alignment invariant below rather than restating it."""
     store = citywide_store
+    idx_to_id = {idx: node_id for node_id, idx in store._id_to_idx.items()}
     worst = []
     for edge in range(len(store._length)):
         u, v = store._graph.es[edge].tuple
         lon_u, lat_u = store._node_lonlat[u]
         lon_v, lat_v = store._node_lonlat[v]
         straight = _local_distance_m(lat_u, lon_u, lat_v, lon_v)
-        deficit = straight - float(store._length[edge])
-        if deficit > EDGE_LENGTH_SLACK_M:
-            worst.append((edge, deficit, u, v))
-    worst.sort(key=lambda t: -t[1])
+        length_m = float(store._length[edge])
+        if straight - length_m > EDGE_LENGTH_SLACK_M + EDGE_LENGTH_SLACK_RELATIVE * length_m:
+            worst.append((edge, straight, length_m, u, v))
+    worst.sort(key=lambda t: -(t[1] - t[2]))
     assert not worst, (
         f"{len(worst)} edge(s) shorter than the straight line between their "
-        f"endpoints by >{EDGE_LENGTH_SLACK_M}m -- impossible for a real edge, "
-        f"the signature of a merge remapping an endpoint to the wrong node. "
-        f"Worst:\n" + "\n".join(
-            f"  edge {e}: length_m={float(store._length[e]):.1f} but endpoints "
-            f"{d:.1f}m apart (nodes {u}/{v})" for e, d, u, v in worst[:5]
+        f"endpoints -- impossible for a real edge, the signature of a merge "
+        f"remapping an endpoint to the wrong node. Worst:\n" + "\n".join(
+            f"  edge {e}: length_m={length:.1f} but endpoints {chord:.1f}m apart "
+            f"(nodes {idx_to_id.get(u, u)} / {idx_to_id.get(v, v)})"
+            for e, chord, length, u, v in worst[:5]
         )
     )
 
