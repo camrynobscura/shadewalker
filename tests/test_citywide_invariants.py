@@ -206,3 +206,143 @@ def test_no_widespread_near_coincident_disconnected_nodes(citywide_store):
             for a, b, real, graph in flagged[:5]
         )
     )
+
+
+# --- Multi-tile merge integrity (FIXES.md, 2026-08-13) ----------------------
+# A synthetic-node id collision (interior sidewalks 1a + park trails 1g number
+# synthetic nodes per-tile from -1, and graph_store.load() merges on id,
+# first-tile-wins) wormholed 94.5k edges into false cross-city shortcuts:
+# plausible length_m, geometry teleporting between boroughs (up to 49km). The
+# invariant that should have caught it existed (test_route_invariants.py's
+# alignment test) but was silently narrowed to the pilot fixture on
+# 2026-07-17 -- one tile, no synthetic nodes, no merge, so the bug could not
+# appear there. These three run against the REAL merged graph
+# (citywide_store), the only scale where a merge bug exists, and are the
+# red->green proof for the fix.
+
+EDGE_LENGTH_SLACK_M = 2.0  # 6dp coord + 0.1m length rounding leaves real
+# edges violating length_m >= chord by at most rounding-scale fractions of a
+# meter; a wormhole understates length_m relative to its endpoints by tens of
+# meters to kilometers, far past this.
+
+GEOMETRY_ENDPOINT_TOL_M = 1.0  # metric, not the pilot test's 1e-6 deg: a few
+# hundred citywide edges sit rounding-scale (<=0.2m) off their nodes; 1m
+# clears those while a wormhole endpoint is >>25m off.
+
+
+@pytest.mark.citywide
+def test_no_edge_is_shorter_than_the_straight_line_between_its_endpoints(citywide_store):
+    """Physical invariant: an edge's stored length_m can never be less than
+    the straight-line distance between its own two endpoint nodes -- a path
+    is at least its chord. A merge that remaps an endpoint to a different
+    tile's node (the synthetic-id collision) leaves a plausible short
+    length_m attached to endpoints kilometers apart, which this catches
+    decisively. Independent of geometry storage, so it cross-checks the
+    alignment invariant below rather than restating it."""
+    store = citywide_store
+    worst = []
+    for edge in range(len(store._length)):
+        u, v = store._graph.es[edge].tuple
+        lon_u, lat_u = store._node_lonlat[u]
+        lon_v, lat_v = store._node_lonlat[v]
+        straight = _local_distance_m(lat_u, lon_u, lat_v, lon_v)
+        deficit = straight - float(store._length[edge])
+        if deficit > EDGE_LENGTH_SLACK_M:
+            worst.append((edge, deficit, u, v))
+    worst.sort(key=lambda t: -t[1])
+    assert not worst, (
+        f"{len(worst)} edge(s) shorter than the straight line between their "
+        f"endpoints by >{EDGE_LENGTH_SLACK_M}m -- impossible for a real edge, "
+        f"the signature of a merge remapping an endpoint to the wrong node. "
+        f"Worst:\n" + "\n".join(
+            f"  edge {e}: length_m={float(store._length[e]):.1f} but endpoints "
+            f"{d:.1f}m apart (nodes {u}/{v})" for e, d, u, v in worst[:5]
+        )
+    )
+
+
+@pytest.mark.citywide
+def test_every_edge_geometry_starts_and_ends_at_its_own_nodes_citywide(citywide_store):
+    """Citywide sibling of test_route_invariants.py's pilot-scoped alignment
+    test -- the multi-tile-merge coverage that test's own docstring promised
+    ('once Stage 2 adds more tiles it also validates the packing across the
+    multi-tile merge') but never got once fixture isolation pinned it to the
+    single pilot tile. Metric tolerance instead of 1e-6 deg for the same
+    rounding reason as the length invariant above."""
+    store = citywide_store
+    misaligned = []
+    for edge in range(len(store._length)):
+        coords = store._edge_coords(edge)
+        if len(coords) < 2:
+            misaligned.append((edge, "fewer than 2 points"))
+            continue
+        u, v = store._graph.es[edge].tuple
+        nu = store._node_lonlat[u]
+        nv = store._node_lonlat[v]
+        start_to_u = _local_distance_m(coords[0][1], coords[0][0], nu[1], nu[0])
+        end_to_v = _local_distance_m(coords[-1][1], coords[-1][0], nv[1], nv[0])
+        start_to_v = _local_distance_m(coords[0][1], coords[0][0], nv[1], nv[0])
+        end_to_u = _local_distance_m(coords[-1][1], coords[-1][0], nu[1], nu[0])
+        runs_uv = max(start_to_u, end_to_v) <= GEOMETRY_ENDPOINT_TOL_M
+        runs_vu = max(start_to_v, end_to_u) <= GEOMETRY_ENDPOINT_TOL_M
+        if not (runs_uv or runs_vu):
+            off_m = min(max(start_to_u, end_to_v), max(start_to_v, end_to_u))
+            misaligned.append((edge, f"{off_m:.1f}m off (nodes {u}/{v})"))
+    assert not misaligned, (
+        f"{len(misaligned)} edge(s) whose geometry doesn't land on their own "
+        f"endpoint nodes -- packed-buffer or merge misalignment. First few: "
+        f"{misaligned[:5]}"
+    )
+
+
+@pytest.mark.citywide
+def test_route_geometry_length_matches_reported_length(citywide_store):
+    """A returned route's drawn polyline and its reported length_m must
+    describe the same path. The synthetic-id collision produced routes with
+    a plausible length_m but geometry teleporting across the city -- caught
+    here because the polyline summed from the returned coords then dwarfs
+    length_m. The user-visible half of the invariant, complementing the
+    per-edge checks above. Same sampling shape as the shade sweep."""
+    store = citywide_store
+    nodes = list(max(store._graph.connected_components(mode="weak"), key=len))
+    rng = random.Random(20260813)
+    checked = 0
+    bad = []
+    attempts = 0
+    while checked < 40 and attempts < 40 * 80:
+        attempts += 1
+        a, b = rng.choice(nodes), rng.choice(nodes)
+        if a == b:
+            continue
+        lon_a, lat_a = store._node_lonlat[a]
+        lon_b, lat_b = store._node_lonlat[b]
+        if not (500.0 <= _local_distance_m(lat_a, lon_a, lat_b, lon_b) <= 2500.0):
+            continue
+        pair = store.snap_pair(lat_a, lon_a, lat_b, lon_b)
+        if pair is None:
+            continue
+        start, end = pair
+        result = store.route(start, end, tree_weight=0.0, month=7)
+        if result is None:
+            continue
+        coords = result["coords"]
+        polyline_m = sum(
+            _local_distance_m(coords[i - 1][1], coords[i - 1][0], coords[i][1], coords[i][0])
+            for i in range(1, len(coords))
+        )
+        reported = result["length_m"]
+        checked += 1
+        # Very loose: a legit polyline matches length_m to well under 1%; a
+        # wormhole overshoots by orders of magnitude, so even 25%+25m catches
+        # it without any risk of flagging a real route.
+        if abs(polyline_m - reported) > 0.25 * reported + 25.0:
+            bad.append((reported, polyline_m, (lat_a, lon_a), (lat_b, lon_b)))
+    assert checked >= 30, f"only checked {checked} routes -- sampling got too sparse"
+    assert not bad, (
+        f"{len(bad)} route(s) whose drawn polyline length disagrees with the "
+        f"reported length_m (geometry and stats describe different paths). "
+        f"First few:\n" + "\n".join(
+            f"  reported={r:.0f}m polyline={p:.0f}m from {a} to {b}"
+            for r, p, a, b in bad[:5]
+        )
+    )
