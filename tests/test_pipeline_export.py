@@ -33,6 +33,7 @@ def test_write_tile_exports_lon_lat_degrees_not_utm_meters(tmp_path, monkeypatch
             "tree_deciduous": [2.5],
             "tree_evergreen": [0.0],
             "tree_count": [3],
+            "tree_park_canopy": [1.25],
             "geometry": [LineString([(-73.99, 40.68), (-73.989, 40.681)])],
             # A real edge also carries geometry_m -- present here on purpose,
             # so this test would catch write_tile() ever reading the wrong
@@ -61,6 +62,9 @@ def test_write_tile_exports_lon_lat_degrees_not_utm_meters(tmp_path, monkeypatch
     edge = tile["edges"][0]
     assert edge["name"] == "Test St"
     assert edge["tree_count"] == 3
+    # v19: the park-canopy slice of tree_deciduous rides along explicitly
+    # (FIXES item 4 -- "which shade is canopy area, not countable trees")
+    assert edge["tree_park_canopy"] == 1.25
     for lon, lat in edge["coords"]:
         # lon/lat degrees, not UTM 18N meters (which would be in the
         # hundreds of thousands) -- this is what would fail if export.py
@@ -104,6 +108,7 @@ def test_write_tile_namespaces_synthetic_node_ids_per_tile(tmp_path, monkeypatch
             "length_m": [150.0, 80.0],
             "name": ["", ""],
             "tree_deciduous": [0.0, 0.0],
+            "tree_park_canopy": [0.0, 0.0],
             "tree_evergreen": [0.0, 0.0],
             "tree_count": [0, 0],
             "geometry": [

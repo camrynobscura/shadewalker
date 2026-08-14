@@ -435,12 +435,16 @@ def test_walk_filter_excludes_foot_private():
     assert "private" in excluded
 
 
-def test_cycleway_filter_requires_foot_designated():
-    # Scoped tightly on purpose: broadening this to admit every cycleway
-    # (not just explicitly shared-use ones) would start routing
-    # pedestrians down ordinary bike-only lanes.
+def test_cycleway_filter_requires_an_explicit_foot_allowance():
+    # Scoped on purpose: broadening this to admit every cycleway (not
+    # just explicitly foot-allowed ones) would start routing pedestrians
+    # down ordinary bike-only lanes. v19 widened designated ->
+    # designated|yes (anchored, so foot=no/foot=designated;no etc. can't
+    # sneak through a substring match): ~95km of real named greenways
+    # citywide carry foot=yes, measured 2026-08-14 (Cunningham Park
+    # Greenway was the found case, FIXES item 1).
     assert '"highway"="cycleway"' in streets.CYCLEWAY_FILTER
-    assert '"foot"="designated"' in streets.CYCLEWAY_FILTER
+    assert '"foot"~"^(designated|yes)$"' in streets.CYCLEWAY_FILTER
 
 
 def test_foot_overrides_access_filter_requires_an_explicit_foot_override():
@@ -1559,3 +1563,85 @@ def test_fetch_streets_fetches_barrier_ways_once_for_both_interior_sidewalks_and
     streets.fetch_streets(BBOX, "test-shared-barrier-fetch-tile")
 
     assert barrier_calls["count"] == 1
+
+
+# ---- closure zones (FIXES.md item 0b, v19) --------------------------------
+# The imported synthetic layers must not re-add paths through a known
+# construction closure (East River Park: OSM's mappers DELETED the paths,
+# so no tag can infer the closure -- measured 2026-08-14, 0/32 ghost edges
+# inside any landuse=construction polygon). Zones are curated polygons in
+# pipeline/closure_zones.json; the clip runs in METRIC_CRS.
+
+
+def _square_zone_m(lon, lat, half_m):
+    """A test closure zone: a square centered on lon/lat, half_m meters
+    to each side, in METRIC_CRS like the real loaded zones."""
+    from shapely.geometry import Polygon
+
+    x, y = streets._TO_METRIC_CRS(lon, lat)
+    return Polygon([(x - half_m, y - half_m), (x + half_m, y - half_m),
+                    (x + half_m, y + half_m), (x - half_m, y + half_m)])
+
+
+def test_clip_closure_zones_drops_a_segment_fully_inside(monkeypatch):
+    monkeypatch.setattr(streets, "_CLOSURE_ZONES_M", [_square_zone_m(-73.99, 40.7, 200.0)])
+    inside = LineString([(-73.9901, 40.7), (-73.9899, 40.7)])  # ~17m, centered
+    assert streets._clip_closure_zones(inside) == []
+
+
+def test_clip_closure_zones_keeps_the_outside_remnants(monkeypatch):
+    monkeypatch.setattr(streets, "_CLOSURE_ZONES_M", [_square_zone_m(-73.99, 40.7, 100.0)])
+    # ~640m west-to-east straight through the 200m-wide zone
+    crossing = LineString([(-73.9938, 40.7), (-73.9862, 40.7)])
+    kept = streets._clip_closure_zones(crossing)
+    assert len(kept) == 2
+    for piece in kept:
+        for lon, lat in piece.coords:
+            x, _ = streets._TO_METRIC_CRS(lon, lat)
+            zx, _ = streets._TO_METRIC_CRS(-73.99, 40.7)
+            assert abs(x - zx) >= 99.0  # every kept point is outside the zone
+
+
+def test_clip_closure_zones_leaves_far_segments_untouched(monkeypatch):
+    monkeypatch.setattr(streets, "_CLOSURE_ZONES_M", [_square_zone_m(-73.99, 40.7, 100.0)])
+    far = LineString([(-73.95, 40.72), (-73.949, 40.72)])
+    assert streets._clip_closure_zones(far) == [far]
+
+
+def test_clip_closure_zones_drops_boundary_slivers(monkeypatch):
+    # A remnant shorter than CLOSURE_ZONE_MIN_REMNANT_M is digitization
+    # noise at the polygon's edge, not a usable path.
+    monkeypatch.setattr(streets, "_CLOSURE_ZONES_M", [_square_zone_m(-73.99, 40.7, 100.0)])
+    # ends ~5m past the zone's western edge: remnant ~5m < 10m floor
+    x_west_edge = -73.99 - 100.0 / (111320.0 * 0.7578)  # rough deg-per-m at 40.7
+    barely_out = LineString([(x_west_edge - 0.00006, 40.7), (-73.99, 40.7)])
+    kept = streets._clip_closure_zones(barely_out)
+    assert kept == [] or all(
+        streets.transform(streets._TO_METRIC_CRS, piece).length
+        >= streets.CLOSURE_ZONE_MIN_REMNANT_M
+        for piece in kept
+    )
+
+
+def test_real_closure_zones_file_covers_east_river_park():
+    # The shipped file must contain the ESCR zone: the point below is one
+    # of the 32 confirmed ghost-edge locations (FIXES item 0b's answer
+    # key, data/audits/2026-08-13/erp_phantoms.json).
+    from shapely.geometry import Point as _Point
+
+    assert len(streets._CLOSURE_ZONES_M) >= 1
+    ghost = _Point(streets._TO_METRIC_CRS(-73.972923, 40.723911))
+    assert any(zone.contains(ghost) for zone in streets._CLOSURE_ZONES_M)
+
+
+def test_interior_sidewalks_for_tile_clips_closure_zones(monkeypatch):
+    monkeypatch.setattr(streets, "_CLOSURE_ZONES_M", [_square_zone_m(-73.99, 40.7, 100.0)])
+    geojson = {"features": [
+        {"geometry": {"type": "LineString",
+                      "coordinates": [[-73.9901, 40.7], [-73.9899, 40.7]]}},  # inside
+        {"geometry": {"type": "LineString",
+                      "coordinates": [[-73.95, 40.72], [-73.949, 40.72]]}},   # far away
+    ]}
+    tile_bbox = Bbox(lat_min=40.6, lat_max=40.8, lon_min=-74.1, lon_max=-73.9)
+    segments = streets._interior_sidewalks_for_tile(geojson, tile_bbox)
+    assert segments == [[(-73.95, 40.72), (-73.949, 40.72)]]

@@ -59,6 +59,10 @@ def write_tile(tile_id: str, nodes: gpd.GeoDataFrame, edges: gpd.GeoDataFrame) -
             "tree_deciduous": row["tree_deciduous"],
             "tree_evergreen": row["tree_evergreen"],
             "tree_count": int(row["tree_count"]),
+            # the slice of tree_deciduous that came from park-canopy area
+            # rather than countable trees (FIXES.md item 4) -- already
+            # included in tree_deciduous, never add both
+            "tree_park_canopy": round(float(row["tree_park_canopy"]), 3),
             # row["geometry"] is the LAT/Lon one — see module docstring.
             "coords": [[round(lon, 6), round(lat, 6)] for lon, lat in row["geometry"].coords],
         })

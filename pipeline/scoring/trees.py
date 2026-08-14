@@ -79,6 +79,15 @@ def score_and_join(edges: gpd.GeoDataFrame, tree_rows: list[dict]) -> gpd.GeoDat
     edges["tree_deciduous"] = per_edge["tree_deciduous"].round(3).values
     edges["tree_evergreen"] = per_edge["tree_evergreen"].round(3).values
     edges["tree_count"] = per_edge["tree_count"].astype(int).values
+    # The park-canopy credit an edge later receives (apply_park_canopy
+    # adds it into tree_deciduous AND records it here) -- kept as its own
+    # column so the export can say which edges' shade comes from canopy
+    # area rather than countable trees (FIXES.md item 4's option A needs
+    # exactly this; the pipeline used to sum-and-forget the split).
+    # Initialized here, where every edge table is born, so the pilot/CI
+    # path (no canopy raster) exports a clean 0.0 rather than a missing
+    # column.
+    edges["tree_park_canopy"] = 0.0
 
     with_trees = (edges["tree_count"] > 0).sum()
     print(f"  [scoring] {len(trees)} scoreable trees → "

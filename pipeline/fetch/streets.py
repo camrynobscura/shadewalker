@@ -22,20 +22,23 @@ Caching is two-layer:
      XML graph format; loading it back skips all network + assembly work.
 """
 
+import json
 import time
+from pathlib import Path
 
 import networkx as nx
 import osmnx as ox
 import requests
 from pyproj import Transformer
 from shapely import prepared
-from shapely.geometry import LineString, Point, box, shape
+from shapely.geometry import LineString, Point, Polygon, box, shape
 from shapely.ops import substring, transform, unary_union
 from shapely.strtree import STRtree
 
 from pipeline import config
 from pipeline.config import Bbox
 from pipeline.fetch import interior_sidewalks, park_trails
+from pipeline.graph import vertical_audit
 from pipeline.graph.centerline import METRIC_CRS
 
 STREETS_DIR = config.RAW_DIR / "streets"
@@ -123,7 +126,22 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # the portion not already within PARK_TRAIL_OVERLAP_BUFFER_M of the walk
 # graph built so far (most of a real trail typically duplicates a path
 # OSM already has), then snapped on the same way interior sidewalks are.
-GRAPH_CACHE_VERSION = 18
+# v19 (2026-08-14, one bundled re-fetch -- see HISTORY.md's v19 entry):
+# (a) CYCLEWAY_FILTER widened foot=designated -> designated|yes (real
+# shared-use greenways, ~95km citywide, were excluded; survey in
+# data/audits/2026-08-14/); (b) closure zones -- imported synthetic
+# segments inside a curated construction-closure polygon are clipped out
+# (East River Park's ESCR ghost paths, FIXES item 0b; see
+# CLOSURE_ZONES_PATH's comment for why tags can't infer this); (c) the
+# `layer` tag is now retained on fetched ways (vertical_audit needs it);
+# (d) snap connectors carry a weld=True attribute so the new
+# vertical-suspects detector (pipeline/graph/vertical_audit.py) can audit
+# exactly the edges the pipeline manufactured -- it REPORTS suspects per
+# tile, it never removes anything (measured 2026-08-14: auto-removal
+# can't reach the needed precision; removal stays evidence-gated in the
+# server's coordinate blocklist). All four are baked into the fetched
+# graph, hence one shared bump.
+GRAPH_CACHE_VERSION = 19
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -199,10 +217,20 @@ WALK_FILTER = (
 # some NYC bridges model their pedestrian path as a shared foot+bike
 # cycleway rather than a footway (Brooklyn Bridge's Brooklyn-side landing,
 # confirmed real) -- WALK_FILTER's highway allowlist doesn't include
-# cycleway at all, since most cycleways are bike-only. Scoped tightly to
-# foot=designated (explicitly shared-use) rather than broadening
-# WALK_FILTER's own list, so ordinary bike-only cycleways stay excluded.
-CYCLEWAY_FILTER = '["highway"="cycleway"]["foot"="designated"]'
+# cycleway at all, since most cycleways are bike-only. Scoped to an
+# explicit foot allowance rather than broadening WALK_FILTER's own list,
+# so ordinary bike-only cycleways stay excluded.
+#
+# v19 widened designated -> designated|yes: foot=designated alone was
+# excluding real shared-use greenways tagged foot=yes (found on the
+# Cunningham Park Greenway via an external-engine comparison, FIXES item
+# 1). A citywide survey (data/audits/2026-08-14/cycleway_foot_yes_ways.
+# json) measured the widened set: 398 ways / 95km, overwhelmingly named
+# greenways (Bronx River, Mosholu-Pelham, Jamaica Bay, Shore Parkway,
+# Kissena, Flushing Bay Promenade...). Admission risk for a mapped real
+# way is access-tagging, and an explicit foot=yes settles that the same
+# way foot=designated does.
+CYCLEWAY_FILTER = '["highway"="cycleway"]["foot"~"^(designated|yes)$"]'
 
 # A third query, also unioned into the main fetch: WALK_FILTER's
 # ["access"!~"private|no"] clause excludes any way tagged access=private
@@ -429,6 +457,69 @@ PARK_TRAIL_MERGE_TOLERANCE_M = 1.0
 # point.
 PARK_TRAIL_SNAP_MAX_M = 10.0
 
+# Curated closure zones (FIXES.md item 0b): polygons where the imported
+# synthetic layers (interior sidewalks, park trails) must NOT be admitted
+# because the real ground is a construction closure that the city's own
+# datasets still show as open paths. This can't be inferred from OSM tags
+# -- measured 2026-08-14 against the 32 confirmed East River Park ghost
+# edges: 0/32 sit inside any landuse=construction polygon and only 8/32
+# near a highway=construction way (OSM's mappers DELETED the paths
+# instead), while proximity rules wrongly flag 215 fine paths elsewhere.
+# From the pipeline's view, "closed and removed from OSM" is
+# indistinguishable from "never mapped in OSM" -- and the latter is the
+# entire reason these imports exist. So closures are recorded as
+# hand-drawn, evidence-based polygons (pipeline/closure_zones.json, one
+# entry per real-world closure, each with a note saying when to delete
+# it), the same curated-evidence philosophy as the server's
+# KNOWN_NODE_GAPS and phantom-connector blocklist. Only the imported
+# layers are filtered -- OSM's own ways already reflect the closure.
+CLOSURE_ZONES_PATH = Path(__file__).parent.parent / "closure_zones.json"
+
+# A leftover piece of an imported segment shorter than this after
+# clipping a closure zone out of it is a boundary sliver, not a path.
+CLOSURE_ZONE_MIN_REMNANT_M = 10.0
+
+
+def _load_closure_zones(path: Path = CLOSURE_ZONES_PATH) -> list:
+    """Closure polygons in METRIC_CRS (buffering/measuring happens in
+    meters throughout -- see the dual-CRS note in CLAUDE.md)."""
+    if not path.exists():
+        return []
+    zones = []
+    with open(path) as f:
+        for zone in json.load(f)["zones"]:
+            ring_m = [_TO_METRIC_CRS(lon, lat) for lon, lat in zone["polygon"]]
+            zones.append(Polygon(ring_m))
+    return zones
+
+
+_CLOSURE_ZONES_M = _load_closure_zones()
+
+
+def _clip_closure_zones(line: LineString) -> list[LineString]:
+    """The portion(s) of an imported lon/lat segment OUTSIDE every closure
+    zone -- same clip-and-keep-remnants shape as _uncovered_trail_segments.
+    Returns [line] untouched when no zone intersects (the common case:
+    zones are rare and tiny). Remnants shorter than
+    CLOSURE_ZONE_MIN_REMNANT_M are dropped as boundary slivers."""
+    if not _CLOSURE_ZONES_M:
+        return [line]
+    line_m = transform(_TO_METRIC_CRS, line)
+    touched = False
+    remainder = line_m
+    for zone_m in _CLOSURE_ZONES_M:
+        if remainder.is_empty or not remainder.intersects(zone_m):
+            continue
+        touched = True
+        remainder = remainder.difference(zone_m)
+    if not touched:
+        return [line]
+    parts = remainder.geoms if hasattr(remainder, "geoms") else [remainder]
+    kept_m = [p for p in parts
+              if isinstance(p, LineString) and p.length >= CLOSURE_ZONE_MIN_REMNANT_M]
+    return [transform(_FROM_METRIC_CRS, p) for p in kept_m]
+
+
 # osmnx's own HTTP-response cache is disabled -- it has no expiration and
 # no connection to GRAPH_CACHE_VERSION below, so it can silently keep
 # serving a stale or incomplete Overpass response forever, even after a
@@ -463,6 +554,18 @@ ox.settings.http_referer = ox.settings.http_user_agent
 # overpass-api.de's own stated 10,000-query/1GB daily guidance anyway,
 # so the connection drops weren't us tripping a real limit.
 ox.settings.overpass_url = "https://overpass-api.de/api"
+
+# v19: retain the `layer` tag on fetched ways (osmnx's default keeps
+# bridge/tunnel but not layer). The vertical-suspects detector (see
+# pipeline/graph/vertical_audit.py) needs it: plenty of real elevated
+# pedestrian structures carry layer=N with no bridge tag at all (the
+# High Line's viaduct sections, the Brooklyn Heights Promenade's
+# layer=3), and 2026-08-14's offline audit measured those exact ways
+# hosting confirmed phantom welds. Costs nothing beyond a slightly
+# larger graphml; baked into the fetched graph, hence part of the v19
+# cache bump.
+if "layer" not in ox.settings.useful_tags_way:
+    ox.settings.useful_tags_way = ox.settings.useful_tags_way + ["layer"]
 
 
 def _fetch_with_retry(bbox: Bbox, custom_filter: str, tile_id: str, label: str) -> nx.MultiDiGraph | None:
@@ -682,8 +785,14 @@ def _interior_sidewalks_for_tile(geojson: dict, bbox: Bbox) -> list[list[tuple[f
     segments = []
     for feature in geojson["features"]:
         coords = [tuple(point) for point in feature["geometry"]["coordinates"]]
-        if tile_box.intersects(LineString(coords)):
-            segments.append(coords)
+        line = LineString(coords)
+        if not tile_box.intersects(line):
+            continue
+        # closure zones (FIXES.md item 0b): drop the portions of imported
+        # paths inside a known construction closure -- see
+        # CLOSURE_ZONES_PATH's comment for why this can't be tag-inferred
+        for kept in _clip_closure_zones(line):
+            segments.append([tuple(point) for point in kept.coords])
     return segments
 
 
@@ -712,8 +821,11 @@ def _park_trails_for_tile(geojson: dict, bbox: Bbox) -> list[LineString]:
         geometry = shape(feature["geometry"])
         parts = geometry.geoms if hasattr(geometry, "geoms") else [geometry]
         for part in parts:
-            if tile_box.intersects(part):
-                lines.append(part)
+            if not tile_box.intersects(part):
+                continue
+            # closure zones (FIXES.md item 0b) -- same clip as interior
+            # sidewalks; see CLOSURE_ZONES_PATH's comment
+            lines.extend(_clip_closure_zones(part))
     return lines
 
 
@@ -867,6 +979,7 @@ def _apply_edge_splits(
             result.add_edge(
                 chain_start, loose_end_node, osmid=next_edge_osmid,
                 length=_node_distance_m(result, chain_start, loose_end_node),
+                weld=True,  # pipeline-manufactured connector -- see vertical_audit
             )
             next_edge_osmid -= 1
             continue
@@ -884,6 +997,7 @@ def _apply_edge_splits(
         result.add_edge(
             split_node, loose_end_node, osmid=next_edge_osmid,
             length=_node_distance_m(result, split_node, loose_end_node),
+            weld=True,  # pipeline-manufactured connector -- see vertical_audit
         )
         next_edge_osmid -= 1
 
@@ -1170,6 +1284,11 @@ def fetch_streets(
     if named_sidewalk_graph is not None:
         graph = nx.compose(graph, named_sidewalk_graph)
 
+    # Kept past its own narrowing below: the vertical-suspects audit needs
+    # the FULL sidewalk layer for reachability arbitration (ramps our
+    # centerline filters exclude live in it) -- see vertical_audit's
+    # docstring.
+    any_sidewalk_graph = None
     if park_reach is not None:
         any_sidewalk_graph = _fetch_with_retry(
             bbox, ANY_SIDEWALK_FILTER, tile_id, "sidewalk-tagged ways near parks"
@@ -1231,6 +1350,12 @@ def fetch_streets(
             graph, trail_graph, barrier_graph, tile_id,
             snap_max_m=PARK_TRAIL_SNAP_MAX_M, label="park trails",
         )
+
+    # Audit the welds this build just manufactured, BEFORE simplification
+    # (scalar osmids, weld=True intact). Report-only -- see
+    # pipeline/graph/vertical_audit.py's docstring for why it never
+    # removes anything.
+    vertical_audit.report_vertical_suspects(graph, any_sidewalk_graph, tile_id)
 
     graph = ox.simplification.simplify_graph(graph)
 
