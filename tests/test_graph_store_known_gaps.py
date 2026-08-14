@@ -231,3 +231,51 @@ def test_bulk_verified_gaps_load_from_file_with_a_plain_label():
         else:
             # OSRM-verified batch: real names allowed, debug strings not
             assert "audit" not in name.lower() and "2026" not in name
+
+
+def test_load_warns_loudly_when_a_mostly_bridged_dataset_has_dead_entries(
+    tmp_path, monkeypatch, capsys
+):
+    # The v18 refetch silently orphaned 11 hand-curated bridges (incl.
+    # "Manhattan Bridge Pedestrian Path") and nothing noticed for a day
+    # (found 2026-08-14). On a dataset where MOST entries bridge, a
+    # dangling entry means a shipped fix has gone dead -- that must be
+    # loud and name the entry.
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
+    _write_tile(tmp_path / "island.json.gz", ISLAND_NODES, ISLAND_EDGES)
+    monkeypatch.setattr(graph_store, "KNOWN_NODE_GAPS", [
+        (GAP_NODE_A, GAP_NODE_B, GAP_NAME, None),          # bridges
+        ("m1", "i2", "Second Bridge", None),               # bridges
+        ("999999991", "999999992", "Ghost Fix", None),     # dead
+    ])
+
+    store = GraphStore()
+    store.load()
+
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "Ghost Fix" in out
+    assert "999999991" in out
+
+
+def test_load_stays_quiet_about_dangling_entries_on_a_partial_dataset(
+    tmp_path, monkeypatch, capsys
+):
+    # The pilot/CI tile legitimately misses almost every entry -- that's
+    # a partial dataset, not dead fixes, and must not scream per entry.
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
+    _write_tile(tmp_path / "island.json.gz", ISLAND_NODES, ISLAND_EDGES)
+    monkeypatch.setattr(graph_store, "KNOWN_NODE_GAPS", [
+        (GAP_NODE_A, GAP_NODE_B, GAP_NAME, None),          # bridges
+        ("999999991", "999999992", "Ghost One", None),     # absent
+        ("999999993", "999999994", "Ghost Two", None),     # absent
+    ])
+
+    store = GraphStore()
+    store.load()
+
+    out = capsys.readouterr().out
+    assert "WARNING" not in out
+    assert "not in this dataset" in out

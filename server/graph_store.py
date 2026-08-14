@@ -605,9 +605,19 @@ class GraphStore:
             print(f"[graph_store] skipped {phantom_skipped} confirmed phantom connector(s)")
 
         bridged_count = 0
+        dangling: list[tuple[str, str, str]] = []
         for node_a, node_b, gap_name, gap_length_m in KNOWN_NODE_GAPS:
             if node_a not in self._id_to_idx or node_b not in self._id_to_idx:
-                continue  # not in this dataset (e.g. the pilot-only test tile) -- skip quietly
+                # Not in this dataset. Two very different situations share
+                # this branch, told apart by proportion below: a PARTIAL
+                # dataset (the pilot-only test tile misses ~14k entries --
+                # normal, quiet) vs. a citywide load where a refetch's OSM
+                # drift orphaned entries (a silently-dead fix; the v18
+                # refetch killed 11 hand-curated bridges including
+                # "Manhattan Bridge Pedestrian Path" and nothing noticed
+                # for a day -- found 2026-08-14).
+                dangling.append((node_a, node_b, gap_name))
+                continue
             idx_a, idx_b = self._id_to_idx[node_a], self._id_to_idx[node_b]
             lon_a, lat_a = node_lonlat[idx_a]
             lon_b, lat_b = node_lonlat[idx_b]
@@ -629,6 +639,22 @@ class GraphStore:
         # startup instead -- a single count is all a normal boot needs.
         if bridged_count:
             print(f"[graph_store] bridged {bridged_count} known node gap(s)")
+        # Mostly-bridged with a few dangling = a citywide dataset where
+        # entries went dead (refetch drift) -- say so LOUDLY, per entry.
+        # Mostly-dangling = a partial dataset (pilot/CI) -- one quiet line.
+        if dangling and bridged_count > len(dangling):
+            print(f"[graph_store] WARNING: {len(dangling)} known-gap entr"
+                  f"{'y' if len(dangling) == 1 else 'ies'} reference nodes "
+                  f"missing from this dataset -- each was a shipped fix that "
+                  f"is now silently inactive (OSM drift after a refetch?); "
+                  f"re-derive or retire them:")
+            for node_a, node_b, gap_name in dangling[:20]:
+                print(f"[graph_store]   dead entry: {node_a} <-> {node_b} ({gap_name!r})")
+            if len(dangling) > 20:
+                print(f"[graph_store]   ...and {len(dangling) - 20} more")
+        elif dangling:
+            print(f"[graph_store] {len(dangling)} known-gap entries not in "
+                  f"this dataset (partial dataset, e.g. the pilot tile)")
 
         # Cross-tile duplicate synthetic paths (see
         # _cross_tile_synthetic_stitches): connect each copy's nodes onto
