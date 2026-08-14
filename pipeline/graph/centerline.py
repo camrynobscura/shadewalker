@@ -24,6 +24,26 @@ import osmnx as ox
 METRIC_CRS = "EPSG:32618"  # UTM 18N — meter units, accurate for NYC
 
 
+def _require_osmid_on_every_edge(street_graph: nx.MultiDiGraph) -> None:
+    """Fail fast, with a specific error, if any edge lacks an osmid.
+
+    Real bug (2026-08-09): pipeline.fetch.streets's interior-sidewalk
+    snapping (FIXES.md item 1a) was adding edges without one. osmnx's own
+    to_undirected() only notices when it needs to compare two edges
+    sharing a node pair (a true parallel edge, not an ordinary two-way
+    street's forward/back pair) -- so it silently works most of the time
+    and then crashes with a bare `KeyError: 'osmid'` deep in osmnx's own
+    internals the moment a real tile happens to have one. Checking here
+    instead, before that call, means a future mistake of the same shape
+    (a new feature adding edges without osmid) fails immediately with a
+    message naming the exact edge, not a cryptic trace through a third-
+    party library.
+    """
+    for u, v, k, data in street_graph.edges(keys=True, data=True):
+        if data.get("osmid") is None:
+            raise ValueError(f"edge ({u!r}, {v!r}, key={k!r}) is missing 'osmid'")
+
+
 def build_edge_table(street_graph: nx.MultiDiGraph) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     """Return (nodes, edges) GeoDataFrames for routing.
 
@@ -31,6 +51,7 @@ def build_edge_table(street_graph: nx.MultiDiGraph) -> tuple[gpd.GeoDataFrame, g
     edges: indexed by (u, v, key), with length_m, name,
            geometry (lat/lon) and geometry_m (meters).
     """
+    _require_osmid_on_every_edge(street_graph)
     undirected = ox.convert.to_undirected(street_graph)
 
     # graph_to_gdfs unpacks a graph into two table-like GeoDataFrames.

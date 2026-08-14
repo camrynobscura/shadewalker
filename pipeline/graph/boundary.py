@@ -43,12 +43,32 @@ def borough_polygon(geojson: dict, borough: str) -> BaseGeometry:
     raise ValueError(f"No borough named {borough!r} in the dataset -- valid names: {valid_names}")
 
 
+def _is_real_park(properties: dict) -> bool:
+    """Whether a single Parks Properties feature is real, walkable park
+    land -- see config.PARK_EXCLUDED_TYPECATEGORIES and its neighboring
+    constants for the two-tier reasoning (FIXES.md item 1d). A
+    typecategory alone can't tell real park land apart from genuinely
+    non-park land filed under the same label, but checking `subcategory`
+    everywhere is equally wrong (it would rescue Belt Parkway's median as
+    "Large Park") -- so the per-property check only applies to the three
+    typecategories where a real bundling error was actually found."""
+    typecategory = properties.get("typecategory")
+    if typecategory in config.PARK_EXCLUDED_TYPECATEGORIES:
+        return False
+    if typecategory in config.PARK_TYPECATEGORIES_NEEDING_SUBCATEGORY_CHECK:
+        return properties.get("subcategory") in config.PARK_LIKE_SUBCATEGORIES
+    return True
+
+
 def park_polygon(geojson: dict) -> BaseGeometry:
     """The union of every real park's polygon -- excludes roadside/median
-    slivers and cemeteries (config.PARK_EXCLUDED_TYPECATEGORIES) so the
-    park canopy mask only covers actual park interiors, not traffic
-    triangles or graveyards. Pure function over the raw GeoJSON
-    FeatureCollection -- see pipeline/fetch/parks.py for the fetch.
+    slivers and non-park land (_is_real_park(), config.
+    PARK_EXCLUDED_TYPECATEGORIES) so the park canopy mask only covers
+    actual park interiors, not traffic triangles or parking lots.
+    Cemeteries are included (as of 2026-07-31): no external routing engine
+    special-cases them, so keeping them out was a data gap, not a real
+    distinction. Pure function over the raw GeoJSON FeatureCollection --
+    see pipeline/fetch/parks.py for the fetch.
 
     Repairs each feature with shapely.make_valid() before unioning -- 9 of
     the real dataset's polygons (Flagship Parks down to a Nature Area,
@@ -67,7 +87,7 @@ def park_polygon(geojson: dict) -> BaseGeometry:
     park_shapes = [
         shapely.make_valid(shape(feature["geometry"]))
         for feature in geojson["features"]
-        if feature["properties"].get("typecategory") not in config.PARK_EXCLUDED_TYPECATEGORIES
+        if _is_real_park(feature["properties"])
     ]
     return shapely.make_valid(shapely.union_all(park_shapes))
 

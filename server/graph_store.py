@@ -29,6 +29,7 @@ import json
 import math
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 
 import igraph
 import numpy as np
@@ -196,7 +197,7 @@ def _save_cached_coverage_rings(cache_path, fingerprint: str, rings: list[list[l
 # between two different real things (a foot=no roadway and a
 # separately-mapped sidewalk that doesn't touch these nodes), not a
 # path split in two.
-KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
+_CURATED_KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
     # Cross Bay Bridge's shared foot+bike path (its Rockaway-side
     # landing) <-> East 21st Road, Broad Channel/Rockaway -- ~12m apart
     # in OSM's own data, confirmed via a direct Overpass query: the same
@@ -246,6 +247,80 @@ KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
 ]
 
 
+def _load_known_node_gaps(path: Path) -> list[tuple[str, str, str, float | None]]:
+    """Load the bulk-verified batch from its own committed JSON file.
+    Two entry shapes coexist:
+
+    [node_a, node_b, name]            -- the 2026-08-01 four-signal batch;
+                                         all gaps <= 25m, so the bridge's
+                                         length is the chord (close enough
+                                         at that scale).
+    [node_a, node_b, name, length_m]  -- the 2026-08-13 OSRM-verified
+                                         dead-end-seam batch; gaps run up
+                                         to 100m, where a straight chord
+                                         understates the real walk, so the
+                                         length OSRM actually measured is
+                                         stored explicitly.
+
+    Kept separate from _CURATED_KNOWN_NODE_GAPS above: at ~14k entries
+    this can't stay a Python list literal the way the curated batch does,
+    and unlike the curated batch it has no individual per-entry story
+    worth a comment."""
+    out: list[tuple[str, str, str, float | None]] = []
+    for entry in json.loads(path.read_text()):
+        if len(entry) == 3:
+            node_a, node_b, name = entry
+            out.append((node_a, node_b, name, None))
+        else:
+            node_a, node_b, name, length_m = entry
+            out.append((node_a, node_b, name, float(length_m)))
+    return out
+
+
+KNOWN_NODE_GAPS: list[tuple[str, str, str, float | None]] = [
+    (node_a, node_b, name, None) for node_a, node_b, name in _CURATED_KNOWN_NODE_GAPS
+] + _load_known_node_gaps(Path(__file__).parent / "known_node_gaps.json")
+
+
+def _load_phantom_connectors(path: Path) -> list[tuple[list[float], list[float], str]]:
+    """The inverse of KNOWN_NODE_GAPS: edges the imported-path layers
+    created that provably do NOT exist as walks in the real world --
+    connectors that jump a vertical boundary (a street node snapped onto
+    a bridge-deck path 30m overhead, with no stairs anywhere near). Each
+    entry was confirmed by the 2026-08-13 reverse-OSRM audit: OSRM either
+    can't walk between the edge's endpoints at all or needs hundreds of
+    meters where our edge claims a few. See FIXES.md item 0.
+
+    Entries are [[lon_a, lat_a], [lon_b, lat_b], note] -- endpoint
+    COORDINATES, not node ids, deliberately: the phantom edges' synthetic
+    node ids renumber on any re-export, and an id-keyed blocklist would
+    go silently stale (the vacuous-fixture failure mode all over again).
+    Coordinates come from the same source data, so they survive
+    re-exports; matching is by proximity (~2m) at load time."""
+    return [(a, b, note) for a, b, note in json.loads(path.read_text())]
+
+
+PHANTOM_CONNECTORS: list[tuple[list[float], list[float], str]] = _load_phantom_connectors(
+    Path(__file__).parent / "phantom_connectors.json"
+)
+
+
+def _is_phantom_connector(lon_u: float, lat_u: float, lon_v: float, lat_v: float) -> bool:
+    """Does this edge's endpoint pair match a PHANTOM_CONNECTORS entry
+    (either orientation, ~2m tolerance per endpoint)?"""
+    for (lon_a, lat_a), (lon_b, lat_b), _note in PHANTOM_CONNECTORS:
+        # cheap prefilter before the real distance math
+        if abs(lat_u - lat_a) > 0.0001 and abs(lat_u - lat_b) > 0.0001:
+            continue
+        if (_local_distance_m(lat_u, lon_u, lat_a, lon_a) <= 2.0
+                and _local_distance_m(lat_v, lon_v, lat_b, lon_b) <= 2.0):
+            return True
+        if (_local_distance_m(lat_u, lon_u, lat_b, lon_b) <= 2.0
+                and _local_distance_m(lat_v, lon_v, lat_a, lon_a) <= 2.0):
+            return True
+    return False
+
+
 def _local_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Flat-earth distance between two nearby points -- fine at the
     few-meters-to-tens-of-meters scale KNOWN_NODE_GAPS entries are at
@@ -255,6 +330,123 @@ def _local_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
     dlat_m = (lat2 - lat1) * METERS_PER_DEGREE_LAT
     dlon_m = (lon2 - lon1) * METERS_PER_DEGREE_LAT * math.cos(math.radians(mean_lat))
     return math.hypot(dlat_m, dlon_m)
+
+
+# How close a synthetic node must sit to ANOTHER tile's synthetic-path line
+# to count as provably the same physical path (see
+# _cross_tile_synthetic_stitches). Deliberately tight: duplicate copies come
+# from the same citywide source dataset, so where they overlap they coincide
+# essentially exactly (6dp export rounding = ~0.11m) -- measured citywide,
+# flagged near-coincident pairs split cleanly into <=1.5m (all duplicates)
+# and >5m (genuinely separate paths, possibly fenced apart); nothing
+# ambiguous survives this cutoff, and paths 2m+ apart are never joined.
+STITCH_ON_LINE_TOLERANCE_M = 1.5
+
+# Longest bridge a stitch may add, node to nearest endpoint of the twin
+# path. Measured over every real stitchable pair citywide: median 1.1m,
+# p90 11.3m, max 24.3m -- so 25m loses nothing real, while capping how far
+# a straight bridge segment can deviate from a curvy path it shortcuts.
+STITCH_MAX_HOP_M = 25.0
+
+
+def _cross_tile_synthetic_stitches(
+    id_to_idx: dict[str, int],
+    node_lonlat: list[list[float]],
+    edge_pairs: list[tuple[int, int]],
+    coords_per_edge: list[list[list[float]]],
+) -> list[tuple[int, int]]:
+    """Node-index pairs to bridge so cross-tile duplicate copies of the same
+    synthetic path become walkable as one.
+
+    Why duplicates exist at all: every tile fetches FETCH_BUFFER_M past its
+    own edges (so neighbors overlap and real OSM border edges merge via
+    their shared, globally-unique node ids), and both neighbors build their
+    own copy of any synthetic path (interior sidewalks, park trails) in the
+    overlap band. Synthetic ids are minted per tile (namespaced
+    "r16c12:-1", see pipeline/export.py), so the copies CAN'T share ids the
+    way real border edges do -- they load as two coincident, disconnected
+    paths, and a walker standing on one "needs" a multi-hundred-meter
+    detour to reach the other, i.e. to reach where they already are.
+
+    The stitch rule: a synthetic node that lies ON a different tile's
+    synthetic-path line (within STITCH_ON_LINE_TOLERANCE_M) is provably a
+    point on the same physical path, so it gets a short bridge edge to that
+    line's nearest endpoint node (capped at STITCH_MAX_HOP_M). Same bridge
+    mechanics as KNOWN_NODE_GAPS above.
+
+    What this deliberately does NOT do:
+    - Same-tile pairs are never stitched -- within one tile the pipeline
+      already decided what connects (with barrier checks this load-time
+      pass can't replicate); its output isn't second-guessed here.
+    - Nearby-but-off-the-line pairs (>1.5m) are never stitched -- two
+      separate paths a few meters apart can have a real fence between
+      them; only exact coincidence is treated as identity.
+    - Copies aren't merged or deduplicated, just connected -- both stay
+      drawn, routing simply stops paying a phantom detour between them.
+    """
+    synth_tile = {
+        idx: node_id.split(":", 1)[0] for node_id, idx in id_to_idx.items() if ":" in node_id
+    }
+    if not synth_tile:
+        return []
+
+    candidate_edges = [
+        i for i, (u, v) in enumerate(edge_pairs) if u in synth_tile or v in synth_tile
+    ]
+    if not candidate_edges:
+        return []
+
+    lonlat = np.asarray(node_lonlat)
+    mean_lat = float(np.mean(lonlat[:, 1]))
+    lat_scale = math.cos(math.radians(mean_lat))
+    scale = np.array([lat_scale, 1.0])
+
+    # Batched LineStrings in the same cos-scaled space _build_edge_index
+    # uses, for the same reason (see its docstring).
+    points_per_edge = [len(coords_per_edge[i]) for i in candidate_edges]
+    stacked = np.concatenate(
+        [np.asarray(coords_per_edge[i], dtype=np.float64) for i in candidate_edges]
+    )
+    lines = shapely.linestrings(
+        stacked * scale, indices=np.repeat(np.arange(len(candidate_edges)), points_per_edge)
+    )
+    tree = STRtree(lines)
+
+    synth_idxs = list(synth_tile)
+    points = shapely.points(lonlat[synth_idxs] * scale)
+    radius_deg = STITCH_ON_LINE_TOLERANCE_M / METERS_PER_DEGREE_LAT
+    hits = tree.query(points, predicate="dwithin", distance=radius_deg)
+
+    # Nearest qualifying twin line per node -- a node's own tile's lines
+    # (including its own incident edges, at distance 0) never qualify.
+    best_for_node: dict[int, tuple[float, int]] = {}
+    for point_i, line_j in zip(hits[0], hits[1]):
+        node_idx = synth_idxs[point_i]
+        u, v = edge_pairs[candidate_edges[line_j]]
+        edge_tile = synth_tile.get(u) or synth_tile.get(v)
+        if edge_tile == synth_tile[node_idx]:
+            continue
+        dist_deg = float(lines[line_j].distance(points[point_i]))
+        current = best_for_node.get(node_idx)
+        if current is None or dist_deg < current[0]:
+            best_for_node[node_idx] = (dist_deg, candidate_edges[line_j])
+
+    already_connected = {(min(u, v), max(u, v)) for u, v in edge_pairs}
+    stitches: list[tuple[int, int]] = []
+    for node_idx, (_, edge_i) in best_for_node.items():
+        u, v = edge_pairs[edge_i]
+        lon_n, lat_n = lonlat[node_idx]
+        hop_u = _local_distance_m(lat_n, lon_n, lonlat[u][1], lonlat[u][0])
+        hop_v = _local_distance_m(lat_n, lon_n, lonlat[v][1], lonlat[v][0])
+        endpoint, hop_m = (u, hop_u) if hop_u <= hop_v else (v, hop_v)
+        if endpoint == node_idx or hop_m > STITCH_MAX_HOP_M:
+            continue
+        pair = (min(node_idx, endpoint), max(node_idx, endpoint))
+        if pair in already_connected:
+            continue
+        already_connected.add(pair)
+        stitches.append(pair)
+    return stitches
 
 
 @dataclass(frozen=True)
@@ -310,6 +502,12 @@ class GraphStore:
         self._coord_offsets = np.zeros(1, dtype=np.int64)
 
         self._graph: igraph.Graph | None = None
+        # How many cross-tile duplicate-path stitches load() added. Kept so
+        # the merge-fixture precondition test can assert the stitch pass
+        # actually exercised (a fixture without cross-tile synthetic data
+        # would make the merge-integrity tests pass vacuously -- exactly how
+        # the id-collision bug stayed invisible).
+        self._stitch_count = 0
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -331,6 +529,7 @@ class GraphStore:
         coords_per_edge: list[list[list[float]]] = []  # packed into _coord_buf after the loop
         seen_edges: dict[tuple, int] = {}  # (u, v, key, side) -> position in the lists above
         seen_geometries: set[tuple] = set()  # (u, v, side, geometry hash) -- see below
+        phantom_skipped = 0
 
         for path in tile_paths:
             tile = json.loads(gzip.open(path, "rt").read())
@@ -341,6 +540,16 @@ class GraphStore:
                     node_lonlat.append([lon, lat])
 
             for edge in tile["edges"]:
+                # Confirmed-phantom connectors (see PHANTOM_CONNECTORS)
+                # never enter the graph. Only short edges can match --
+                # every confirmed phantom is a <120m snap connector.
+                if edge["length_m"] <= 150.0 and PHANTOM_CONNECTORS:
+                    lon_u, lat_u = tile["nodes"][edge["u"]]
+                    lon_v, lat_v = tile["nodes"][edge["v"]]
+                    if _is_phantom_connector(lon_u, lat_u, lon_v, lat_v):
+                        phantom_skipped += 1
+                        continue
+
                 # Border edges appear in two neighboring tiles; a canonical
                 # (sorted) node pair makes both copies hash identically.
                 # Each tile scored its copy against only its own tree
@@ -392,10 +601,46 @@ class GraphStore:
                 names.append(edge["name"])
                 coords_per_edge.append(edge["coords"])
 
-        for node_a, node_b, gap_name in KNOWN_NODE_GAPS:
+        if phantom_skipped:
+            print(f"[graph_store] skipped {phantom_skipped} confirmed phantom connector(s)")
+
+        bridged_count = 0
+        for node_a, node_b, gap_name, gap_length_m in KNOWN_NODE_GAPS:
             if node_a not in self._id_to_idx or node_b not in self._id_to_idx:
                 continue  # not in this dataset (e.g. the pilot-only test tile) -- skip quietly
             idx_a, idx_b = self._id_to_idx[node_a], self._id_to_idx[node_b]
+            lon_a, lat_a = node_lonlat[idx_a]
+            lon_b, lat_b = node_lonlat[idx_b]
+            edge_pairs.append((idx_a, idx_b))
+            # Entries with a measured length (OSRM's actual walk) use it;
+            # the rest fall back to the chord, honest at their <=25m scale.
+            if gap_length_m is not None:
+                length.append(gap_length_m)
+            else:
+                length.append(_local_distance_m(lat_a, lon_a, lat_b, lon_b))
+            deciduous.append(0.0)
+            evergreen.append(0.0)
+            counts.append(0)
+            names.append(gap_name)
+            coords_per_edge.append([[lon_a, lat_a], [lon_b, lat_b]])
+            bridged_count += 1
+        # One line per entry was fine at 28 hand-curated entries; the bulk
+        # batch (server/known_node_gaps.json) makes that ~14k lines on every
+        # startup instead -- a single count is all a normal boot needs.
+        if bridged_count:
+            print(f"[graph_store] bridged {bridged_count} known node gap(s)")
+
+        # Cross-tile duplicate synthetic paths (see
+        # _cross_tile_synthetic_stitches): connect each copy's nodes onto
+        # its twin where they provably coincide, with the same bridge shape
+        # KNOWN_NODE_GAPS uses. length gets a small floor -- two coincident
+        # trim points can sit at the exact same rounded coordinate, and a
+        # true zero-length edge would divide by zero in route()'s partial-
+        # edge cost math.
+        stitches = _cross_tile_synthetic_stitches(
+            self._id_to_idx, node_lonlat, edge_pairs, coords_per_edge
+        )
+        for idx_a, idx_b in stitches:
             lon_a, lat_a = node_lonlat[idx_a]
             lon_b, lat_b = node_lonlat[idx_b]
             edge_pairs.append((idx_a, idx_b))
@@ -403,9 +648,11 @@ class GraphStore:
             deciduous.append(0.0)
             evergreen.append(0.0)
             counts.append(0)
-            names.append(gap_name)
+            names.append("")
             coords_per_edge.append([[lon_a, lat_a], [lon_b, lat_b]])
-            print(f"[graph_store] bridged known node gap: {node_a} <-> {node_b} ({gap_name})")
+        self._stitch_count = len(stitches)
+        if stitches:
+            print(f"[graph_store] stitched {len(stitches)} cross-tile synthetic duplicate(s)")
 
         self._names = names
         self._node_lonlat = np.array(node_lonlat)
@@ -415,7 +662,16 @@ class GraphStore:
         lon_min, lat_min = self._node_lonlat.min(axis=0)
         lon_max, lat_max = self._node_lonlat.max(axis=0)
         self._bounds = (float(lon_min), float(lat_min), float(lon_max), float(lat_max))
-        self._length = np.array(length, dtype=np.float32)
+        # Floored at 0.01m, in ONE place for every edge source (tile files,
+        # KNOWN_NODE_GAPS bridges, synthetic stitches): 960 real exported
+        # edges have length_m 0.0 -- a sub-5cm connector rounds to 0.0 at
+        # export (pipeline/export.py rounds to 0.1m) -- and a snap landing
+        # on a zero-length edge turns route()'s partial-edge division into
+        # 0/0 -> NaN -> a crash at int(round(tree_count)). Found live: a
+        # Central Park test route did exactly this once the stitch pass
+        # changed which component snaps resolve onto. 1cm on a <5cm
+        # connector distorts nothing.
+        self._length = np.maximum(np.array(length, dtype=np.float32), 0.01)
         self._tree_deciduous = np.array(deciduous, dtype=np.float32)
         self._tree_evergreen = np.array(evergreen, dtype=np.float32)
         self._tree_count = np.array(counts, dtype=np.int32)

@@ -13,14 +13,41 @@ import pytest
 from pipeline.graph.centerline import _normalize_name, build_edge_table
 
 
+def test_missing_osmid_fails_fast_with_a_clear_message():
+    # Real bug (FIXES.md item 1e's follow-up, 2026-08-09): interior-sidewalk
+    # edges (pipeline.fetch.streets) were being added without an osmid
+    # attribute at all. osmnx's own to_undirected() only notices when it
+    # actually needs to compare two edges sharing the same node pair (a true
+    # parallel edge, not just a plain two-way street's forward/back pair) --
+    # then it crashes with a bare `KeyError: 'osmid'` three calls deep in
+    # osmnx's own internals, which is what actually happened on a real tile
+    # (r7c14, Marine Park) the first time this code path ran end-to-end.
+    # Pinning the exact trigger condition here (a true parallel edge, one
+    # with osmid and one without) rather than trusting the generic case,
+    # and asserting OUR OWN check fires first with a clear message naming
+    # the problem -- not osmnx's cryptic KeyError -- so a future instance of
+    # the same mistake (a new feature adding edges without osmid) fails
+    # fast and points straight at the cause instead of needing another
+    # multi-step trace to even understand what broke.
+    g = nx.MultiDiGraph(crs="epsg:4326")
+    g.add_node(1, x=-73.99, y=40.68)
+    g.add_node(2, x=-73.989, y=40.681)
+    g.add_edge(1, 2, key=0, length=150.0, oneway=False, osmid=111)
+    g.add_edge(2, 1, key=0, length=150.0, oneway=False, osmid=111)
+    g.add_edge(1, 2, key=1, length=160.0, oneway=False)  # missing osmid
+
+    with pytest.raises(ValueError, match="osmid"):
+        build_edge_table(g)
+
+
 def _two_way_graph() -> nx.MultiDiGraph:
     """Two nodes ~150m apart with both directed edges present, the way
     osmnx represents a two-way street before we collapse it."""
     g = nx.MultiDiGraph(crs="epsg:4326")
     g.add_node(1, x=-73.99, y=40.68)
     g.add_node(2, x=-73.989, y=40.681)
-    g.add_edge(1, 2, key=0, length=150.0, name="Test St", oneway=False)
-    g.add_edge(2, 1, key=0, length=150.0, name="Test St", oneway=False)
+    g.add_edge(1, 2, key=0, length=150.0, name="Test St", oneway=False, osmid=42)
+    g.add_edge(2, 1, key=0, length=150.0, name="Test St", oneway=False, osmid=42)
     return g
 
 
@@ -54,8 +81,8 @@ def test_missing_name_column_entirely_falls_back_to_empty_string():
     g = nx.MultiDiGraph(crs="epsg:4326")
     g.add_node(1, x=-73.99, y=40.68)
     g.add_node(2, x=-73.989, y=40.681)
-    g.add_edge(1, 2, key=0, length=40.0, oneway=False)
-    g.add_edge(2, 1, key=0, length=40.0, oneway=False)
+    g.add_edge(1, 2, key=0, length=40.0, oneway=False, osmid=99)
+    g.add_edge(2, 1, key=0, length=40.0, oneway=False, osmid=99)
 
     _, edges = build_edge_table(g)
     assert edges.iloc[0]["name"] == ""

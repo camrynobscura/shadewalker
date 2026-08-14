@@ -166,6 +166,109 @@ def test_fastest_route_from_the_reported_bug_now_enters_the_park(citywide_store)
     )
 
 
+# --- Ozone Park: a real gap between two near-coincident nodes ---------------
+# RED until the KNOWN_NODE_GAPS batch from the citywide audit lands (see
+# FIXES.md). Found 2026-07-31 via the OSRM/Valhalla/BRouter sanity check:
+# this NONE-priority route came back 1239.4m, while OSRM/Valhalla/BRouter
+# all agreed with each other within ~5m around 1156-1161m. Root-caused to
+# two real, distinct OSM nodes only ~15m apart in reality that needed a
+# ~350m round trip to connect, because nothing in the graph linked them
+# directly -- not a missing street, not a park/cemetery exclusion, just two
+# nearby points that were never wired together.
+
+
+@pytest.mark.citywide
+def test_ozone_park_route_no_longer_detours_around_a_disconnected_stub(citywide_store):
+    """Pinned to the exact coordinates from the 2026-07-31 sanity-check
+    finding, at tree_weight=0 (NONE priority, the plain shortest path --
+    this is a pure connectivity check, not a shade-preference one).
+
+    1180m leaves real slack above the ~1156-1161m three-engine consensus
+    for legitimate path-choice variance, while staying well below the
+    1239.4m the disconnected stub was forcing before the fix."""
+    pair = citywide_store.snap_pair(40.67346, -73.85500, 40.67845, -73.84710)
+    assert pair is not None, "endpoints did not snap to a shared component"
+    start, end = pair
+    route = citywide_store.route(start, end, tree_weight=0.0, month=7)
+    assert route is not None, "the Ozone Park route no longer resolves at all"
+
+    assert route["length_m"] < 1180.0, (
+        f"Ozone Park route still detouring around the disconnected stub: "
+        f"{route['length_m']:.1f}m (external engines agree around 1156-1161m) "
+        f"via {[s['name'] for s in route['segments']]}"
+    )
+
+
+# --- Bronx (Melrose/Mott Haven): a stale, incomplete tile fetch -------------
+# Found via the same OSRM/Valhalla/BRouter sanity check as Ozone Park above:
+# this NONE-priority route came back 925.9m, while all three engines agreed
+# with each other within 2m around 618-620m. Root cause was different from
+# Ozone Park's, though -- not a missing KNOWN_NODE_GAPS entry, but osmnx's
+# own HTTP-response cache (separate from and invisible to
+# GRAPH_CACHE_VERSION) silently freezing a one-off incomplete Overpass
+# response for tile r18c14 forever: bumping our own cache version and
+# re-fetching kept replaying that same stale answer no matter how many
+# times it ran, since osmnx's cache doesn't know our version changed.
+# Fixed two ways: pipeline/fetch/streets.py now disables osmnx's cache
+# entirely (ox.settings.use_cache = False), and tile r18c14 was re-fetched
+# for real under the fix.
+
+
+@pytest.mark.citywide
+def test_bronx_route_no_longer_detours_around_a_stale_incomplete_fetch(citywide_store):
+    """Pinned to the exact coordinates from the reported bug, at
+    tree_weight=0 (NONE priority -- a pure connectivity check, not a
+    shade-preference one).
+
+    650m leaves real slack above the ~618-620m three-engine consensus for
+    legitimate path-choice variance, while staying well below the 925.9m
+    the stale/incomplete fetch was forcing before the fix."""
+    pair = citywide_store.snap_pair(40.8105, -73.9051, 40.8127, -73.9104)
+    assert pair is not None, "endpoints did not snap to a shared component"
+    start, end = pair
+    route = citywide_store.route(start, end, tree_weight=0.0, month=7)
+    assert route is not None, "the Bronx route no longer resolves at all"
+
+    assert route["length_m"] < 650.0, (
+        f"Bronx route still detouring around the stale/incomplete fetch: "
+        f"{route['length_m']:.1f}m (external engines agree around 618-620m) "
+        f"via {[s['name'] for s in route['segments']]}"
+    )
+
+
+# --- Williamsburg Bridge: severed Brooklyn landing --------------------------
+# Found 2026-08-13 via the external-engine sanity check (batch 2): this
+# NONE-priority route came back 8,948m via the Manhattan Bridge while OSRM
+# and BRouter agreed around 4,824-4,843m via the Williamsburg Bridge. Root
+# cause: the walkway's Brooklyn end connected to the street grid only
+# through unnamed footway=sidewalk/crossing ways the centerline fetch
+# excludes, so the span dead-ended -- reachable from Manhattan, not from
+# Brooklyn. Fixed by the 2026-08-13 OSRM-verified KNOWN_NODE_GAPS batch
+# (dead-end 9990599477 bridged to the Bedford Ave/S 6th St corner, plus
+# neighboring verified pairs). Full story: FIXES.md item 1's third lead.
+
+
+@pytest.mark.citywide
+def test_williamsburg_bridge_route_crosses_it_instead_of_detouring(citywide_store):
+    """Pinned to the exact coordinates from the batch-2 finding, at
+    tree_weight=0 (NONE priority -- a pure connectivity check).
+
+    5,100m leaves real slack above the ~4,824-4,843m OSRM/BRouter consensus
+    (measured 4,919m right after the fix) while staying far below the
+    8,948m the severed landing was forcing before it."""
+    pair = citywide_store.snap_pair(40.711914, -73.978963, 40.722472, -73.962225)
+    assert pair is not None, "endpoints did not snap to a shared component"
+    start, end = pair
+    route = citywide_store.route(start, end, tree_weight=0.0, month=7)
+    assert route is not None, "the Williamsburg route no longer resolves at all"
+
+    assert route["length_m"] < 5100.0, (
+        f"LES->Williamsburg route detouring again instead of using the "
+        f"Williamsburg Bridge: {route['length_m']:.1f}m (OSRM/BRouter agree "
+        f"around 4,824-4,843m) via {[s['name'] for s in route['segments']]}"
+    )
+
+
 @pytest.mark.citywide
 def test_max_shade_prefers_central_park_south_over_the_block_one_south(citywide_store):
     """Central Park's own trees are Conservancy-managed and absent from the

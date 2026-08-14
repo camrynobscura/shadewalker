@@ -570,7 +570,13 @@ def test_every_edge_geometry_starts_and_ends_at_its_own_nodes(graph_store):
     Tolerance: nodes and geometry are both exported rounded to 6
     decimals (pipeline/export.py), so matching endpoints agree to ~1e-6
     degrees; a misaligned edge's endpoints would be whole intersections
-    (>>0.1m) away."""
+    (>>0.1m) away.
+
+    Pilot-scoped by fixture: the citywide sibling that actually exercises
+    the multi-tile merge this docstring's last sentence used to promise
+    lives in test_citywide_invariants.py. A synthetic-id merge bug can't
+    appear in a single-tile fixture, so this one alone is not that guard --
+    see FIXES.md."""
 
     def _matches(point, node) -> bool:
         return abs(point[0] - node[0]) <= 1e-6 and abs(point[1] - node[1]) <= 1e-6

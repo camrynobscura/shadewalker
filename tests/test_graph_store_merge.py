@@ -128,6 +128,72 @@ def test_genuinely_different_parallel_edges_both_survive(tmp_path, monkeypatch):
     assert len(store._length) == 2
 
 
+def _write_tile_with_nodes(path, nodes: dict, edges: list[dict]) -> None:
+    """Like _write_tile, but with per-tile nodes -- the stitch tests below
+    need synthetic (namespaced) nodes that differ between tiles, which the
+    shared NODES table can't express."""
+    with gzip.open(path, "wt") as f:
+        json.dump({"nodes": nodes, "edges": edges}, f)
+
+
+def _synthetic_edge(u: str, v: str, nodes: dict, length_m: float) -> dict:
+    return {
+        "u": u, "v": v, "key": 0, "side": "C",
+        "length_m": length_m, "name": "",
+        "tree_deciduous": 0.0, "tree_evergreen": 0.0, "tree_count": 0,
+        "coords": [nodes[u], nodes[v]],
+    }
+
+
+def test_cross_tile_synthetic_duplicate_copies_get_stitched(tmp_path, monkeypatch):
+    """Two tiles each export their own copy of the same synthetic path
+    (border overlap -- see _cross_tile_synthetic_stitches). Tile b's copy
+    starts partway along tile a's line: its endpoint lies exactly ON that
+    line, ~10m from a's nearest node, so load() must bridge the two copies
+    into one walkable component instead of leaving a phantom detour."""
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    # ~0.0001 deg lon at this latitude is ~8.4m; all four nodes sit on one
+    # straight east-west line, i.e. b's copy lies exactly on a's.
+    a_nodes = {"a_tile:-1": [-73.9900, 40.6800], "a_tile:-2": [-73.9880, 40.6800]}
+    b_nodes = {"b_tile:-1": [-73.98812, 40.6800], "b_tile:-2": [-73.9860, 40.6800]}
+    _write_tile_with_nodes(tmp_path / "a_tile.json.gz", a_nodes,
+                           [_synthetic_edge("a_tile:-1", "a_tile:-2", a_nodes, 169.0)])
+    _write_tile_with_nodes(tmp_path / "b_tile.json.gz", b_nodes,
+                           [_synthetic_edge("b_tile:-1", "b_tile:-2", b_nodes, 178.0)])
+    store = GraphStore()
+    store.load()
+
+    idx_a = store._id_to_idx["a_tile:-1"]
+    idx_b = store._id_to_idx["b_tile:-2"]
+    walk_m = store._graph.distances(source=[idx_a], target=[idx_b], weights=store._length)[0][0]
+    # Reachable, and roughly the real end-to-end distance (~340m) -- not
+    # infinity (unstitched) and not a detour.
+    assert walk_m != float("inf"), "the two copies of the same path never got stitched"
+    assert walk_m < 400.0
+
+
+def test_nearby_but_separate_synthetic_paths_stay_unstitched(tmp_path, monkeypatch):
+    """The other side of the stitch rule: a path from another tile that runs
+    5m to the side (parallel, NOT on the line -- could have a fence between
+    them) must be left alone. Only exact coincidence means identity."""
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    # 0.000045 deg lat is ~5m north of a's line: within the near-coincident
+    # range a careless rule would join, far outside STITCH_ON_LINE_TOLERANCE_M.
+    a_nodes = {"a_tile:-1": [-73.9900, 40.6800], "a_tile:-2": [-73.9880, 40.6800]}
+    b_nodes = {"b_tile:-1": [-73.98812, 40.680045], "b_tile:-2": [-73.9860, 40.680045]}
+    _write_tile_with_nodes(tmp_path / "a_tile.json.gz", a_nodes,
+                           [_synthetic_edge("a_tile:-1", "a_tile:-2", a_nodes, 169.0)])
+    _write_tile_with_nodes(tmp_path / "b_tile.json.gz", b_nodes,
+                           [_synthetic_edge("b_tile:-1", "b_tile:-2", b_nodes, 178.0)])
+    store = GraphStore()
+    store.load()
+
+    idx_a = store._id_to_idx["a_tile:-1"]
+    idx_b = store._id_to_idx["b_tile:-2"]
+    walk_m = store._graph.distances(source=[idx_a], target=[idx_b], weights=store._length)[0][0]
+    assert walk_m == float("inf"), "two separate parallel paths were wrongly joined"
+
+
 def test_no_pilot_fixture_lingering_in_production_tiles_dir():
     """Tripwire for the one way the stale-fixture bug can come back:
     regenerating the fixture (`uv run python -m pipeline.run_tile pilot`)

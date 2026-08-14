@@ -67,3 +67,75 @@ def test_write_tile_exports_lon_lat_degrees_not_utm_meters(tmp_path, monkeypatch
         # ever read geometry_m instead of geometry.
         assert -75 < lon < -73
         assert 40 < lat < 41
+
+
+def test_write_tile_namespaces_synthetic_node_ids_per_tile(tmp_path, monkeypatch):
+    """Synthetic (negative) node ids must come out namespaced with the tile
+    id -- "-1" -> "test_tile:-1" -- on BOTH the nodes dict and edge u/v,
+    while real OSM ids (positive) stay exactly as they were.
+
+    Why: every tile numbers its synthetic nodes (interior sidewalks 1a,
+    park trails 1g) from -1 independently, and graph_store.load() merges
+    all tiles on the id string, first-tile-wins -- so un-namespaced ids
+    made one tile's "-1" swallow every other tile's "-1", wiring 94.5k
+    edges to nodes in the wrong borough (routes teleporting up to 49km;
+    see FIXES.md). Namespacing at export makes cross-tile collision
+    structurally impossible.
+
+    The negative check must survive numpy integer types: iterrows() yields
+    np.int64 index values, not Python ints, so an isinstance(int) guard
+    would silently skip namespacing entirely and resurrect the bug -- this
+    test exists to fail in that case too.
+    """
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path / "tiles")
+
+    # One real OSM node, two synthetic ones -- the index is int64, so
+    # iterrows() hands back np.int64 values, exactly like real data.
+    nodes = gpd.GeoDataFrame(
+        {"x": [-73.99, -73.989, -73.988], "y": [40.68, 40.681, 40.682]},
+        index=[42424089, -1, -2],
+    )
+    # One street-to-synthetic connector and one synthetic-to-synthetic
+    # segment -- u and v each get namespaced independently, so both
+    # positions need at least one synthetic id across the two edges.
+    edges = gpd.GeoDataFrame(
+        {
+            "length_m": [150.0, 80.0],
+            "name": ["", ""],
+            "tree_deciduous": [0.0, 0.0],
+            "tree_evergreen": [0.0, 0.0],
+            "tree_count": [0, 0],
+            "geometry": [
+                LineString([(-73.99, 40.68), (-73.989, 40.681)]),
+                LineString([(-73.989, 40.681), (-73.988, 40.682)]),
+            ],
+            "geometry_m": [
+                LineString([(585435.9, 4503837.4), (585352.7, 4503950.1)]),
+                LineString([(585352.7, 4503950.1), (585269.5, 4504062.8)]),
+            ],
+        },
+        index=pd.MultiIndex.from_tuples(
+            [(42424089, -1, 0), (-1, -2, 0)], names=["u", "v", "key"]
+        ),
+        geometry="geometry",
+    )
+
+    export.write_tile("test_tile", nodes, edges)
+
+    with gzip.open(tmp_path / "tiles" / "test_tile.json.gz", "rt") as f:
+        tile = json.load(f)
+
+    # Real OSM id: untouched. Synthetic ids: tile-prefixed.
+    assert set(tile["nodes"]) == {"42424089", "test_tile:-1", "test_tile:-2"}
+
+    connector, interior = tile["edges"]
+    assert (connector["u"], connector["v"]) == ("42424089", "test_tile:-1")
+    assert (interior["u"], interior["v"]) == ("test_tile:-1", "test_tile:-2")
+
+    # Every edge endpoint must resolve to an exported node -- namespacing
+    # applied to the nodes dict but not edge u/v (or vice versa) would
+    # otherwise ship a tile the server can't load.
+    for edge in tile["edges"]:
+        assert edge["u"] in tile["nodes"]
+        assert edge["v"] in tile["nodes"]

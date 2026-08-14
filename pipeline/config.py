@@ -335,15 +335,55 @@ CANOPY_RASTER_CRS = "EPSG:2263"
 CANOPY_RASTER_TREE_CLASS = 1
 
 # NYC Parks Properties `typecategory` values excluded from the park canopy
-# mask: roadside/traffic-island types (a locked scope decision -- these
-# aren't "a park" for routing purposes) plus Cemetery, deferred to a
-# future follow-on branch alongside federal/state green land (Green-Wood
-# etc. aren't even in this NYC-Parks-only dataset, so no separate filter
-# is needed for those -- see PLAN.md's Park-canopy section).
+# mask AND the park-reach routing rule (both share citywide_park_shape_m())
+# -- roadside/traffic-island types, a locked scope decision: these aren't
+# "a park" for either purpose. Cemetery was excluded here too until
+# 2026-07-31: NONE-priority routes through two real cemeteries came back
+# 3.7-6.7% longer than OSRM/Valhalla/BRouter, all three of which route
+# straight through cemetery interior footways with no special-casing --
+# confirmed by inspecting all three engines' turn-by-turn (mostly-to-
+# entirely unnamed `highway=footway`, no access restriction). No routing
+# engine treats a cemetery path differently from a park path, so excluding
+# them here was a data gap, not a real product decision -- reclassified
+# from "deferred" to "just include them." Federal/state green land
+# (Green-Wood etc.) is a separate, still-open gap: those aren't even in
+# this NYC-Parks-only dataset, so no filter change here helps them -- see
+# PLAN.md's Park-canopy section.
+#
+# Blanket-excluded regardless of any property on the feature -- checked
+# directly against the real dataset (2026-08-08): Parkway in particular
+# still carries several properties whose OWN subcategory reads "Large
+# Park" or "Neighborhood Park" (Belt Parkway/Shore Parkway, 760 acres;
+# Richmond Parkway, 351 acres; Pelham/Mosholu/Eastern Parkway) -- real
+# highway medians, not walkable park interior, despite the park-like
+# label. The subcategory override below (PARK_LIKE_SUBCATEGORIES) does
+# NOT apply to these -- it would wrongly rescue ~1,300 acres of median.
 PARK_EXCLUDED_TYPECATEGORIES = frozenset({
-    "Parkway", "Mall", "Triangle/Plaza", "Strip",  # roadside/median slivers
-    "Cemetery",                                     # deferred follow-on
-    "Buildings/Institutions", "Lot", "Operations", "Retired N/A",  # not park land
+    "Parkway", "Strip",  # highway medians/rights-of-way
+    "Lot", "Operations", "Retired N/A",  # not park land, no bundling error found
+})
+
+# Typecategories where a real bundling error WAS found (2026-08-08,
+# FIXES.md item 1d): actual park land filed under a label meant for
+# something else (Theodore Roosevelt Park and Brooklyn Botanic Garden
+# under "Buildings/Institutions"; Grand Army Plaza under "Triangle/
+# Plaza"; Ocean Parkway Malls under "Mall"). For exactly these three,
+# park_polygon() checks the property's own `subcategory` instead of
+# excluding the whole typecategory outright -- see PARK_LIKE_SUBCATEGORIES.
+PARK_TYPECATEGORIES_NEEDING_SUBCATEGORY_CHECK = frozenset({
+    "Buildings/Institutions", "Triangle/Plaza", "Mall",
+})
+
+# `subcategory` values confirmed (2026-08-08) to mean real, walkable park
+# land wherever they appear on the typecategories above -- deliberately
+# narrow, only labels with an unambiguous real-park meaning (checked
+# directly against the dataset, not guessed). Excludes e.g. "Sitting
+# Area/Triangle/Mall" (the genuine traffic triangles Triangle/Plaza mostly
+# is), "Building"/"Recreation Center"/"Concession" (genuine buildings),
+# and ambiguous one-off labels ("Type 1", "Undeveloped", "REDEC") that
+# have no confirmed real-park example behind them.
+PARK_LIKE_SUBCATEGORIES = frozenset({
+    "Large Park", "Neighborhood Park", "Flagship Park", "Garden", "Neighborhood Plgd",
 })
 
 # Canopy fraction -> tree-density calibration (Phase 2 street audit: 750
@@ -384,7 +424,12 @@ SOCRATA_BASE_URL = "https://data.cityofnewyork.us/resource"
 TREES_DATASET_ID = "hn5i-inap"      # Forestry Tree Points — the live NYC Tree Map data
 PARKS_DATASET_ID = "enfh-gkve"      # Parks Properties — one polygon per NYC Parks property,
                                      # `typecategory` distinguishes real parkland from roadside
-                                     # slivers/cemeteries (see PARK_EXCLUDED_TYPECATEGORIES)
+                                     # slivers/non-park land (see PARK_EXCLUDED_TYPECATEGORIES)
+PARK_TRAILS_DATASET_ID = "vjbm-hsyr" # NYC Parks Trails — official park-interior trail
+                                     # centerlines, some missing from OSM entirely
+                                     # (FIXES.md item 1g); `class` distinguishes real,
+                                     # obvious paths (Class IV/V) from an unreliable
+                                     # lower tier (see PARK_TRAIL_CLASSES in streets.py)
 BOUNDARIES_DATASET_ID = "wh2p-dxnf" # Borough Boundaries (water areas included) — see PLAN.md:
                                      # a bridge's midspan sits over water, which the water-
                                      # EXCLUDED sibling dataset (gthc-hcne) doesn't cover --
