@@ -236,6 +236,39 @@ def test_bronx_route_no_longer_detours_around_a_stale_incomplete_fetch(citywide_
     )
 
 
+# --- Williamsburg Bridge: severed Brooklyn landing --------------------------
+# Found 2026-08-13 via the external-engine sanity check (batch 2): this
+# NONE-priority route came back 8,948m via the Manhattan Bridge while OSRM
+# and BRouter agreed around 4,824-4,843m via the Williamsburg Bridge. Root
+# cause: the walkway's Brooklyn end connected to the street grid only
+# through unnamed footway=sidewalk/crossing ways the centerline fetch
+# excludes, so the span dead-ended -- reachable from Manhattan, not from
+# Brooklyn. Fixed by the 2026-08-13 OSRM-verified KNOWN_NODE_GAPS batch
+# (dead-end 9990599477 bridged to the Bedford Ave/S 6th St corner, plus
+# neighboring verified pairs). Full story: FIXES.md item 1's third lead.
+
+
+@pytest.mark.citywide
+def test_williamsburg_bridge_route_crosses_it_instead_of_detouring(citywide_store):
+    """Pinned to the exact coordinates from the batch-2 finding, at
+    tree_weight=0 (NONE priority -- a pure connectivity check).
+
+    5,100m leaves real slack above the ~4,824-4,843m OSRM/BRouter consensus
+    (measured 4,919m right after the fix) while staying far below the
+    8,948m the severed landing was forcing before it."""
+    pair = citywide_store.snap_pair(40.711914, -73.978963, 40.722472, -73.962225)
+    assert pair is not None, "endpoints did not snap to a shared component"
+    start, end = pair
+    route = citywide_store.route(start, end, tree_weight=0.0, month=7)
+    assert route is not None, "the Williamsburg route no longer resolves at all"
+
+    assert route["length_m"] < 5100.0, (
+        f"LES->Williamsburg route detouring again instead of using the "
+        f"Williamsburg Bridge: {route['length_m']:.1f}m (OSRM/BRouter agree "
+        f"around 4,824-4,843m) via {[s['name'] for s in route['segments']]}"
+    )
+
+
 @pytest.mark.citywide
 def test_max_shade_prefers_central_park_south_over_the_block_one_south(citywide_store):
     """Central Park's own trees are Conservancy-managed and absent from the

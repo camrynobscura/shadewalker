@@ -247,21 +247,78 @@ _CURATED_KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
 ]
 
 
-def _load_known_node_gaps(path: Path) -> list[tuple[str, str, str]]:
-    """Load the bulk-verified batch from its own committed JSON file --
-    a flat array of [node_a, node_b, name] triples. Kept separate from
-    _CURATED_KNOWN_NODE_GAPS above: at ~14k entries this can't stay a
-    Python list literal the way the curated batch does, and unlike the
-    curated batch it has no individual per-entry story worth a comment --
-    each entry passed the 2026-08-01 near-coincident-node sweep's
-    building/barrier/PLUTO/Osmose checks, not a one-off manual lookup."""
-    entries = json.loads(path.read_text())
-    return [(a, b, name) for a, b, name in entries]
+def _load_known_node_gaps(path: Path) -> list[tuple[str, str, str, float | None]]:
+    """Load the bulk-verified batch from its own committed JSON file.
+    Two entry shapes coexist:
+
+    [node_a, node_b, name]            -- the 2026-08-01 four-signal batch;
+                                         all gaps <= 25m, so the bridge's
+                                         length is the chord (close enough
+                                         at that scale).
+    [node_a, node_b, name, length_m]  -- the 2026-08-13 OSRM-verified
+                                         dead-end-seam batch; gaps run up
+                                         to 100m, where a straight chord
+                                         understates the real walk, so the
+                                         length OSRM actually measured is
+                                         stored explicitly.
+
+    Kept separate from _CURATED_KNOWN_NODE_GAPS above: at ~14k entries
+    this can't stay a Python list literal the way the curated batch does,
+    and unlike the curated batch it has no individual per-entry story
+    worth a comment."""
+    out: list[tuple[str, str, str, float | None]] = []
+    for entry in json.loads(path.read_text()):
+        if len(entry) == 3:
+            node_a, node_b, name = entry
+            out.append((node_a, node_b, name, None))
+        else:
+            node_a, node_b, name, length_m = entry
+            out.append((node_a, node_b, name, float(length_m)))
+    return out
 
 
-KNOWN_NODE_GAPS: list[tuple[str, str, str]] = _CURATED_KNOWN_NODE_GAPS + _load_known_node_gaps(
-    Path(__file__).parent / "known_node_gaps.json"
+KNOWN_NODE_GAPS: list[tuple[str, str, str, float | None]] = [
+    (node_a, node_b, name, None) for node_a, node_b, name in _CURATED_KNOWN_NODE_GAPS
+] + _load_known_node_gaps(Path(__file__).parent / "known_node_gaps.json")
+
+
+def _load_phantom_connectors(path: Path) -> list[tuple[list[float], list[float], str]]:
+    """The inverse of KNOWN_NODE_GAPS: edges the imported-path layers
+    created that provably do NOT exist as walks in the real world --
+    connectors that jump a vertical boundary (a street node snapped onto
+    a bridge-deck path 30m overhead, with no stairs anywhere near). Each
+    entry was confirmed by the 2026-08-13 reverse-OSRM audit: OSRM either
+    can't walk between the edge's endpoints at all or needs hundreds of
+    meters where our edge claims a few. See FIXES.md item 0.
+
+    Entries are [[lon_a, lat_a], [lon_b, lat_b], note] -- endpoint
+    COORDINATES, not node ids, deliberately: the phantom edges' synthetic
+    node ids renumber on any re-export, and an id-keyed blocklist would
+    go silently stale (the vacuous-fixture failure mode all over again).
+    Coordinates come from the same source data, so they survive
+    re-exports; matching is by proximity (~2m) at load time."""
+    return [(a, b, note) for a, b, note in json.loads(path.read_text())]
+
+
+PHANTOM_CONNECTORS: list[tuple[list[float], list[float], str]] = _load_phantom_connectors(
+    Path(__file__).parent / "phantom_connectors.json"
 )
+
+
+def _is_phantom_connector(lon_u: float, lat_u: float, lon_v: float, lat_v: float) -> bool:
+    """Does this edge's endpoint pair match a PHANTOM_CONNECTORS entry
+    (either orientation, ~2m tolerance per endpoint)?"""
+    for (lon_a, lat_a), (lon_b, lat_b), _note in PHANTOM_CONNECTORS:
+        # cheap prefilter before the real distance math
+        if abs(lat_u - lat_a) > 0.0001 and abs(lat_u - lat_b) > 0.0001:
+            continue
+        if (_local_distance_m(lat_u, lon_u, lat_a, lon_a) <= 2.0
+                and _local_distance_m(lat_v, lon_v, lat_b, lon_b) <= 2.0):
+            return True
+        if (_local_distance_m(lat_u, lon_u, lat_b, lon_b) <= 2.0
+                and _local_distance_m(lat_v, lon_v, lat_a, lon_a) <= 2.0):
+            return True
+    return False
 
 
 def _local_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -472,6 +529,7 @@ class GraphStore:
         coords_per_edge: list[list[list[float]]] = []  # packed into _coord_buf after the loop
         seen_edges: dict[tuple, int] = {}  # (u, v, key, side) -> position in the lists above
         seen_geometries: set[tuple] = set()  # (u, v, side, geometry hash) -- see below
+        phantom_skipped = 0
 
         for path in tile_paths:
             tile = json.loads(gzip.open(path, "rt").read())
@@ -482,6 +540,16 @@ class GraphStore:
                     node_lonlat.append([lon, lat])
 
             for edge in tile["edges"]:
+                # Confirmed-phantom connectors (see PHANTOM_CONNECTORS)
+                # never enter the graph. Only short edges can match --
+                # every confirmed phantom is a <120m snap connector.
+                if edge["length_m"] <= 150.0 and PHANTOM_CONNECTORS:
+                    lon_u, lat_u = tile["nodes"][edge["u"]]
+                    lon_v, lat_v = tile["nodes"][edge["v"]]
+                    if _is_phantom_connector(lon_u, lat_u, lon_v, lat_v):
+                        phantom_skipped += 1
+                        continue
+
                 # Border edges appear in two neighboring tiles; a canonical
                 # (sorted) node pair makes both copies hash identically.
                 # Each tile scored its copy against only its own tree
@@ -533,15 +601,23 @@ class GraphStore:
                 names.append(edge["name"])
                 coords_per_edge.append(edge["coords"])
 
+        if phantom_skipped:
+            print(f"[graph_store] skipped {phantom_skipped} confirmed phantom connector(s)")
+
         bridged_count = 0
-        for node_a, node_b, gap_name in KNOWN_NODE_GAPS:
+        for node_a, node_b, gap_name, gap_length_m in KNOWN_NODE_GAPS:
             if node_a not in self._id_to_idx or node_b not in self._id_to_idx:
                 continue  # not in this dataset (e.g. the pilot-only test tile) -- skip quietly
             idx_a, idx_b = self._id_to_idx[node_a], self._id_to_idx[node_b]
             lon_a, lat_a = node_lonlat[idx_a]
             lon_b, lat_b = node_lonlat[idx_b]
             edge_pairs.append((idx_a, idx_b))
-            length.append(_local_distance_m(lat_a, lon_a, lat_b, lon_b))
+            # Entries with a measured length (OSRM's actual walk) use it;
+            # the rest fall back to the chord, honest at their <=25m scale.
+            if gap_length_m is not None:
+                length.append(gap_length_m)
+            else:
+                length.append(_local_distance_m(lat_a, lon_a, lat_b, lon_b))
             deciduous.append(0.0)
             evergreen.append(0.0)
             counts.append(0)

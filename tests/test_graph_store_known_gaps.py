@@ -23,7 +23,7 @@ from server.graph_store import GraphStore
 # The real ids from KNOWN_NODE_GAPS[0] -- reused here so the patch logic
 # under test actually fires, rather than testing a stand-in pair it would
 # never touch in production.
-GAP_NODE_A, GAP_NODE_B, GAP_NAME = graph_store.KNOWN_NODE_GAPS[0]
+GAP_NODE_A, GAP_NODE_B, GAP_NAME, _ = graph_store.KNOWN_NODE_GAPS[0]
 
 MAIN_NODES = {
     "m1": [-73.9900, 40.6800],
@@ -115,9 +115,20 @@ def test_every_known_node_gap_entry_is_well_formed():
     # catches a typo'd or accidentally-empty entry that the behavioral
     # tests above, which only exercise entry [0], wouldn't.
     seen_pairs = set()
-    for node_a, node_b, name in graph_store.KNOWN_NODE_GAPS:
+    for node_a, node_b, name, length_m in graph_store.KNOWN_NODE_GAPS:
         assert node_a and node_b and name
         assert node_a != node_b
+        # Measured lengths (the 2026-08-13 OSRM-verified batch) must be a
+        # sane bridge scale -- anything past 500m shouldn't be a bridge.
+        # One deliberate exception: Roosevelt Island Bridge (672m along
+        # the real roadway chain) -- the island's ONLY walking access,
+        # whose OSM sidewalk chain is mapped on the span but broken
+        # mid-chain (a digitization gap, the Cross Bay Bridge class), so
+        # the whole crossing needs one long bridge.
+        if frozenset((node_a, node_b)) == frozenset(("1242879136", "3785702957")):
+            assert length_m == 672.0
+        else:
+            assert length_m is None or 0.0 < length_m <= 500.0
         pair = frozenset((node_a, node_b))
         assert pair not in seen_pairs, f"duplicate gap entry: {node_a} <-> {node_b}"
         seen_pairs.add(pair)
@@ -128,7 +139,7 @@ def test_every_known_node_gap_entry_is_well_formed():
 # risk given the list grew from 1 entry to 25 in the same change: a
 # future refactor that stops after the first match would pass every
 # existing test above while silently leaving the other 24 unbridged).
-SECOND_GAP_NODE_A, SECOND_GAP_NODE_B, SECOND_GAP_NAME = next(
+SECOND_GAP_NODE_A, SECOND_GAP_NODE_B, SECOND_GAP_NAME, _ = next(
     entry for entry in graph_store.KNOWN_NODE_GAPS if entry[2] == "Bronx River Greenway"
 )
 
@@ -166,12 +177,21 @@ def test_load_bridges_a_second_known_node_gap_entry(tmp_path, monkeypatch):
 
 
 def test_known_node_gaps_load_from_an_external_file(tmp_path):
+    # Both entry shapes: the 3-element four-signal batch (length comes
+    # from the chord at load time) and the 4-element OSRM-verified batch
+    # (length measured, stored explicitly).
     data_path = tmp_path / "gaps.json"
-    data_path.write_text(json.dumps([["111", "222", "Test Gap"]]))
+    data_path.write_text(json.dumps([
+        ["111", "222", "Test Gap"],
+        ["333", "444", "Measured Gap", 87.0],
+    ]))
 
     loaded = graph_store._load_known_node_gaps(data_path)
 
-    assert loaded == [("111", "222", "Test Gap")]
+    assert loaded == [
+        ("111", "222", "Test Gap", None),
+        ("333", "444", "Measured Gap", 87.0),
+    ]
 
 
 def test_load_prints_one_summary_line_not_one_per_gap(tmp_path, monkeypatch, capsys):
@@ -193,15 +213,21 @@ def test_load_prints_one_summary_line_not_one_per_gap(tmp_path, monkeypatch, cap
 
 
 def test_bulk_verified_gaps_load_from_file_with_a_plain_label():
-    # The curated batch is hand-named (Cross Bay Bridge, Pulaski Bridge,
-    # ...); the bulk-verified batch isn't individually named at all, so it
-    # gets the same plain label the app already shows for any other
-    # anonymous segment (server/graph_store.py's `self._names[e] or
-    # "unnamed path"` fallback) rather than an invented debug string that
-    # would otherwise leak into a real user-facing route description.
+    # Bridge names leak into real user-facing route descriptions, so every
+    # bulk entry must carry either the plain "unnamed path" fallback (the
+    # 2026-08-01 four-signal batch, not individually named) or a real
+    # street/path name taken from the gap's own incident edges (the
+    # 2026-08-13 OSRM-verified batch) -- never an invented debug string.
     curated_names = {name for _, _, name in graph_store._CURATED_KNOWN_NODE_GAPS}
     assert "unnamed path" not in curated_names
 
     loaded_from_file = graph_store.KNOWN_NODE_GAPS[len(graph_store._CURATED_KNOWN_NODE_GAPS):]
     assert loaded_from_file, "expected the bulk-verified batch to be present"
-    assert all(name == "unnamed path" for _, _, name in loaded_from_file)
+    for _, _, name, length_m in loaded_from_file:
+        assert name, "a gap bridge must have a displayable name"
+        if length_m is None:
+            # four-signal batch: anonymous by design
+            assert name == "unnamed path"
+        else:
+            # OSRM-verified batch: real names allowed, debug strings not
+            assert "audit" not in name.lower() and "2026" not in name
