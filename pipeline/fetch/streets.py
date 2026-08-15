@@ -608,6 +608,11 @@ def _fetch_with_retry(bbox: Bbox, custom_filter: str, tile_id: str, label: str) 
     ConnectionError gets its own, separate handling (retry, not skip) --
     unlike ValueError, it says nothing about whether this tile has data,
     only that this one attempt to ask didn't reach the server.
+    ChunkedEncodingError is the same failure arriving later: the
+    connection dropped mid-response instead of at connect time. It is NOT
+    a ConnectionError subclass (both inherit RequestException directly),
+    so it needs its own mention -- learned when one killed a Queens
+    borough run at tile 76/155 (2026-08-15).
 
     simplify=False, NOT True (osmnx's own default): each of our three
     queries only ever sees the ways ITS OWN filter matched, so simplifying
@@ -629,16 +634,24 @@ def _fetch_with_retry(bbox: Bbox, custom_filter: str, tile_id: str, label: str) 
     see its own docstring.
     """
     for attempt in range(1, MAX_FETCH_RETRIES + 1):
+        started = time.monotonic()
         try:
-            return ox.graph_from_bbox(
+            graph = ox.graph_from_bbox(
                 bbox=(bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max),
                 custom_filter=custom_filter,
                 retain_all=True,
                 simplify=False,
             )
+            # Pure instrumentation (2026-08-14): per-query timing, to size
+            # the "fetch heavy layers citywide once" optimization from real
+            # data instead of guessing which of the seven queries dominates.
+            print(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, "
+                  f"{len(graph.edges)} edges")
+            return graph
         except ValueError:
+            print(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, empty")
             return None
-        except requests.exceptions.ConnectionError:
+        except (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError):
             if attempt == MAX_FETCH_RETRIES:
                 raise
             wait_s = FETCH_RETRY_BACKOFF_S * (2 ** (attempt - 1))

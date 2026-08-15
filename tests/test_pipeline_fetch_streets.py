@@ -156,6 +156,26 @@ def test_fetch_streets_retries_on_connection_error_then_succeeds(monkeypatch, tm
     assert calls["count"] == streets.MAX_FETCH_RETRIES
 
 
+def test_fetch_streets_retries_on_mid_response_drop_then_succeeds(monkeypatch, tmp_path):
+    # ChunkedEncodingError is a connection dying mid-response rather than
+    # at connect time; it is a RequestException sibling of ConnectionError,
+    # not a subclass, so an unlisted catch lets it kill a whole borough run
+    # (Queens tile 76/155, 2026-08-15).
+    fake_graph = nx.MultiDiGraph()
+    calls = {"count": 0}
+
+    def flaky(**kwargs):
+        calls["count"] += 1
+        if calls["count"] < streets.MAX_FETCH_RETRIES:
+            raise requests.exceptions.ChunkedEncodingError("Connection broken: IncompleteRead")
+        return fake_graph
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(flaky))
+    result = streets.fetch_streets(BBOX, "test-midstream-drop-tile")
+    assert list(result.nodes) == []
+    assert calls["count"] == streets.MAX_FETCH_RETRIES
+
+
 def test_fetch_streets_raises_after_exhausting_retries(monkeypatch, tmp_path):
     def always_fails(**kwargs):
         raise requests.exceptions.ConnectionError("connection refused")
