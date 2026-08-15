@@ -219,6 +219,17 @@ _CURATED_KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
     ("739651503", "11622964702", "Pulaski Bridge"),
     ("9690694933", "11211160285", "Pulaski Bridge"),
 
+    # Ed Koch Queensboro Bridge Outer Roadway -- found 2026-08-15 by the
+    # 100-route external batch (5/5 flagged routes were this one gap; the
+    # path was a 3-node + 2-node island pair, forcing every midtown<->LIC
+    # walk 4km north over the RFK). Three joints, each verified by
+    # way-membership (no deck-to-ground pair; the one deck-vs-ground
+    # candidate 24.7m mid-span was correctly REJECTED) + OSRM advisory
+    # (4m/28m/9m walks) before shipping, per FIXES item 1's rule:
+    ("7792410664", "13892069996", "Queensboro Bridge Outer Roadway"),   # Manhattan entrance, 4.8m
+    ("3785648023", "2089938144", "Queensboro Bridge Outer Roadway"),    # anchorage ramp joint, 28.8m
+    ("8315072991", "11520108686", "Queensboro Bridge Outer Roadway"),   # Crescent St touchdown, 17.4m
+
     # Tile-boundary truncation gaps -- see the comment above.
     #
     # The 2026-08-15 post-v19 dead-entry audit
