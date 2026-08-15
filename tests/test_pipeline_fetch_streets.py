@@ -24,9 +24,19 @@ from shapely.geometry import LineString, box
 
 from pipeline import config
 from pipeline.config import Bbox
-from pipeline.fetch import park_trails, streets
+from pipeline.fetch import citywide_layers, park_trails, streets
 
 BBOX = Bbox(lat_min=40.0, lat_max=40.1, lon_min=-74.0, lon_max=-73.9)
+
+
+def _isolate_citywide_layers(monkeypatch, tmp_path):
+    """Point the citywide layer cache at a temp dir and clear the
+    per-process memo -- without this, one test's mocked layer would leak
+    into every later test in the session (the memo is deliberately
+    process-lived in production), and marker files would land in the real
+    data/raw/citywide_layers/."""
+    monkeypatch.setattr(citywide_layers, "CACHE_DIR", tmp_path / "citywide_layers")
+    monkeypatch.setattr(citywide_layers, "_MEMO", {})
 
 
 def _mock_fetch(monkeypatch, tmp_path, graph_from_bbox):
@@ -34,6 +44,7 @@ def _mock_fetch(monkeypatch, tmp_path, graph_from_bbox):
     monkeypatch.setattr(streets.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(streets.ox, "graph_from_bbox", graph_from_bbox)
     monkeypatch.setattr(streets.ox, "save_graphml", lambda graph, path: None)
+    _isolate_citywide_layers(monkeypatch, tmp_path)
     # Defaults to "no trails here" (the common real case) unless a test
     # overrides it -- unlike interior_sidewalks.fetch_interior_sidewalks,
     # nothing else in this suite implicitly relies on a real cache file
@@ -225,8 +236,12 @@ def test_fetch_streets_unions_in_foot_designated_cycleways(monkeypatch, tmp_path
     main_graph = nx.MultiDiGraph()
     main_graph.add_node("m1", x=0.0, y=0.0)
 
+    # In-BBOX coordinates on purpose: aux results now arrive as slices of
+    # a citywide layer (FIXES item 6b), and the slice keeps only nodes
+    # inside the tile's bbox -- a node parked at (1, 1) would be sliced
+    # away before fetch_streets ever composed it.
     cycleway_graph = nx.MultiDiGraph()
-    cycleway_graph.add_node("c1", x=1.0, y=1.0)
+    cycleway_graph.add_node("c1", x=-73.951, y=40.051)
 
     def cycleway_fn(**kwargs):
         assert kwargs.get("custom_filter") == streets.CYCLEWAY_FILTER
@@ -262,7 +277,7 @@ def test_fetch_streets_unions_in_foot_designated_access_override_ways(monkeypatc
     main_graph.add_node("m1", x=0.0, y=0.0)
 
     override_graph = nx.MultiDiGraph()
-    override_graph.add_node("a1", x=2.0, y=2.0)
+    override_graph.add_node("a1", x=-73.952, y=40.052)  # in-BBOX: see cycleway test
 
     def access_override_fn(**kwargs):
         assert kwargs.get("custom_filter") == streets.FOOT_OVERRIDES_ACCESS_FILTER
@@ -295,11 +310,11 @@ def test_fetch_streets_simplifies_once_after_composing_all_five_results(monkeypa
     main_graph = nx.MultiDiGraph()
     main_graph.add_node("m1", x=0.0, y=0.0)
     cycleway_graph = nx.MultiDiGraph()
-    cycleway_graph.add_node("c1", x=1.0, y=1.0)
+    cycleway_graph.add_node("c1", x=-73.951, y=40.051)  # in-BBOX: see cycleway test
     override_graph = nx.MultiDiGraph()
-    override_graph.add_node("a1", x=2.0, y=2.0)
+    override_graph.add_node("a1", x=-73.952, y=40.052)
     named_sidewalk_graph = nx.MultiDiGraph()
-    named_sidewalk_graph.add_node("n1", x=3.0, y=3.0)
+    named_sidewalk_graph.add_node("n1", x=-73.953, y=40.053)
     any_sidewalk_graph = nx.MultiDiGraph()
     any_sidewalk_graph.add_node("s1", x=-73.95, y=40.05)
     any_sidewalk_graph.add_node("s2", x=-73.9501, y=40.0501)
@@ -357,7 +372,7 @@ def test_fetch_streets_unions_in_named_sidewalk_tagged_park_paths(monkeypatch, t
     main_graph.add_node("m1", x=0.0, y=0.0)
 
     named_sidewalk_graph = nx.MultiDiGraph()
-    named_sidewalk_graph.add_node("n1", x=3.0, y=3.0)
+    named_sidewalk_graph.add_node("n1", x=-73.953, y=40.053)  # in-BBOX: see cycleway test
 
     def named_sidewalk_fn(**kwargs):
         assert kwargs.get("custom_filter") == streets.NAMED_SIDEWALK_FILTER
@@ -551,6 +566,7 @@ def _cache_roundtrip(monkeypatch, tmp_path, cached_graph, recorded_bbox_signatur
     rather than being asserted against a mock's in-memory dict."""
     monkeypatch.setattr(streets, "STREETS_DIR", tmp_path)
     monkeypatch.setattr(streets.time, "sleep", lambda seconds: None)
+    _isolate_citywide_layers(monkeypatch, tmp_path)
 
     if recorded_bbox_signature is not None:
         cached_graph.graph["fetch_bbox"] = recorded_bbox_signature
@@ -784,8 +800,11 @@ def test_fetch_streets_caches_park_reach_and_plain_results_under_different_names
     streets.fetch_streets(BBOX, "test-cache-variant-tile", park_reach=_park_reach_around(-73.95, 40.05))
     streets.fetch_streets(BBOX, "test-cache-variant-tile")
 
-    assert len(saved) == 2
-    assert saved[0] != saved[1]
+    # save_graphml also fires for the citywide layer caches now (item 6b)
+    # -- only the two TILE cache writes are under test here.
+    saved_tiles = [path for path in saved if "test-cache-variant-tile" in str(path)]
+    assert len(saved_tiles) == 2
+    assert saved_tiles[0] != saved_tiles[1]
 
 
 # FIXES.md item 1b: parking_aisle ways are excluded from WALK_FILTER
@@ -1583,6 +1602,157 @@ def test_fetch_streets_fetches_barrier_ways_once_for_both_interior_sidewalks_and
     streets.fetch_streets(BBOX, "test-shared-barrier-fetch-tile")
 
     assert barrier_calls["count"] == 1
+
+
+# ---- citywide auxiliary layers (FIXES.md item 6b) ---------------------------
+# The six auxiliary queries are fetched once citywide and sliced per tile
+# (see pipeline/fetch/citywide_layers.py for the measured why: every
+# Overpass query costs ~25s regardless of result size, and the six were
+# 78.4% of all fetch wait in the v19 refetch). The slice must be a drop-in
+# replacement for the per-tile query it replaced -- same truncation
+# semantics as ox.graph_from_bbox (boundary-inclusive node test, isolated
+# nodes kept) -- and Overpass must be asked once per layer per process, not
+# once per tile.
+
+
+def test_aux_layer_slice_keeps_only_nodes_inside_the_tile_bbox(monkeypatch, tmp_path):
+    _isolate_citywide_layers(monkeypatch, tmp_path)
+    citywide = nx.MultiDiGraph()
+    citywide.add_node("in_a", x=-73.95, y=40.05)
+    citywide.add_node("in_b", x=-73.951, y=40.051)
+    citywide.add_edge("in_a", "in_b")
+    citywide.add_node("far_a", x=-73.99, y=40.60)  # another tile's data
+    citywide.add_node("far_b", x=-73.991, y=40.601)
+    citywide.add_edge("far_a", "far_b")
+    citywide_layers._MEMO["cycleways"] = citywide
+
+    sliced = streets._aux_layer_graph(BBOX, "test-slice-tile", "cycleways")
+
+    assert set(sliced.nodes) == {"in_a", "in_b"}
+    assert sliced.number_of_edges() == 1
+
+
+def test_aux_layer_slice_is_boundary_inclusive_and_keeps_isolated_nodes(monkeypatch, tmp_path):
+    # osmnx's own truncation admits boundary points (a shapely intersects
+    # test) and leaves isolated nodes in place (a way crossing the bbox
+    # edge keeps its inside nodes even when every neighbor is outside) --
+    # today's composed tile graphs genuinely contain both cases, so the
+    # slice must reproduce them, not "clean them up".
+    _isolate_citywide_layers(monkeypatch, tmp_path)
+    citywide = nx.MultiDiGraph()
+    citywide.add_node("on_edge", x=BBOX.lon_min, y=BBOX.lat_min)
+    citywide.add_node("inside_isolated", x=-73.95, y=40.05)
+    citywide.add_node("outside", x=-73.95, y=40.2)
+    citywide.add_edge("inside_isolated", "outside")
+    citywide_layers._MEMO["barriers"] = citywide
+
+    sliced = streets._aux_layer_graph(BBOX, "test-boundary-tile", "barriers")
+
+    assert set(sliced.nodes) == {"on_edge", "inside_isolated"}
+    assert sliced.number_of_edges() == 0
+
+
+def test_aux_layer_slice_returns_none_when_nothing_falls_inside(monkeypatch, tmp_path):
+    _isolate_citywide_layers(monkeypatch, tmp_path)
+    citywide = nx.MultiDiGraph()
+    citywide.add_node("far", x=-73.95, y=40.7)
+    citywide_layers._MEMO["parking_aisles"] = citywide
+
+    assert streets._aux_layer_graph(BBOX, "test-empty-slice-tile", "parking_aisles") is None
+
+
+def test_aux_layers_ask_overpass_once_per_layer_per_process_not_per_tile(monkeypatch, tmp_path):
+    # The entire point of item 6b: measured 714 minutes of Overpass wait
+    # across the v19 refetch, 78.4% of it these six queries repeated per
+    # tile.
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=-73.95, y=40.05)
+
+    cycleway_calls = {"count": 0}
+
+    def cycleway_fn(**kwargs):
+        cycleway_calls["count"] += 1
+        graph = nx.MultiDiGraph()
+        graph.add_node("c1", x=-73.951, y=40.051)
+        return graph
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph, cycleway_fn))
+    streets.fetch_streets(BBOX, "test-layer-once-tile-a")
+    streets.fetch_streets(BBOX, "test-layer-once-tile-b")
+
+    assert cycleway_calls["count"] == 1
+
+
+def test_citywide_layer_disk_cache_survives_a_new_process(monkeypatch, tmp_path):
+    # The memo only lives per process; the graphml cache is what saves the
+    # NEXT borough run (or a resumed one) from re-fetching every layer.
+    # Round-trips through osmnx's real save/load, same reasoning as
+    # _cache_roundtrip above.
+    _isolate_citywide_layers(monkeypatch, tmp_path)
+    fetches = {"count": 0}
+
+    def fake_fetch(**kwargs):
+        fetches["count"] += 1
+        graph = nx.MultiDiGraph(crs="epsg:4326")
+        graph.add_node(1111, x=-73.95, y=40.05)  # int id: osmnx casts on load
+        return graph
+
+    monkeypatch.setattr(citywide_layers.ox, "graph_from_bbox", fake_fetch)
+
+    first = citywide_layers.citywide_layer("cycleways", "unused-filter", 99)
+    citywide_layers._MEMO.clear()  # simulate a new process
+    second = citywide_layers.citywide_layer("cycleways", "unused-filter", 99)
+
+    assert fetches["count"] == 1
+    assert 1111 in first.nodes
+    assert 1111 in second.nodes
+
+
+def test_citywide_layer_refetches_when_the_recorded_bbox_no_longer_matches(monkeypatch, tmp_path):
+    # Same discipline as the per-tile cache's fetch_bbox guard: the
+    # filename can't be trusted after a CITY_BBOX/grid redefinition (the
+    # r17c14 lesson -- see streets._bbox_signature).
+    _isolate_citywide_layers(monkeypatch, tmp_path)
+    fetches = {"count": 0}
+
+    def fake_fetch(**kwargs):
+        fetches["count"] += 1
+        graph = nx.MultiDiGraph(crs="epsg:4326")
+        graph.add_node(1111, x=-73.95, y=40.05)
+        return graph
+
+    monkeypatch.setattr(citywide_layers.ox, "graph_from_bbox", fake_fetch)
+
+    citywide_layers.citywide_layer("cycleways", "unused-filter", 99)
+    citywide_layers._MEMO.clear()
+    monkeypatch.setattr(
+        citywide_layers, "_layer_fetch_bbox",
+        lambda: Bbox(lat_min=41.0, lat_max=41.5, lon_min=-74.0, lon_max=-73.5),
+    )
+    citywide_layers.citywide_layer("cycleways", "unused-filter", 99)
+
+    assert fetches["count"] == 2
+
+
+def test_citywide_layer_caches_an_empty_layer_without_reasking(monkeypatch, tmp_path):
+    # "The filter matched nothing citywide" is a real answer -- the marker
+    # file keeps a fresh process from re-asking Overpass for it.
+    _isolate_citywide_layers(monkeypatch, tmp_path)
+    fetches = {"count": 0}
+
+    def fake_fetch(**kwargs):
+        fetches["count"] += 1
+        raise ValueError("nothing matched citywide")
+
+    monkeypatch.setattr(citywide_layers.ox, "graph_from_bbox", fake_fetch)
+
+    first = citywide_layers.citywide_layer("foot_overrides", "unused-filter", 99)
+    citywide_layers._MEMO.clear()
+    second = citywide_layers.citywide_layer("foot_overrides", "unused-filter", 99)
+
+    assert first is None
+    assert second is None
+    assert fetches["count"] == 1
 
 
 # ---- closure zones (FIXES.md item 0b, v19) --------------------------------
