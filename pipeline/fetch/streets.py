@@ -16,10 +16,14 @@ fragments (WALK_FILTER, below) -- plus a narrow second query
 (CYCLEWAY_FILTER) for the shared foot+bike paths some bridge landings use
 instead of a footway. One edge per block, carrying its street name.
 
-Caching is two-layer:
-  1. osmnx's own HTTP cache (raw Overpass responses) in data/raw/osmnx_cache
-  2. our per-tile GraphML file in data/raw/streets/ — GraphML is a standard
+Caching (osmnx's own HTTP cache is deliberately disabled -- see the
+ox.settings.use_cache comment below):
+  1. our per-tile GraphML file in data/raw/streets/ — GraphML is a standard
      XML graph format; loading it back skips all network + assembly work.
+  2. one-shot citywide GraphML caches for the six auxiliary layers in
+     data/raw/citywide_layers/ (FIXES item 6b) — each tile slices its own
+     bbox out in memory instead of re-asking Overpass, leaving WALK_FILTER
+     as the only per-tile query. See pipeline/fetch/citywide_layers.py.
 """
 
 import json
@@ -37,7 +41,7 @@ from shapely.strtree import STRtree
 
 from pipeline import config
 from pipeline.config import Bbox
-from pipeline.fetch import interior_sidewalks, park_trails
+from pipeline.fetch import citywide_layers, interior_sidewalks, park_trails
 from pipeline.graph import vertical_audit
 from pipeline.graph.centerline import METRIC_CRS
 
@@ -141,6 +145,18 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # can't reach the needed precision; removal stays evidence-gated in the
 # server's coordinate blocklist). All four are baked into the fetched
 # graph, hence one shared bump.
+# 2026-08-15 (FIXES item 6b): the six auxiliary queries moved from
+# per-tile Overpass fetches to slices of one-shot citywide layer caches
+# (pipeline/fetch/citywide_layers.py) with deliberately NO bump -- a
+# fetch-mechanism change, not a content change. Verified by building five
+# diverse tiles both ways and diffing at primitive-segment level: every
+# real OSM segment identical, component counts identical, total length
+# exact on four tiles and within 0.1m of 248km on the fifth; the only
+# residue is synthetic-id labels and sub-meter weld-connector
+# representation in dense imported-path areas -- the same order-dependent
+# tie-breaks that already shift on every refetch (HISTORY 2026-08-15).
+# The layer caches key on this same version, so any future filter change
+# (which always bumps this) invalidates them too.
 GRAPH_CACHE_VERSION = 19
 
 # Overpass's public instance drops connections intermittently under sustained
@@ -380,6 +396,24 @@ PARKING_AISLE_FILTER = (
 # "gate"/"lift_gate"/"bollard" (those mark an intentional passage point,
 # not a permanent block).
 BARRIER_FILTER = '["barrier"~"fence|wall|hedge|retaining_wall|chain|city_wall"]'
+
+# FIXES item 6b (2026-08-15): the six auxiliary filters above are no
+# longer queried per tile -- each is fetched ONCE citywide (see
+# pipeline/fetch/citywide_layers.py for the measured why) and every tile
+# slices its own bbox out in memory via _aux_layer_graph(). The slice is
+# behavior-identical to the per-tile query it replaced (verified by
+# building sample tiles both ways and diffing -- see HISTORY 2026-08-15);
+# only the main WALK_FILTER query still goes to Overpass per tile.
+# Keys here are the layer cache filenames; labels match the old per-tile
+# [timing] output so log tooling keeps working.
+CITYWIDE_LAYERS = {
+    "cycleways": (CYCLEWAY_FILTER, "foot-designated cycleways"),
+    "foot_overrides": (FOOT_OVERRIDES_ACCESS_FILTER, "foot-designated access=no/private ways"),
+    "named_sidewalks": (NAMED_SIDEWALK_FILTER, "named park paths tagged footway=sidewalk"),
+    "any_sidewalks": (ANY_SIDEWALK_FILTER, "sidewalk-tagged ways near parks"),
+    "parking_aisles": (PARKING_AISLE_FILTER, "parking aisles"),
+    "barriers": (BARRIER_FILTER, "barrier ways"),
+}
 
 # How close two interior-sidewalk segments' endpoints need to be to count
 # as the same real point when stitching a tile's segments together (see
@@ -658,6 +692,49 @@ def _fetch_with_retry(bbox: Bbox, custom_filter: str, tile_id: str, label: str) 
             print(f"  [streets] {tile_id}: connection error fetching {label} "
                   f"(attempt {attempt}/{MAX_FETCH_RETRIES}), retrying in {wait_s}s...")
             time.sleep(wait_s)
+
+
+def _aux_layer_graph(bbox: Bbox, tile_id: str, layer_name: str) -> nx.MultiDiGraph | None:
+    """This tile's slice of one citywide auxiliary layer (FIXES item 6b)
+    -- a drop-in replacement for the per-tile Overpass query it replaced,
+    so it must reproduce ox.graph_from_bbox's own truncation exactly:
+    keep every node whose point lies inside bbox (boundary-INCLUSIVE --
+    osmnx truncates with a shapely intersects test, which admits boundary
+    points) plus every edge between two kept nodes, isolated nodes
+    included (osmnx truncation leaves those in place too, and today's
+    composed graphs genuinely contain them). None when no nodes fall
+    inside, matching _fetch_with_retry's None-for-empty convention (osmnx
+    surfaces that case as a ValueError).
+
+    The [timing] print is kept -- it now measures the slice (plus, on the
+    first tile of a run, the one-time citywide fetch/load it triggers),
+    so the same log-scraping that measured item 6b can measure its
+    payoff.
+    """
+    custom_filter, label = CITYWIDE_LAYERS[layer_name]
+    started = time.monotonic()
+    layer = citywide_layers.citywide_layer(layer_name, custom_filter, GRAPH_CACHE_VERSION)
+    if layer is None:
+        print(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, empty")
+        return None
+
+    keep = [
+        node for node, data in layer.nodes(data=True)
+        if bbox.lon_min <= data["x"] <= bbox.lon_max
+        and bbox.lat_min <= data["y"] <= bbox.lat_max
+    ]
+    if not keep:
+        print(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, empty")
+        return None
+
+    sliced = layer.subgraph(keep).copy()
+    # The layer's own graph-level attrs ride along on the copy; fetch_bbox
+    # in particular would otherwise leak through nx.compose (second graph's
+    # attrs win) and misdescribe the tile until fetch_streets overwrites it.
+    sliced.graph.pop("fetch_bbox", None)
+    print(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, "
+          f"{len(sliced.edges)} edges")
+    return sliced
 
 
 def _bbox_signature(bbox: Bbox) -> str:
@@ -1281,19 +1358,15 @@ def fetch_streets(
     # error -- most tiles have neither, and that's fine: street_graph
     # alone is a complete, valid result.
     graph = street_graph
-    cycleway_graph = _fetch_with_retry(bbox, CYCLEWAY_FILTER, tile_id, "foot-designated cycleways")
+    cycleway_graph = _aux_layer_graph(bbox, tile_id, "cycleways")
     if cycleway_graph is not None:
         graph = nx.compose(graph, cycleway_graph)
 
-    access_override_graph = _fetch_with_retry(
-        bbox, FOOT_OVERRIDES_ACCESS_FILTER, tile_id, "foot-designated access=no/private ways"
-    )
+    access_override_graph = _aux_layer_graph(bbox, tile_id, "foot_overrides")
     if access_override_graph is not None:
         graph = nx.compose(graph, access_override_graph)
 
-    named_sidewalk_graph = _fetch_with_retry(
-        bbox, NAMED_SIDEWALK_FILTER, tile_id, "named park paths tagged footway=sidewalk"
-    )
+    named_sidewalk_graph = _aux_layer_graph(bbox, tile_id, "named_sidewalks")
     if named_sidewalk_graph is not None:
         graph = nx.compose(graph, named_sidewalk_graph)
 
@@ -1303,9 +1376,7 @@ def fetch_streets(
     # docstring.
     any_sidewalk_graph = None
     if park_reach is not None:
-        any_sidewalk_graph = _fetch_with_retry(
-            bbox, ANY_SIDEWALK_FILTER, tile_id, "sidewalk-tagged ways near parks"
-        )
+        any_sidewalk_graph = _aux_layer_graph(bbox, tile_id, "any_sidewalks")
         park_sidewalk_graph = _park_reach_sidewalks(any_sidewalk_graph, park_reach, tile_id)
         if park_sidewalk_graph is not None:
             graph = nx.compose(graph, park_sidewalk_graph)
@@ -1315,7 +1386,7 @@ def fetch_streets(
     # ordering as park-reach sidewalks above -- filtering afterwards would
     # strand intersection nodes the same way, see _park_reach_sidewalks()'s
     # own measured comment on this.
-    parking_aisle_graph = _fetch_with_retry(bbox, PARKING_AISLE_FILTER, tile_id, "parking aisles")
+    parking_aisle_graph = _aux_layer_graph(bbox, tile_id, "parking_aisles")
     through_path_aisles = _through_path_parking_aisles(graph, parking_aisle_graph, tile_id)
     if through_path_aisles is not None:
         graph = nx.compose(graph, through_path_aisles)
@@ -1339,7 +1410,7 @@ def fetch_streets(
     interior_segments = _interior_sidewalks_for_tile(interior_geojson, bbox)
     interior_graph = _build_interior_sidewalk_graph(interior_segments, tile_id)
     if interior_graph is not None:
-        barrier_graph = _fetch_with_retry(bbox, BARRIER_FILTER, tile_id, "barrier ways")
+        barrier_graph = _aux_layer_graph(bbox, tile_id, "barriers")
         barrier_fetched = True
         graph = _snap_interior_sidewalks(graph, interior_graph, barrier_graph, tile_id)
 
@@ -1357,7 +1428,7 @@ def fetch_streets(
     trail_graph = _missing_park_trail_graph(graph, trail_lines, tile_id)
     if trail_graph is not None:
         if not barrier_fetched:
-            barrier_graph = _fetch_with_retry(bbox, BARRIER_FILTER, tile_id, "barrier ways")
+            barrier_graph = _aux_layer_graph(bbox, tile_id, "barriers")
             barrier_fetched = True
         graph = _snap_interior_sidewalks(
             graph, trail_graph, barrier_graph, tile_id,

@@ -17,6 +17,37 @@ from pipeline import config
 from server.app import app
 from server.graph_store import GraphStore
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-external", action="store_true", default=False,
+        help="run the external-engine discovery harness (LIVE third-party "
+             "calls at ~1 req/s -- see tests/test_external_validation.py)",
+    )
+    parser.addoption(
+        "--external-pairs", type=int, default=30,
+        help="how many random pairs the external discovery batch compares",
+    )
+    parser.addoption(
+        "--external-seed", type=int, default=None,
+        help="seed for the external discovery batch (default: fresh entropy, printed)",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """`external` tests are opt-in via an explicit flag, NOT just the marker:
+    marker expressions compose badly with addopts (a routine
+    `-m "not citywide"` would otherwise silently re-enable live third-party
+    traffic), so the gate is a flag no invocation passes by accident."""
+    if config.getoption("--run-external"):
+        return
+    skip = pytest.mark.skip(
+        reason="live external-engine calls only run with --run-external"
+    )
+    for item in items:
+        if "external" in item.keywords:
+            item.add_marker(skip)
+
+
 # The committed pilot-tile fixture. It lives under tests/, not data/tiles/,
 # so the production server (which loads every *.json.gz in data/tiles/) can
 # never pick it up by accident -- that actually happened: the fixture's
