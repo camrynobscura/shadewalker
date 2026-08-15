@@ -251,5 +251,126 @@
    40.704476
   ],
   "Manhattan Bridge walkway deck vs DUMBO streets below"
+ ],
+ [
+  [
+   -74.008115,
+   40.740399
+  ],
+  [
+   -74.008015,
+   40.74085
+  ],
+  "High Line mid-span weld, no stairs at pins (field check B5, 2026-08-14)"
+ ],
+ [
+  [
+   -74.007893,
+   40.741391
+  ],
+  [
+   -74.008015,
+   40.74085
+  ],
+  "High Line mid-span weld, same site as B5 (field check B6, 2026-08-14)"
+ ],
+ [
+  [
+   -73.962141,
+   40.802646
+  ],
+  [
+   -73.962257,
+   40.802485
+  ],
+  "elevated footway weld, levels not connected (field check B7/B8, 2026-08-14)"
+ ],
+ [
+  [
+   -73.934041,
+   40.819369
+  ],
+  [
+   -73.933955,
+   40.818828
+  ],
+  "145th Street Bridge weld, no connection at pins (field check B9, 2026-08-14)"
+ ],
+ [
+  [
+   -73.923955,
+   40.87673
+  ],
+  [
+   -73.923308,
+   40.876553
+  ],
+  "Inwood: elevated Henry Hudson Bridge walkway <-> ground trail, no ramp at pins (field check C10, 2026-08-14)"
+ ],
+ [
+  [
+   -73.936151,
+   40.829122
+  ],
+  [
+   -73.936388,
+   40.828803
+  ],
+  "Highbridge Park: elevated footway <-> ground, court/viaduct don't meet (field check C11, 2026-08-14)"
+ ],
+ [
+  [
+   -73.936076,
+   40.829218
+  ],
+  [
+   -73.936151,
+   40.829122
+  ],
+  "Highbridge Park loose phantom-list edge, confirmed no connection (field check D, 2026-08-14)"
+ ],
+ [
+  [
+   -73.936322,
+   40.829323
+  ],
+  [
+   -73.936076,
+   40.829218
+  ],
+  "Highbridge Park loose phantom-list edge, confirmed no connection (field check D, 2026-08-14)"
+ ],
+ [
+  [
+   -73.936322,
+   40.829323
+  ],
+  [
+   -73.936392,
+   40.829229
+  ],
+  "Highbridge Park loose phantom-list edge, confirmed no connection (field check D, 2026-08-14)"
+ ],
+ [
+  [
+   -73.936775,
+   40.829873
+  ],
+  [
+   -73.936322,
+   40.829323
+  ],
+  "Highbridge Park loose phantom-list edge, confirmed no connection (field check D, 2026-08-14)"
+ ],
+ [
+  [
+   -73.94473,
+   40.846542
+  ],
+  [
+   -73.944663,
+   40.846714
+  ],
+  "footbridge-area weld, OSM walk 344m > 300m harm bar + user field check B10 (2026-08-14)"
  ]
 ]

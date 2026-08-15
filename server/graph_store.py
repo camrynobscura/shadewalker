@@ -219,30 +219,42 @@ _CURATED_KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
     ("739651503", "11622964702", "Pulaski Bridge"),
     ("9690694933", "11211160285", "Pulaski Bridge"),
 
+    # Ed Koch Queensboro Bridge Outer Roadway -- found 2026-08-15 by the
+    # 100-route external batch (5/5 flagged routes were this one gap; the
+    # path was a 3-node + 2-node island pair, forcing every midtown<->LIC
+    # walk 4km north over the RFK). Three joints, each verified by
+    # way-membership (no deck-to-ground pair; the one deck-vs-ground
+    # candidate 24.7m mid-span was correctly REJECTED) + OSRM advisory
+    # (4m/28m/9m walks) before shipping, per FIXES item 1's rule:
+    ("7792410664", "13892069996", "Queensboro Bridge Outer Roadway"),   # Manhattan entrance, 4.8m
+    ("3785648023", "2089938144", "Queensboro Bridge Outer Roadway"),    # anchorage ramp joint, 28.8m
+    ("8315072991", "11520108686", "Queensboro Bridge Outer Roadway"),   # Crescent St touchdown, 17.4m
+
     # Tile-boundary truncation gaps -- see the comment above.
+    #
+    # The 2026-08-15 post-v19 dead-entry audit
+    # (data/audits/2026-08-15/curated_gap_verdicts.py) retired ten
+    # entries here whose gaps the v19 data now walks directly (walk within
+    # ~1.1x of straight-line at the same coords -- the cycleway widening
+    # made the greenways themselves routable), and re-derived two whose
+    # gap is still real but whose node id fell out of the v19 export
+    # (both ids verified alive in OSM; simplification absorbed them):
     ("9191842218", "9191842217", "Manhattan Bridge Pedestrian Path"),
-    ("3564754694", "11638917883", "Manhattan Bridge Pedestrian Path"),
-    ("246651644", "12161232284", "Hudson River Park Esplanade"),
+    # Re-derived 2026-08-15: was 11638917883, v19 node 1.7m away.
+    ("3564754694", "8279851182", "Manhattan Bridge Pedestrian Path"),
     ("12644027075", "12152905164", "Hudson River Park Esplanade"),
     ("8729985306", "12198069447", "Bronx River Greenway"),
     ("1024175662", "3616599502", "Mosholu-Pelham Greenway"),
-    ("11037604160", "11037604159", "East River Esplanade"),
     ("387181476", "387181479", "East River Esplanade"),
     ("7782217038", "6304586882", "East River Esplanade"),
     ("348444405", "2350521367", "Harlem River Pathway"),
-    ("10125049230", "608494469", "Flatbush Avenue Greenway"),
-    ("466530316", "608494950", "Flatbush Avenue Greenway"),
     ("466530316", "2356694584", "Flatbush Avenue Greenway"),
-    ("10125049230", "2356694586", "Flatbush Avenue Greenway"),
-    ("10125049229", "10125049224", "Flatbush Avenue Greenway"),
-    ("10125049230", "10125049231", "Flatbush Avenue Greenway"),
-    ("10125049230", "10125049233", "Flatbush Avenue Greenway"),
     ("401828152", "401828132", "Harlem River Drive Greenway"),
-    ("10032649492", "12036632939", "Leif Ericson Park Greenway"),
     ("1100356499", "8151268693", "Putnam Greenway"),
     ("2346900217", "2346900228", "Pugsley Creek Greenway"),
-    ("2557285537", "608513702", "Park Drive Greenway"),
-    ("608491459", "6382627345", "Jamaica Bay Greenway"),
+    # Re-derived 2026-08-15: was 608491459, v19 node 1.3m away; the gap
+    # still forces a 7.8km detour on the Jamaica Bay Greenway without it.
+    ("12472019883", "6382627345", "Jamaica Bay Greenway"),
     ("42830977", "608478724", "Cross Bay Bridge"),
 ]
 
@@ -605,9 +617,19 @@ class GraphStore:
             print(f"[graph_store] skipped {phantom_skipped} confirmed phantom connector(s)")
 
         bridged_count = 0
+        dangling: list[tuple[str, str, str]] = []
         for node_a, node_b, gap_name, gap_length_m in KNOWN_NODE_GAPS:
             if node_a not in self._id_to_idx or node_b not in self._id_to_idx:
-                continue  # not in this dataset (e.g. the pilot-only test tile) -- skip quietly
+                # Not in this dataset. Two very different situations share
+                # this branch, told apart by proportion below: a PARTIAL
+                # dataset (the pilot-only test tile misses ~14k entries --
+                # normal, quiet) vs. a citywide load where a refetch's OSM
+                # drift orphaned entries (a silently-dead fix; the v18
+                # refetch killed 11 hand-curated bridges including
+                # "Manhattan Bridge Pedestrian Path" and nothing noticed
+                # for a day -- found 2026-08-14).
+                dangling.append((node_a, node_b, gap_name))
+                continue
             idx_a, idx_b = self._id_to_idx[node_a], self._id_to_idx[node_b]
             lon_a, lat_a = node_lonlat[idx_a]
             lon_b, lat_b = node_lonlat[idx_b]
@@ -629,6 +651,22 @@ class GraphStore:
         # startup instead -- a single count is all a normal boot needs.
         if bridged_count:
             print(f"[graph_store] bridged {bridged_count} known node gap(s)")
+        # Mostly-bridged with a few dangling = a citywide dataset where
+        # entries went dead (refetch drift) -- say so LOUDLY, per entry.
+        # Mostly-dangling = a partial dataset (pilot/CI) -- one quiet line.
+        if dangling and bridged_count > len(dangling):
+            print(f"[graph_store] WARNING: {len(dangling)} known-gap entr"
+                  f"{'y' if len(dangling) == 1 else 'ies'} reference nodes "
+                  f"missing from this dataset -- each was a shipped fix that "
+                  f"is now silently inactive (OSM drift after a refetch?); "
+                  f"re-derive or retire them:")
+            for node_a, node_b, gap_name in dangling[:20]:
+                print(f"[graph_store]   dead entry: {node_a} <-> {node_b} ({gap_name!r})")
+            if len(dangling) > 20:
+                print(f"[graph_store]   ...and {len(dangling) - 20} more")
+        elif dangling:
+            print(f"[graph_store] {len(dangling)} known-gap entries not in "
+                  f"this dataset (partial dataset, e.g. the pilot tile)")
 
         # Cross-tile duplicate synthetic paths (see
         # _cross_tile_synthetic_stitches): connect each copy's nodes onto

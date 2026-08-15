@@ -193,4 +193,8 @@ def apply_park_canopy(
 
     edges = edges.copy()
     edges["tree_deciduous"] = edges["tree_deciduous"].to_numpy() + added
+    # Record the credit separately too (column born in score_and_join) --
+    # the export needs to know which shade came from canopy area rather
+    # than countable trees (FIXES.md item 4).
+    edges["tree_park_canopy"] = edges["tree_park_canopy"].to_numpy() + added
     return edges

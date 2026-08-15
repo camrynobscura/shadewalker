@@ -112,8 +112,11 @@ def test_raster_available(tmp_path, synthetic_raster):
 
 
 def _edge_row(line, tree_deciduous=1.0):
+    # tree_park_canopy is born in score_and_join() before apply_park_canopy
+    # ever runs -- fixtures carry it like every production edge table does
     return gpd.GeoDataFrame({
         "geometry_m": [line], "length_m": [line.length], "tree_deciduous": [tree_deciduous],
+        "tree_park_canopy": [0.0],
     })
 
 
@@ -131,6 +134,10 @@ def test_apply_park_canopy_adds_credit_for_canopy_inside_the_park(synthetic_rast
     scored_length = max(line.length, config.DENSITY_LENGTH_FLOOR_M)
     expected = 1.0 + config.CANOPY_FRACTION_TO_DENSITY_SLOPE * fraction * scored_length
     assert result["tree_deciduous"].iloc[0] == pytest.approx(expected)
+    # v19: the credit is also recorded on its own (FIXES item 4) -- the
+    # export needs to know which shade came from canopy area rather than
+    # countable trees, and it must equal exactly the amount added above
+    assert result["tree_park_canopy"].iloc[0] == pytest.approx(expected - 1.0)
 
 
 def test_apply_park_canopy_adds_nothing_where_the_reach_has_no_canopy(synthetic_raster):
