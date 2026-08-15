@@ -31,4 +31,8 @@ markers = [
     # fresh clone only have the committed pilot fixture). Opt out of the
     # ~15s graph load in a tight edit-test loop with: pytest -m "not citywide".
     "citywide: opt-out-able sweep over the full citywide graph (skips if data absent)",
+    # The external-engine discovery harness: LIVE third-party routing-engine
+    # calls, so it never runs by default or in CI. The marker alone doesn't
+    # enable it -- conftest.py also requires the explicit --run-external flag.
+    "external: opt-in live comparison against external routing engines (needs --run-external)",
 ]

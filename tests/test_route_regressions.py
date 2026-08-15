@@ -303,6 +303,117 @@ def test_max_shade_prefers_central_park_west_over_the_block_one_west(citywide_st
     )
 
 
+# --- v19 external-batch anchor pins (citywide) -------------------------------
+# The 2026-08-15 external-engine validation batch (HISTORY 2026-08-15; the
+# ad-hoc scripts it ran are now formalized as the discovery harness in
+# test_external_validation.py) verified these sites end-to-end: engine
+# comparison, way-membership audit where a weld was in question, and a manual
+# imagery field check. Each pin is a length BAND, not just a ceiling, because
+# at several of these sites the historical bug made the route SHORTER (a
+# phantom weld shortcutting between elevation levels, or an over-connection),
+# so a suspiciously short route is as much a regression as a detour. Bands
+# leave real slack around the verified-good measurement for legitimate
+# path-choice drift while sitting far from every historical bad value.
+#
+# Deliberately NOT pinned from that batch: the High Line B5 local walk (its
+# legitimate ground path and the blocklisted weld chord are both ~52m, so a
+# length band can't tell them apart -- the load-time blocklist tests in
+# test_graph_store_phantom_connectors.py own that guard), and the Washington
+# Bridge / Wards Island pairs (still OPEN leads in FIXES item 1; pinning them
+# would freeze a state we suspect is imperfect).
+
+V19_ANCHOR_PINS = [
+    pytest.param(
+        (40.704456, -73.986651), (40.717267, -73.977333), 4400.0, 5100.0,
+        "measured 4,721m twice on 2026-08-15 (OSRM foot: 4,576m). The "
+        "blocklisted DUMBO phantom weld read 3,372m, so the floor catches "
+        "that weld class returning; the ceiling catches the Manhattan Bridge "
+        "approach severing again",
+        id="dumbo-to-les-over-manhattan-bridge",
+    ),
+    pytest.param(
+        (40.704169, -73.989582), (40.704637, -73.986443), None, 345.0,
+        "measured 314.1m twice on 2026-08-15 (OSRM: 305m), direct along "
+        "John St under the bridge anchorage. The pre-fix symptom was a ~+40m "
+        "plaza detour (dead splits at the anchorage), so the ceiling is "
+        "deliberately tight",
+        id="john-st-walk-across-the-anchorage",
+    ),
+    pytest.param(
+        (40.697559, -73.99646), (40.699825, -73.996337), None, 1050.0,
+        "measured 920.8m twice on 2026-08-15 (OSRM agrees: 918m) via the "
+        "field-checked real Squibb Park / Promenade access. If this entrance "
+        "severs, the route balloons toward the next park access",
+        id="clark-st-promenade-entrance",
+    ),
+    pytest.param(
+        (40.744796, -73.978573), (40.75992, -73.936627), 5500.0, 6800.0,
+        "measured 6,115m on 2026-08-15 after the three curated Queensboro "
+        "Outer Roadway bridges landed (Valhalla-no-ferry agreed within ~3%; "
+        "OSRM's 4,855m rode the E 34th St ferry). Disconnected, this pair "
+        "read 11,713m via the RFK Bridge; the floor guards against a "
+        "phantom shortcut across the river",
+        id="queensboro-outer-roadway-midtown-to-lic",
+    ),
+]
+
+
+@pytest.mark.citywide
+@pytest.mark.parametrize("frm, to, min_m, max_m, evidence", V19_ANCHOR_PINS)
+def test_v19_anchor_site_stays_in_its_verified_band(citywide_store, frm, to, min_m, max_m, evidence):
+    """NONE-priority (tree_weight=0) length pins at the sites the 2026-08-15
+    external-engine batch verified -- pure connectivity checks, directly
+    comparable to what external engines measure (see section comment)."""
+    pair = citywide_store.snap_pair(frm[0], frm[1], to[0], to[1])
+    assert pair is not None, "endpoints did not snap to a shared component"
+    start, end = pair
+    route = citywide_store.route(start, end, tree_weight=0.0, month=7)
+    assert route is not None, "this anchor route no longer resolves at all"
+
+    length = route["length_m"]
+    assert length <= max_m, (
+        f"anchor route got LONGER than its verified band ({length:.1f}m > {max_m:.0f}m) -- "
+        f"likely a lost connection. Evidence for the band: {evidence}. "
+        f"Via {[s['name'] for s in route['segments']]}"
+    )
+    if min_m is not None:
+        assert length >= min_m, (
+            f"anchor route got suspiciously SHORT ({length:.1f}m < {min_m:.0f}m) -- "
+            f"likely a phantom connection returning. Evidence for the band: {evidence}. "
+            f"Via {[s['name'] for s in route['segments']]}"
+        )
+
+
+# --- East River Park closure zone stays empty (citywide) ---------------------
+# pipeline/closure_zones.json drops the imported paths inside the drawn ESCR
+# construction polygon (OSM deleted its own copies; only OUR imported layers
+# kept re-adding ghosts -- 32 ghost edges pre-v19, 0 after, verified
+# 2026-08-15). The regression signature isn't a route length: it's that a
+# point INSIDE the closure polygon becomes snappable again. The probe below
+# is the polygon's representative interior point pushed ~40m inside its
+# boundary (derived from closure_zones.json itself on 2026-08-15); the
+# ghost paths crossed the zone's interior within a few meters of it, while
+# today the nearest walkable edge is East 11th Street, 53m away and outside
+# the polygon.
+
+
+@pytest.mark.citywide
+def test_east_river_park_closure_zone_has_nothing_to_snap_to(citywide_store):
+    from external_engines import haversine_m
+
+    lat, lon = 40.724663, -73.972522  # interior of the ESCR closure polygon
+    pair = citywide_store.snap_pair(lat, lon, lat, lon)
+    if pair is None:
+        return  # even stronger: nothing snappable at all
+    moved = haversine_m(pair[0].point[1], pair[0].point[0], lat, lon)
+    assert moved > 30.0, (
+        f"a walkable edge appeared {moved:.0f}m from the closure-zone interior "
+        f"probe (nearest legit edge was East 11th Street at 53m, 2026-08-15) -- "
+        f"ghost paths inside the ESCR closure polygon are likely back; check "
+        f"pipeline/closure_zones.json is still applied by the export"
+    )
+
+
 # --- Route-description regression (citywide) ---------------------------------
 # `fix-interior-park-paths` admits unnamed park sidewalks (ANY_SIDEWALK_FILTER,
 # a14ffa8) so the router can enter parks at all -- but every one of those
