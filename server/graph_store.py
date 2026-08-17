@@ -256,6 +256,22 @@ _CURATED_KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
     # still forces a 7.8km detour on the Jamaica Bay Greenway without it.
     ("12472019883", "6382627345", "Jamaica Bay Greenway"),
     ("42830977", "608478724", "Cross Bay Bridge"),
+
+    # Marine Parkway (Gil Hodges) Bridge -- found 2026-08-16 by the
+    # post-v20 250-pair external batch (lead 2: Breezy Point <-> Coney
+    # Island read 34.6km vs OSRM 12.6km, a 21km detour around Jamaica
+    # Bay). The bridge walkway exists in our data as two overlapping
+    # greenway strands that never share a node: "Flatbush Avenue
+    # Greenway" (bridge deck, dead-ending at 40.578765,-73.888378) and
+    # "Beach Channel Drive Greenway" (Riis-side approach, dead-ending
+    # 320m up the deck at 40.580979,-73.890817) -- OSRM transitions
+    # between the same two ways at exactly our terminus point, so OSM
+    # connects them and our fetch lost the junction. Bridged at the
+    # closest cross-strand node pair, 99m apart ALONG the shared bridge
+    # approach (both nodes on the same structure -- no deck-to-ground
+    # risk). Verified: the entry cuts the probe route to 14.5km, ratio
+    # 1.15 vs OSRM, under the batch flag bar.
+    ("466530483", "466530490", "Marine Parkway Bridge"),
 ]
 
 
