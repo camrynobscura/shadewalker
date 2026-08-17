@@ -18,13 +18,27 @@ The main WALK_FILTER query deliberately stays per-tile in streets.py:
 it's the one query whose result is actually tile-sized (the whole city's
 walkable street network in one response would dwarf every layer above).
 
+Cache keying (FIXES item 11, 2026-08-17): every raw Overpass cache --
+these six layers AND streets.py's per-tile raw WALK_FILTER snapshots --
+is keyed on raw_fetch_key(), a hash of the only things that change what
+Overpass hands back (the filter string, which way tags osmnx retains,
+and the osmnx version whose truncation semantics baked the graph).
+Deliberately NOT keyed on streets.GRAPH_CACHE_VERSION: that number now
+means "how the raw data is processed," and bumping it for a
+processing-only change must rebuild from these snapshots instead of
+re-downloading the city (the v20 refetch re-downloaded ~5h of identical
+data for a purely-local weld pass). A filter edit still invalidates
+exactly the caches it affects, because the filter string is in the key.
+
 Freshness: a cached layer is as old as the last time its file was
-fetched, so a refetch campaign that wants fresh auxiliary data must
-delete data/raw/citywide_layers/ (or pass refresh=True) -- bumping
-GRAPH_CACHE_VERSION alone re-fetches tiles but would happily reuse layer
-caches from the same version. The per-refetch runbook owns this step.
+fetched. Pulling fresh OSM is an explicit action now -- run_tile's
+--refresh-raw -- never a side effect of a logic change, so before/after
+route comparisons only ever move one variable at a time. Within one
+process a refresh only re-asks Overpass once per layer (_FRESHENED), or
+a borough run would re-download every layer per tile.
 """
 
+import hashlib
 import time
 from pathlib import Path
 
@@ -64,6 +78,39 @@ FETCH_RETRY_BACKOFF_S = 5
 # GraphML from disk per tile would eat the fetch savings this module
 # exists for.
 _MEMO: dict[str, nx.MultiDiGraph | None] = {}
+
+# Layers this process has already pulled fresh from Overpass. refresh=True
+# means "this RUN wants fresh OSM data," not "every call does" -- without
+# this, a --refresh-raw borough run would re-download every layer once per
+# tile, exactly the per-tile repetition item 6b removed.
+_FRESHENED: set[str] = set()
+
+
+def raw_fetch_key(custom_filter: str) -> str:
+    """A short stable key identifying what a raw Overpass fetch would
+    return -- the cache key for every raw (unprocessed) snapshot, both
+    the citywide layers here and streets.py's per-tile WALK_FILTER ones.
+
+    Three ingredients, because exactly three things change the graph
+    osmnx hands back for a given bbox: the Overpass filter string itself,
+    ox.settings.useful_tags_way (which way tags survive onto the edges --
+    v19 added `layer` this way, a real content change with no filter
+    edit), and the osmnx version (its bbox-truncation semantics are baked
+    into the saved graph; an upgrade must invalidate rather than mix two
+    versions' semantics in one cache). The bbox is deliberately NOT in
+    the key -- it's recorded inside each file and re-checked on load
+    (_bbox_signature), the discipline that caught the r17c14 grid shift.
+
+    Read at call time, not import time: streets.py appends to
+    useful_tags_way when it's imported, and hashing before that would key
+    on a settings state no fetch actually runs under.
+    """
+    material = "|".join([
+        custom_filter,
+        ",".join(sorted(ox.settings.useful_tags_way)),
+        ox.__version__,
+    ])
+    return hashlib.sha256(material.encode()).hexdigest()[:12]
 
 
 def _bbox_signature(bbox: Bbox) -> str:
@@ -122,26 +169,32 @@ def _fetch_citywide(custom_filter: str, name: str) -> nx.MultiDiGraph | None:
 
 
 def citywide_layer(
-    name: str, custom_filter: str, cache_version: int, refresh: bool = False
+    name: str, custom_filter: str, refresh: bool = False
 ) -> nx.MultiDiGraph | None:
     """The citywide graph for one auxiliary layer, memoized per process
     and cached on disk as GraphML.
 
-    cache_version is streets.GRAPH_CACHE_VERSION: the filters live there
-    and every filter change already bumps it, so keying the layer cache
-    on the same number means a filter change can never silently reuse a
-    layer fetched under the old definition. (Passed in rather than
-    imported to keep this module import-free of streets.py, which
-    imports this one.)
+    The cache is keyed on raw_fetch_key(custom_filter) -- see its
+    docstring, and the module docstring's FIXES item 11 paragraph, for
+    why it's the filter's own identity rather than
+    streets.GRAPH_CACHE_VERSION: a filter change still can never
+    silently reuse a layer fetched under the old definition (the filter
+    string is in the key), while a processing-only version bump no
+    longer throws away raw data that would come back byte-identical.
+
+    refresh=True pulls fresh from Overpass -- once per layer per process
+    (see _FRESHENED), so a --refresh-raw borough run doesn't repeat the
+    download per tile.
 
     An empty layer (None) is memoized and cached too -- via a marker
     graph on disk, since "the filter matched nothing citywide" is a real
     answer, not a failure to get one.
     """
+    refresh = refresh and name not in _FRESHENED
     if not refresh and name in _MEMO:
         return _MEMO[name]
 
-    cache_path = CACHE_DIR / f"{name}_v{cache_version}.graphml"
+    cache_path = CACHE_DIR / f"{name}_{raw_fetch_key(custom_filter)}.graphml"
     wanted = _bbox_signature(_layer_fetch_bbox())
 
     if cache_path.exists() and not refresh:
@@ -160,6 +213,7 @@ def citywide_layer(
               f"-- re-fetching")
 
     graph = _fetch_citywide(custom_filter, name)
+    _FRESHENED.add(name)
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     if graph is None:
