@@ -57,11 +57,16 @@ def test_click_near_2nd_street_actually_reaches_2nd_street(client):
 
 def test_a_heavily_shaded_route_never_reads_as_exactly_full_shade(client):
     """A route from 40.68627,-73.99906 to 40.68595,-73.98429 crosses 10
-    different Cobble Hill blocks, each of which independently clears
-    SHADE_DENSITY_THRESHOLD -- shade_fraction read exactly 1.0 (100%) at
-    every tree_weight above 0, which overstates real coverage: a walker
-    is still exposed at each of the corners along the way, regardless of
-    how tree-lined the blocks bordering them are."""
+    different tree-lined Cobble Hill blocks. Under the original binary
+    definition each block independently cleared the shaded-or-not bar and
+    shade_fraction read exactly 1.0 (100%) at every tree_weight above 0
+    -- overstating real coverage. The continuous definition (FIXES item
+    2, 2026-08-17) keeps this honest by a different mechanism: real
+    blocks vary, and any stretch below SHADE_SATURATION_DENSITY earns
+    only partial credit, so a full-length 100% requires every walked
+    meter at saturation -- which real geography doesn't produce here.
+    Kept as the anti-inflation guard: exactly-1.0 on a long mixed-block
+    route means the stat's ceiling logic regressed."""
     res = client.get(
         "/route",
         params={

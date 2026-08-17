@@ -273,39 +273,37 @@ MAX_TREE_WEIGHT = 40.0
 # densities (0.8+ vs a leafy block's 0.05).
 DENSITY_LENGTH_FLOOR_M = 20.0
 
-# Below this per-meter tree density, an edge counts as "not shaded" for
-# the /route response's shade_fraction stat. Distinct from the cost
-# formula's *degree* of density above -- this is a yes/no cutoff, more
-# lenient than RouteStats.tsx's SPARSE_TREES_PER_M (a whole-route warning
-# threshold, not a per-edge one). Named for *shade* generally, not trees
-# specifically -- Stage 4's building-shadow scoring (optional stretch
-# goal) would feed the same field later without a schema change.
+# The per-meter tree density at which an edge counts as FULLY shaded for
+# the /route response's shade_fraction stat: each edge contributes
+# min(density / this, 1) of its length, so the stat is a continuous
+# length-weighted average instead of a per-edge yes/no. Distinct from the
+# cost formula's use of density above (which never saturates). Named for
+# *shade* generally, not trees specifically -- Stage 4's building-shadow
+# scoring (optional stretch goal) would feed the same field later without
+# a schema change.
 #
-# 0.025, not the pilot tile's ~0.011 median: an initial 0.01 pick turned
-# out to sit almost exactly at the citywide-tile median density, so it
-# barely filtered anything (97% shade on one real test route). Checked
-# the real distribution and several candidate values before landing here
-# -- push this much past ~0.035 and the classification gets sensitive
-# enough to individual edges that it can invert which of two routes reads
-# as "more shaded," which defeats the point of the stat.
-SHADE_DENSITY_THRESHOLD = 0.025
-
-# A pedestrian is briefly exposed at every real street intersection a
-# route crosses, no matter how tree-lined the blocks on either side are --
-# shade_fraction's per-edge average can't see this on its own (the bug
-# this constant fixes: a route over 10 different tree-lined Cobble Hill
-# blocks read as exactly 100% shaded, because each block cleared
-# SHADE_DENSITY_THRESHOLD in isolation). Applied once per intersection
-# where *both* neighboring edges are themselves shaded -- a crossing next
-# to an already-unshaded block doesn't need a separate deduction, since
-# that block's own classification already accounts for the exposure
-# there; only double-subtracting where the model would otherwise report
-# an unbroken (and unrealistic) stretch of continuous cover.
+# Replaced SHADE_DENSITY_THRESHOLD (0.025, a binary shaded-or-not bar)
+# on 2026-08-17 (FIXES item 2): the cliff-edge meant near-identical
+# routes could read 0% vs 100% -- measured citywide 2026-07-31, 27% of
+# edges sat within 50% of the bar. 0.05 is exactly 2x that retired bar,
+# which itself was calibrated against real route distributions
+# (2026-07-22..23) -- so "just barely counted as shaded" under the old
+# definition now reads 50% credit. Chosen 2026-08-17 from three measured
+# candidates over 24 real routes at all four presets (data/audits/
+# 2026-08-17/shade_stat_candidates_results.json): saturating at the old
+# bar itself inflates (midtown street routes read 42%) and still shows
+# pre-clamp preset-monotonicity dips; saturating at the citywide p90
+# (0.107) undersells the shadiest real walks (Central Park loop drops to
+# 49-74%). At 0.05, park loops read 93-99%, ordinary midtown streets
+# ~20%, and every sampled pair was monotonic across presets before the
+# clamp even ran.
 #
-# Not calibrated against real data the way SHADE_DENSITY_THRESHOLD was --
-# there's no crosswalk-width dataset in this pipeline. 6m is a plain
-# physical estimate (roughly one corner's curb-to-building clearance).
-SHADE_CROSSING_GAP_M = 6.0
+# The old definition also carried SHADE_CROSSING_GAP_M (a 6m deduction
+# per shaded-shaded intersection, approximating crosswalk exposure).
+# Deliberately dropped with the redesign, as decided in FIXES item 2:
+# its boolean both-neighbors-shaded gate has no continuous equivalent,
+# and it was a plain physical estimate, never calibrated.
+SHADE_SATURATION_DENSITY = 0.05
 
 # How far a requested point may sit from the nearest graph node and still be
 # considered "in coverage". Intersections along a real block are already

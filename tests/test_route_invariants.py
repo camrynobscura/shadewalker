@@ -163,13 +163,14 @@ def test_more_shade_priority_never_reduces_shade_over_many_random_routes(client)
     be >= the preset before it.
 
     This is the invariant the monotonic clamp exists to guarantee. Without
-    it the property genuinely fails on real geography: the cost formula
-    `length / (1 + w * density)` gives a saturating discount, so at high
-    weight the router chains many barely-treed blocks (a big cost discount,
-    but each below SHADE_DENSITY_THRESHOLD so worth nothing to
-    shade_fraction) over fewer genuinely-shady ones; and SHADE_CROSSING_GAP_M
-    subtracts per shaded-shaded transition in the reporting layer, which the
-    router can't see. Both can make a higher preset report less shade. The
+    it the property genuinely fails on real geography: the router's cost
+    formula rewards density without limit, but shade_fraction saturates it
+    at SHADE_SATURATION_DENSITY -- so a higher weight can chain
+    already-saturated blocks the stat can't credit any further and report
+    less shade than a lower weight's route. Much rarer since the stat went
+    continuous (2026-08-17; the old per-edge threshold + crossing deduction
+    also violated it through two extra mechanisms, both retired), but the
+    saturation mechanism is still real. The
     clamp resolves it by never serving a higher preset a route whose shade a
     lower preset already beat -- all four presets are computed per /route
     call, so it's pure post-processing over routes the request already has.
@@ -526,24 +527,24 @@ def test_shade_fraction_carries_signal_tree_count_cannot(client):
         counts[label] = props["tree_count"]
 
     assert counts["leafy"] == counts["industrial"]  # identical tree_count...
-    # ...but wildly different real coverage (measured 0.756 vs 0.196; the
-    # margin is loose so threshold/crossing-gap recalibrations don't break
-    # it, while a wiring regression still does).
+    # ...but wildly different real coverage (measured 0.756 vs 0.196 under
+    # the original binary definition; the margin is loose so saturation
+    # recalibrations -- like 2026-08-17's continuous redesign -- don't
+    # break it, while a wiring regression still does).
     assert shades["leafy"] > shades["industrial"] + 0.3
 
 
-def test_shade_fraction_crossing_deduction_leaves_a_low_shade_route_alone(client):
-    """SHADE_CROSSING_GAP_M only fires between two edges that are BOTH
-    already classified shaded (see graph_store.route()) -- a mostly-
-    unshaded route has few or no such crossings, so its shade_fraction
-    should come out unchanged by the deduction. Pins the FROM/TO pair's
-    known low-shade value so a future change that starts applying the
-    deduction unconditionally (not gated on both neighbors) gets caught
-    here -- test_a_heavily_shaded_route_never_reads_as_exactly_full_shade
-    in test_route_regressions.py wouldn't catch that, since it only checks
-    that a *heavily* shaded route drops below 100%, not that a lightly
-    shaded one is left alone. (Pinned value re-derived 2026-07-23 against
-    the regenerated 14m-buffer fixture: 0.23 -> 0.258.)"""
+def test_shade_fraction_gives_partial_credit_below_saturation(client):
+    """Pins a lightly-shaded route's exact shade_fraction under the
+    continuous definition (FIXES item 2, 2026-08-17): every edge
+    contributes min(density / SHADE_SATURATION_DENSITY, 1) of its length,
+    so blocks below saturation earn PARTIAL credit instead of the old
+    all-or-nothing threshold's zero. This exact pin guards two things at
+    once: the saturation constant (a silent recalibration moves this
+    number) and the length-weighting wiring (a regression back to
+    per-edge yes/no snaps it to the old binary reading -- this same pair
+    read 0.258 under the retired threshold+crossing-gap definition,
+    re-derived to 0.318 when the stat went continuous)."""
     res = client.get(
         "/route",
         params={
@@ -552,7 +553,7 @@ def test_shade_fraction_crossing_deduction_leaves_a_low_shade_route_alone(client
             "tree_weights": [15],
         },
     )
-    assert res.json()["routes"][0]["properties"]["shade_fraction"] == 0.258
+    assert res.json()["routes"][0]["properties"]["shade_fraction"] == 0.318
 
 
 def test_every_edge_geometry_starts_and_ends_at_its_own_nodes(graph_store):

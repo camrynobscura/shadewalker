@@ -2,9 +2,28 @@ import type { RouteFeature } from '../api'
 import { formatDistance, formatDistanceParts } from '../format'
 import styles from './RouteStats.module.css'
 
-/** Below ~0.02 trees-per-meter along the route, even the "greenest" option
- * is objectively sparse — say so instead of overselling (honest stats). */
-const SPARSE_TREES_PER_M = 0.02
+/** Below this shade_fraction, the route is objectively exposed — say so
+ * instead of overselling (honest stats). Reads the same continuous stat
+ * displayed as "% shaded" right above it, so the warning and the number
+ * can never disagree (the old rule read tree_count/length instead, a
+ * different signal entirely — a Central Park route could show "83%
+ * shaded" AND this warning, and by 2026-08-17 it fired on 0% of
+ * default-preset routes). 0.25 chosen from a 200-route August scan
+ * (data/audits/2026-08-17/warning_cutoff_scan_results.json): flags ~2%
+ * of default-preset routes citywide and ~10% of no-priority ones —
+ * rising to ~26%/64% for routes within Midtown's canyon blocks, which is
+ * the honest geography, not noise. Peak-canopy numbers: the same bar
+ * fires more in spring/fall, when those walks really are less shaded. */
+const LOW_SHADE_FRACTION = 0.25
+
+/** When at least this share of the route's tree score is park-canopy AREA
+ * credit (not countable trees), hide the "trees: N" stat -- the count
+ * can't see area credit, so it undersells exactly the routes with the
+ * most real cover ("83% shaded, 3 trees", FIXES item 4). Measured
+ * 2026-08-17: park loops (Central/Prospect/Riverside) read 0.40-0.51,
+ * ordinary street routes 0.000, a park-adjacent street 0.297 -- 1/3
+ * hides the count only where canopy genuinely dominates. */
+const CANOPY_SHARE_HIDES_TREE_COUNT = 1 / 3
 
 interface RouteStatsProps {
   /** The currently selected Shade_priority preset's route -- /route
@@ -45,7 +64,7 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
 
 function StatsBody({ route, description }: { route: RouteFeature; description: string }) {
   const stats = route.properties
-  const isSparse = stats.tree_count / stats.length_m < SPARSE_TREES_PER_M
+  const isLowShade = stats.shade_fraction < LOW_SHADE_FRACTION
   const dist = formatDistanceParts(stats.length_m)
 
   return (
@@ -84,20 +103,22 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
             </span>
             <span className={styles.statLabel}>eta</span>
           </div>
-          <div className={styles.stat}>
-            <span className={styles.statVal}>{stats.tree_count}</span>
-            <span className={styles.statLabel}>trees</span>
-          </div>
+          {stats.park_canopy_share < CANOPY_SHARE_HIDES_TREE_COUNT && (
+            <div className={styles.stat}>
+              <span className={styles.statVal}>{stats.tree_count}</span>
+              <span className={styles.statLabel}>trees</span>
+            </div>
+          )}
           <div className={styles.stat}>
             <span className={styles.statVal}>{Math.round(stats.shade_fraction * 100)}%</span>
             <span className={styles.statLabel}>shaded</span>
           </div>
         </div>
 
-        {isSparse && (
+        {isLowShade && (
           <p className={styles.sparseNote}>
-            // LOW_TREE_DENSITY: {stats.tree_count} over {formatDistance(stats.length_m)} — expect
-            limited shade
+            // LOW_SHADE: {Math.round(stats.shade_fraction * 100)}% shaded over{' '}
+            {formatDistance(stats.length_m)} — expect mostly direct sun
           </p>
         )}
 

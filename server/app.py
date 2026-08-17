@@ -164,6 +164,7 @@ def _to_feature(route: dict, tree_weight: float) -> dict:
             "minutes": route["minutes"],
             "tree_count": route["tree_count"],
             "shade_fraction": route["shade_fraction"],
+            "park_canopy_share": route["park_canopy_share"],
             "segments": route["segments"],
         },
     }
