@@ -35,8 +35,15 @@ export interface RouteFeature {
     tree_count: number
     /** Fraction (0-1) of the route classified as shaded -- tree canopy
      * only today, but a general "shade" field so building-shadow scoring
-     * (an optional future stretch goal) can feed the same one later. */
+     * (an optional future stretch goal) can feed the same one later.
+     * Continuous since 2026-08-17: each block contributes
+     * min(density / saturation, 1) of its length, no per-edge cliff. */
     shade_fraction: number
+    /** Fraction (0-1) of the route's tree score that is park-canopy AREA
+     * credit rather than countable trees -- when it dominates, the raw
+     * tree_count undersells the real cover (a Central Park loop can be
+     * "83% shaded, 3 trees"), so RouteStats hides the count. */
+    park_canopy_share: number
     segments: RouteSegment[]
   }
 }

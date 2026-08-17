@@ -83,10 +83,14 @@ def clamp_shade_monotonic(routes: list[dict], weights: list[float]) -> list[dict
     route already in the batch.
 
     Why this is needed: route() minimizes a smooth density-weighted cost, but
-    shade_fraction is a thresholded (shaded-or-not per edge) stat with a
-    per-crossing deduction on top -- so the route chosen for a higher weight
-    can genuinely report LESS shade than a lower weight's route (~17% of
-    citywide routes; up to a 0.22 drop). /route computes every preset in one
+    shade_fraction saturates that density at SHADE_SATURATION_DENSITY -- so
+    the route chosen for a higher weight can genuinely report LESS shade
+    than a lower weight's route (the router keeps rewarding density past the
+    point where the stat stops crediting it). Far rarer since the stat went
+    continuous (2026-08-17: 0/24 sampled pairs pre-clamp, vs 7/24 under the
+    old shaded-or-not threshold whose measured rate was ~17% of citywide
+    routes, up to a 0.22 drop), but the mechanism is still real, so the
+    guarantee stays. /route computes every preset in one
     call, so this is pure post-processing: it only ever falls back to a real
     route the batch already produced, never one worse on shade than the
     preset's own route -- the walker strictly benefits, and length/time can
@@ -567,6 +571,10 @@ class GraphStore:
         self._tree_deciduous = np.empty(0, dtype=np.float32)
         self._tree_evergreen = np.empty(0, dtype=np.float32)
         self._tree_count = np.empty(0, dtype=np.int32)
+        # The slice of _tree_deciduous that is park-canopy credit rather
+        # than countable trees (FIXES item 4) -- already inside
+        # _tree_deciduous, so it's a share of the score, never an addition.
+        self._tree_park_canopy = np.empty(0, dtype=np.float32)
         self._names: list[str] = []
         # Edge shapes, packed: all edges' [lon, lat] points concatenated
         # into one flat block. float64, not float32 — at NYC longitudes
@@ -600,6 +608,10 @@ class GraphStore:
         node_lonlat: list[list[float]] = []
         edge_pairs: list[tuple[int, int]] = []  # (u_idx, v_idx) for igraph
         length, deciduous, evergreen, counts = [], [], [], []
+        # .get()-defaulted on read: tiles exported before v19 (the committed
+        # pilot test fixture) predate the field entirely, and 0.0 is exactly
+        # what they mean -- no canopy credit was computed for them.
+        canopy_credit: list[float] = []
         names: list[str] = []
         coords_per_edge: list[list[list[float]]] = []  # packed into _coord_buf after the loop
         seen_edges: dict[tuple, int] = {}  # (u, v, key, side) -> position in the lists above
@@ -646,6 +658,7 @@ class GraphStore:
                         deciduous[existing] = edge["tree_deciduous"]
                         evergreen[existing] = edge["tree_evergreen"]
                         counts[existing] = edge["tree_count"]
+                        canopy_credit[existing] = edge.get("tree_park_canopy", 0.0)
                         names[existing] = edge["name"]
                         coords_per_edge[existing] = edge["coords"]
                     continue
@@ -673,6 +686,7 @@ class GraphStore:
                 deciduous.append(edge["tree_deciduous"])
                 evergreen.append(edge["tree_evergreen"])
                 counts.append(edge["tree_count"])
+                canopy_credit.append(edge.get("tree_park_canopy", 0.0))
                 names.append(edge["name"])
                 coords_per_edge.append(edge["coords"])
 
@@ -706,6 +720,7 @@ class GraphStore:
             deciduous.append(0.0)
             evergreen.append(0.0)
             counts.append(0)
+            canopy_credit.append(0.0)
             names.append(gap_name)
             coords_per_edge.append([[lon_a, lat_a], [lon_b, lat_b]])
             bridged_count += 1
@@ -749,6 +764,7 @@ class GraphStore:
             deciduous.append(0.0)
             evergreen.append(0.0)
             counts.append(0)
+            canopy_credit.append(0.0)
             names.append("")
             coords_per_edge.append([[lon_a, lat_a], [lon_b, lat_b]])
         self._stitch_count = len(stitches)
@@ -776,6 +792,7 @@ class GraphStore:
         self._tree_deciduous = np.array(deciduous, dtype=np.float32)
         self._tree_evergreen = np.array(evergreen, dtype=np.float32)
         self._tree_count = np.array(counts, dtype=np.int32)
+        self._tree_park_canopy = np.array(canopy_credit, dtype=np.float32)
 
         # Pack the edge shapes: one flat buffer + an offsets array (see
         # __init__). cumsum turns per-edge point counts into slice
@@ -1125,8 +1142,10 @@ class GraphStore:
 
     def _edge_density(self, month: int) -> np.ndarray:
         """Month-adjusted tree density (score per meter), vectorized over
-        every edge. Shared by edge_costs() (degree of density matters) and
-        route()'s shade_fraction (a yes/no threshold on the same number)."""
+        every edge. Shared by edge_costs() (unsaturated -- degree of
+        density always matters to the router) and route()'s
+        shade_fraction (the same number, saturated at
+        SHADE_SATURATION_DENSITY for reporting)."""
         canopy = config.CANOPY_BY_MONTH[month - 1]  # month is 1-12; lists index from 0
         tree_score = self._tree_evergreen + self._tree_deciduous * canopy
         return tree_score / np.maximum(self._length, config.DENSITY_LENGTH_FLOOR_M)
@@ -1167,7 +1186,14 @@ class GraphStore:
         at a high tree_weight.
         """
         costs = self.edge_costs(tree_weight, month)
-        shaded = self._edge_density(month) >= config.SHADE_DENSITY_THRESHOLD
+        # Continuous per-edge shade credit (FIXES item 2): an edge
+        # contributes min(density / SHADE_SATURATION_DENSITY, 1) of its
+        # length to shade_fraction, replacing the old shaded-or-not
+        # threshold whose cliff-edge let near-identical routes read 0%
+        # vs 100% -- see the constant's comment for the calibration.
+        shade_credit = np.minimum(
+            self._edge_density(month) / config.SHADE_SATURATION_DENSITY, 1.0
+        )
 
         start_options = [(start.node_u, start.dist_to_u_m), (start.node_v, start.dist_to_v_m)]
         end_options = [(end.node_u, end.dist_to_u_m), (end.node_v, end.dist_to_v_m)]
@@ -1222,10 +1248,13 @@ class GraphStore:
             coords = self._edge_substring(start.edge, start.point, end.point)
             length_m = direct_dist_m
             tree_count = direct_dist_m / self._length[start.edge] * self._tree_count[start.edge]
-            # Unlike tree_count's proportional split, shade is all-or-
-            # nothing per edge -- the edge either clears the threshold or
-            # it doesn't, so a partial edge inherits its whole edge's status.
-            shaded_length_m = direct_dist_m if shaded[start.edge] else 0.0
+            # Density is uniform along an edge, so a partial edge earns
+            # its whole edge's per-meter credit over just the walked part.
+            shaded_length_m = direct_dist_m * float(shade_credit[start.edge])
+            canopy_score = float(self._tree_park_canopy[start.edge])
+            walked_tree_score = float(
+                self._tree_deciduous[start.edge] + self._tree_evergreen[start.edge]
+            )
             _add_segment(segments, self._names[start.edge] or "unnamed path", length_m)
         else:
             _, s_node, s_dist_m, e_node, e_dist_m, edge_path = best_plan
@@ -1273,27 +1302,33 @@ class GraphStore:
                 + float(self._tree_count[edge_path].sum())
                 + e_dist_m / self._length[end.edge] * self._tree_count[end.edge]
             )
+            # Same proportional-credit treatment as tree_count above: the
+            # partial lead-in/lead-out edges earn their own edge's
+            # per-meter credit over just the walked distance. (The old
+            # binary definition also subtracted a per-intersection
+            # exposure gap here, SHADE_CROSSING_GAP_M -- dropped with the
+            # continuous redesign, see SHADE_SATURATION_DENSITY's comment.)
             shaded_length_m = (
-                (s_dist_m if shaded[start.edge] else 0.0)
-                + float(self._length[edge_path][shaded[edge_path]].sum())
-                + (e_dist_m if shaded[end.edge] else 0.0)
+                s_dist_m * float(shade_credit[start.edge])
+                + float((self._length[edge_path] * shade_credit[edge_path]).sum())
+                + e_dist_m * float(shade_credit[end.edge])
             )
-            # Reconstruct the full ordered sequence of edges actually
-            # walked (partial lead-in/lead-out edges only included if
-            # genuinely walked, i.e. their partial distance is nonzero) so
-            # consecutive pairs can be checked for whether they cross a
-            # real intersection while both sides read "shaded" -- see
-            # config.SHADE_CROSSING_GAP_M for why only that case counts.
-            walked_edges = (
-                ([start.edge] if s_dist_m > 0 else [])
-                + list(edge_path)
-                + ([end.edge] if e_dist_m > 0 else [])
+            # How much of the walked tree score is park-canopy credit vs
+            # countable trees (FIXES item 4) -- the frontend hides the
+            # raw "trees: N" stat when this share is significant, since a
+            # count can't see area-based credit. Same proportional
+            # partial-edge treatment as tree_count above.
+            s_frac = s_dist_m / self._length[start.edge]
+            e_frac = e_dist_m / self._length[end.edge]
+            canopy_score = (
+                s_frac * float(self._tree_park_canopy[start.edge])
+                + float(self._tree_park_canopy[edge_path].sum())
+                + e_frac * float(self._tree_park_canopy[end.edge])
             )
-            crossings_within_shade = sum(
-                1 for a, b in zip(walked_edges, walked_edges[1:]) if shaded[a] and shaded[b]
-            )
-            shaded_length_m = max(
-                shaded_length_m - crossings_within_shade * config.SHADE_CROSSING_GAP_M, 0.0
+            walked_tree_score = (
+                s_frac * float(self._tree_deciduous[start.edge] + self._tree_evergreen[start.edge])
+                + float((self._tree_deciduous[edge_path] + self._tree_evergreen[edge_path]).sum())
+                + e_frac * float(self._tree_deciduous[end.edge] + self._tree_evergreen[end.edge])
             )
 
         if len(coords) < 2:
@@ -1307,6 +1342,14 @@ class GraphStore:
             # error from the fractional lead-in/lead-out doesn't compound.
             "tree_count": int(round(tree_count)),
             "shade_fraction": round(shaded_length_m / length_m, 3) if length_m else 0.0,
+            # 0.0 when the route has no tree score at all -- "no trees" is
+            # not "all canopy".
+            # float() strips the numpy float32 the _length division leaks
+            # into these sums -- pydantic can't serialize numpy scalars.
+            "park_canopy_share": (
+                round(float(canopy_score) / float(walked_tree_score), 3)
+                if walked_tree_score else 0.0
+            ),
             "segments": [
                 {"name": s["name"], "length_m": round(s["length_m"], 1)} for s in segments
             ],

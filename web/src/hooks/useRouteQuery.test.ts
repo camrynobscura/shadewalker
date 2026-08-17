@@ -23,6 +23,7 @@ function feature(treeWeight: number, lengthM: number, treeCount: number, shadeFr
       minutes: 1,
       tree_count: treeCount,
       shade_fraction: shadeFraction,
+      park_canopy_share: 0,
       segments: [],
     },
   }
