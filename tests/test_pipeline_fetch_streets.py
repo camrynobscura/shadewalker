@@ -1835,3 +1835,144 @@ def test_interior_sidewalks_for_tile_clips_closure_zones(monkeypatch):
     tile_bbox = Bbox(lat_min=40.6, lat_max=40.8, lon_min=-74.1, lon_max=-73.9)
     segments = streets._interior_sidewalks_for_tile(geojson, tile_bbox)
     assert segments == [[(-73.95, 40.72), (-73.949, 40.72)]]
+
+
+# --- drawing-error welds (FIXES item 1, connection Batch A) ---------------
+#
+# _weld_drawing_error_components is pure graph surgery (no network), so
+# these build MultiDiGraphs directly. Coordinates are real NYC lon/lat --
+# the function measures in the metric CRS, so degrees must be honest.
+# At lat 40.70, 0.000003 degrees of latitude is ~0.33m.
+
+_STREET_Y = 40.70
+
+
+def _weld_graph(scrap_lat_offset_deg: float, street_tags: dict | None = None,
+                scrap_ids=(101, 102), street_len: float = 844.0):
+    """A straight east-west street plus a 2-node scrap fragment whose
+    near node hovers scrap_lat_offset_deg north of the street line."""
+    g = nx.MultiDiGraph()
+    g.graph["crs"] = "epsg:4326"
+    g.add_node(1, x=-73.99, y=_STREET_Y)
+    g.add_node(2, x=-73.98, y=_STREET_Y)
+    g.add_edge(1, 2, osmid=555, length=street_len, **(street_tags or {}))
+    near, far = scrap_ids
+    g.add_node(near, x=-73.985, y=_STREET_Y + scrap_lat_offset_deg)
+    g.add_node(far, x=-73.985, y=_STREET_Y + scrap_lat_offset_deg + 0.0001)
+    g.add_edge(near, far, osmid=777, length=11.0)
+    return g
+
+
+def test_weld_connects_a_drawing_error_fragment():
+    g = _weld_graph(scrap_lat_offset_deg=0.000003)  # ~0.33m gap
+    g = streets._weld_drawing_error_components(g, None, "test")
+    assert nx.number_connected_components(g.to_undirected(as_view=True)) == 1
+    weld_edges = [(u, v, d) for u, v, d in g.edges(data=True) if d.get("weld")]
+    assert len(weld_edges) == 1
+    # the connector is synthetic: negative osmid, and it lands on a
+    # freshly-minted negative split node (or directly on a street node)
+    assert weld_edges[0][2]["osmid"] < 0
+
+
+def test_weld_split_ids_continue_existing_negative_counters():
+    g = _weld_graph(scrap_lat_offset_deg=0.000003)
+    g.add_node(-1, x=-73.9899, y=_STREET_Y + 0.0002)
+    g.add_edge(-1, 1, osmid=-1, length=22.0)
+    g = streets._weld_drawing_error_components(g, None, "test")
+    new_negative_nodes = [n for n in g.nodes if isinstance(n, int) and n < -1]
+    assert new_negative_nodes, "split node should continue below the existing -1"
+    negative_osmids = [d["osmid"] for _, _, d in g.edges(data=True)
+                       if isinstance(d.get("osmid"), int) and d["osmid"] < 0]
+    assert len(negative_osmids) == len(set(negative_osmids)), (
+        "synthetic edge osmids must never collide")
+    assert min(negative_osmids) < -1, (
+        "connector osmid should continue below the existing -1")
+
+
+def test_weld_leaves_a_real_gap_alone():
+    g = _weld_graph(scrap_lat_offset_deg=0.00002)  # ~2.2m -- a real gap
+    g = streets._weld_drawing_error_components(g, None, "test")
+    assert nx.number_connected_components(g.to_undirected(as_view=True)) == 2
+    assert not any(d.get("weld") for _, _, d in g.edges(data=True))
+
+
+def test_weld_elevation_veto_blocks_ground_fragment_under_a_bridge():
+    g = _weld_graph(scrap_lat_offset_deg=0.000003, street_tags={"bridge": "yes"})
+    g = streets._weld_drawing_error_components(g, None, "test")
+    assert nx.number_connected_components(g.to_undirected(as_view=True)) == 2
+
+
+def test_weld_elevation_match_allows_bridge_fragment_onto_bridge():
+    g = _weld_graph(scrap_lat_offset_deg=0.000003, street_tags={"bridge": "yes"})
+    for u, v, k in list(g.edges(keys=True)):
+        if g.edges[u, v, k].get("osmid") == 777:
+            g.edges[u, v, k]["bridge"] = "yes"
+    g = streets._weld_drawing_error_components(g, None, "test")
+    assert nx.number_connected_components(g.to_undirected(as_view=True)) == 1
+
+
+def test_weld_barrier_veto_blocks_a_fenced_gap():
+    g = _weld_graph(scrap_lat_offset_deg=0.000003)
+    barrier = nx.MultiDiGraph()
+    barrier.graph["crs"] = "epsg:4326"
+    barrier.add_node(9001, x=-73.9851, y=_STREET_Y + 0.0000015)
+    barrier.add_node(9002, x=-73.9849, y=_STREET_Y + 0.0000015)
+    barrier.add_edge(9001, 9002, osmid=888, length=17.0)
+    g = streets._weld_drawing_error_components(g, barrier, "test")
+    assert nx.number_connected_components(g.to_undirected(as_view=True)) == 2
+
+
+def test_weld_skips_imported_only_fragments():
+    # synthetic (negative-id) fragments are FIXES item 6's territory
+    g = _weld_graph(scrap_lat_offset_deg=0.000003, scrap_ids=(-50, -51))
+    g = streets._weld_drawing_error_components(g, None, "test")
+    assert nx.number_connected_components(g.to_undirected(as_view=True)) == 2
+
+
+def test_weld_never_merges_two_real_networks():
+    # both components >= WELD_SCRAP_MAX_LEN_M: neither is a scrap, even
+    # 0.33m apart -- a genuine sub-network deserves a verified fix
+    g = _weld_graph(scrap_lat_offset_deg=0.000003, street_len=6000.0)
+    for u, v, k in list(g.edges(keys=True)):
+        if g.edges[u, v, k].get("osmid") == 777:
+            g.edges[u, v, k]["length"] = 6000.0
+    g = streets._weld_drawing_error_components(g, None, "test")
+    assert nx.number_connected_components(g.to_undirected(as_view=True)) == 2
+
+
+def test_weld_duplicate_parallel_way_welds_only_at_loose_ends():
+    # a fragment drawn on top of the street (every vertex within 0.5m)
+    # must weld at its two ENDS, not manufacture a rung at every vertex
+    g = nx.MultiDiGraph()
+    g.graph["crs"] = "epsg:4326"
+    g.add_node(1, x=-73.99, y=_STREET_Y)
+    g.add_node(2, x=-73.98, y=_STREET_Y)
+    g.add_edge(1, 2, osmid=555, length=844.0)
+    xs = [-73.987, -73.986, -73.985, -73.984, -73.983]
+    for i, x in enumerate(xs):
+        g.add_node(201 + i, x=x, y=_STREET_Y + 0.000003)
+    for i in range(len(xs) - 1):
+        g.add_edge(201 + i, 202 + i, osmid=778, length=84.0)
+    g = streets._weld_drawing_error_components(g, None, "test")
+    assert nx.number_connected_components(g.to_undirected(as_view=True)) == 1
+    weld_edges = [d for _, _, d in g.edges(data=True) if d.get("weld")]
+    assert len(weld_edges) == 2, f"expected end welds only, got {len(weld_edges)}"
+
+
+def test_weld_mid_line_touch_gets_a_single_closest_weld():
+    # fragment whose loose ends are FAR from the street but whose interior
+    # brushes it: one weld at the closest node, nothing else
+    g = nx.MultiDiGraph()
+    g.graph["crs"] = "epsg:4326"
+    g.add_node(1, x=-73.99, y=_STREET_Y)
+    g.add_node(2, x=-73.98, y=_STREET_Y)
+    g.add_edge(1, 2, osmid=555, length=844.0)
+    g.add_node(301, x=-73.9853, y=_STREET_Y + 0.0002)   # far end
+    g.add_node(302, x=-73.985, y=_STREET_Y + 0.000003)  # brushes the street
+    g.add_node(303, x=-73.9847, y=_STREET_Y + 0.0002)   # far end
+    g.add_edge(301, 302, osmid=779, length=25.0)
+    g.add_edge(302, 303, osmid=779, length=25.0)
+    g = streets._weld_drawing_error_components(g, None, "test")
+    assert nx.number_connected_components(g.to_undirected(as_view=True)) == 1
+    weld_edges = [d for _, _, d in g.edges(data=True) if d.get("weld")]
+    assert len(weld_edges) == 1
