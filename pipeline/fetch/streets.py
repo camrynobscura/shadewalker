@@ -157,7 +157,19 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # tie-breaks that already shift on every refetch (HISTORY 2026-08-15).
 # The layer caches key on this same version, so any future filter change
 # (which always bumps this) invalidates them too.
-GRAPH_CACHE_VERSION = 19
+# v20 (2026-08-16, FIXES item 1's connection Batch A): weld drawing-error
+# components -- OSM fragments whose nodes sit within
+# DRAWING_ERROR_WELD_MAX_M (0.5m) of a street edge in a different, larger
+# component. The 2026-08-15/16 citywide cause audit measured 768 such
+# components (min node-to-network distance <= 0.5m): two real, distinct
+# OSM ways drawn essentially on top of each other without a shared node,
+# a digitization slip, not a real separation. Welded pre-simplify through
+# the same _apply_edge_splits machinery as interior sidewalks, with the
+# same barrier veto plus an elevation-signature veto (bridge/tunnel/layer
+# must match -- the phantom-vertical-connector lesson), and every
+# connector carries weld=True so vertical_audit reviews it like any
+# other manufactured edge.
+GRAPH_CACHE_VERSION = 20
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -490,6 +502,26 @@ PARK_TRAIL_MERGE_TOLERANCE_M = 1.0
 # which would routinely reject a trail's own just-computed connection
 # point.
 PARK_TRAIL_SNAP_MAX_M = 10.0
+
+# Connection Batch A (FIXES.md item 1, 2026-08-16): how close a node of a
+# disconnected OSM fragment must be to a street edge of a different,
+# larger component before the two are welded. 0.5m is the citywide cause
+# audit's DRAWING_ERROR_CONNECTABLE bar (768 components measured at or
+# under it): at half a meter, two mapped features occupy the same
+# physical spot -- the separation is a digitization slip in OSM's own
+# data (verified on real cases: way endpoints 0.1-0.2m from an adjacent
+# way's edge, e.g. Howard Beach), not a real-world gap. Deliberately far
+# tighter than INTERIOR_SIDEWALK_SNAP_MAX_M's 5m: those snaps attach a
+# TRUSTED synthetic source to the network, while this welds two OSM
+# fragments to each other on distance evidence alone, so the evidence
+# bar is "same spot", not "nearby".
+DRAWING_ERROR_WELD_MAX_M = 0.5
+
+# A component only qualifies for drawing-error welding while its total
+# edge length is under this -- the same "scrap vs real network" bar the
+# citywide audit used (a genuine sub-network above it deserves its own
+# verified fix, never an automatic weld).
+WELD_SCRAP_MAX_LEN_M = 5000.0
 
 # Curated closure zones (FIXES.md item 0b): polygons where the imported
 # synthetic layers (interior sidewalks, park trails) must NOT be admitted
@@ -1209,6 +1241,200 @@ def _snap_interior_sidewalks(
     return result
 
 
+def _elevation_signature(tags: dict) -> tuple:
+    """A way's vertical context: (on a bridge, in a tunnel, layer). Two
+    ways may only be drawing-error-welded when these match — the
+    phantom-vertical-connector lesson (FIXES.md item 0): plain 2D
+    proximity happily wires a ground path onto the bridge deck overhead.
+    bridge=boardwalk counts as ground, same as vertical_audit treats it —
+    a boardwalk is stepped onto from ground level."""
+    bridge = vertical_audit._scalar(tags.get("bridge"))
+    tunnel = vertical_audit._scalar(tags.get("tunnel"))
+    try:
+        layer = int(vertical_audit._scalar(tags.get("layer")) or 0)
+    except (TypeError, ValueError):
+        layer = 0
+    return (
+        bridge not in (None, "no", "boardwalk"),
+        tunnel not in (None, "no"),
+        layer,
+    )
+
+
+def _weld_drawing_error_components(
+    graph: nx.MultiDiGraph,
+    barrier_graph: nx.MultiDiGraph | None,
+    tile_id: str,
+) -> nx.MultiDiGraph:
+    """Weld OSM drawing-error fragments onto the street network (FIXES.md
+    item 1, connection Batch A, 2026-08-16).
+
+    A "drawing error" is a disconnected component with a node sitting
+    within DRAWING_ERROR_WELD_MAX_M (0.5m) of a street edge belonging to
+    a different, larger component: two real OSM ways mapped on top of
+    each other without a shared node. The citywide cause audit measured
+    768 of these (data/audits/2026-08-15/scrap_cause_audit_results.json);
+    each weld inserts a split node at the exact nearest point on the
+    street edge, through the same _apply_edge_splits machinery as
+    interior sidewalks.
+
+    Three vetoes, in order:
+      - size: only components under WELD_SCRAP_MAX_LEN_M qualify, and
+        only ones containing at least one real OSM node — imported-only
+        fragments (synthetic negative ids) are FIXES item 6's
+        evidence-gated territory, never auto-welded;
+      - elevation: the target edge's bridge/tunnel/layer signature must
+        match one of the scrap node's own incident edges
+        (_elevation_signature) — at 0.5m in 2D, "right next to" and
+        "directly underneath" look identical;
+      - barrier: a mapped fence/wall crossing the (sub-meter) connection
+        line blocks it, same rule as _snap_interior_sidewalks.
+
+    Every connector carries weld=True, so vertical_audit reviews these
+    like every other pipeline-manufactured edge. Welds at real OSM nodes
+    only — the split node minted on the street edge is synthetic, but the
+    scrap-side anchor is always a genuine OSM node the audit measured.
+    """
+    undirected = graph.to_undirected(as_view=True)
+    components = list(nx.connected_components(undirected))
+    if len(components) <= 1:
+        return graph
+
+    comp_of = {}
+    comp_len = [0.0] * len(components)
+    for ci, nodes in enumerate(components):
+        for n in nodes:
+            comp_of[n] = ci
+    for u, v, data in undirected.edges(data=True):
+        comp_len[comp_of[u]] += float(data.get("length", 0.0))
+
+    # The tile's largest component is always weld-able onto, whatever its
+    # absolute length — a mostly-water tile can hold only a sliver of the
+    # real network, still the right thing to attach fragments to.
+    largest = max(range(len(components)), key=lambda ci: comp_len[ci])
+    target_comps = {
+        ci for ci in range(len(components))
+        if ci == largest or comp_len[ci] >= WELD_SCRAP_MAX_LEN_M
+    }
+    scrap_comps = [
+        ci for ci in range(len(components))
+        if ci not in target_comps
+        and 0.0 < comp_len[ci] < WELD_SCRAP_MAX_LEN_M
+        and any(isinstance(n, int) and n > 0 for n in components[ci])
+    ]
+    if not scrap_comps:
+        return graph
+
+    target_edge_keys = [
+        (u, v, k) for u, v, k in graph.edges(keys=True)
+        if comp_of[u] in target_comps
+    ]
+    target_lines_m = [_edge_line_m(graph, u, v, k) for u, v, k in target_edge_keys]
+    target_tree = STRtree(target_lines_m)
+
+    barrier_lines_m = []
+    if barrier_graph is not None:
+        barrier_lines_m = [
+            _edge_line_m(barrier_graph, u, v, k)
+            for u, v, k in barrier_graph.edges(keys=True)
+        ]
+
+    splits_by_edge: dict[tuple, list[tuple[float, object, Point]]] = {}
+    welded_nodes = 0
+    vetoed_elevation = 0
+    vetoed_barrier = 0
+    candidate_comps = set()
+    welded_comps = set()
+
+    def try_weld(ci, node) -> bool:
+        """Queue a weld for one fragment node if it survives every check.
+        Mutates the enclosing counters; returns whether it was queued."""
+        nonlocal welded_nodes, vetoed_elevation, vetoed_barrier
+        point_m = Point(_TO_METRIC_CRS(graph.nodes[node]["x"], graph.nodes[node]["y"]))
+        edge_idx = target_tree.nearest(point_m)
+        nearest_line = target_lines_m[edge_idx]
+        if point_m.distance(nearest_line) > DRAWING_ERROR_WELD_MAX_M:
+            return False
+        candidate_comps.add(ci)
+
+        u, v, k = target_edge_keys[edge_idx]
+        target_sig = _elevation_signature(graph.edges[u, v, k])
+        node_sigs = {
+            _elevation_signature(data)
+            for _, _, data in undirected.edges(node, data=True)
+        }
+        if node_sigs and target_sig not in node_sigs:
+            vetoed_elevation += 1
+            return False
+
+        distance_along = nearest_line.project(point_m)
+        snap_point_m = nearest_line.interpolate(distance_along)
+        connection = LineString([point_m, snap_point_m])
+        if any(connection.crosses(barrier) for barrier in barrier_lines_m):
+            vetoed_barrier += 1
+            return False
+
+        splits_by_edge.setdefault((u, v, k), []).append(
+            (distance_along, node, snap_point_m)
+        )
+        welded_nodes += 1
+        welded_comps.add(ci)
+        return True
+
+    # Weld at a fragment's loose ends (degree <= 1), the same philosophy
+    # as _snap_interior_sidewalks: a drawing error lives where a way's
+    # END was drawn 0.x meters short of the way it belongs to. Welding
+    # every coincident node instead would stitch a duplicate way drawn
+    # parallel along a street to it at every shared vertex -- dozens of
+    # manufactured rungs OSM never had (measured on r10c17: 66 welds for
+    # 7 fragments before this restriction). A fragment with no qualifying
+    # loose end still gets ONE weld at its single closest node -- the
+    # mid-line touch case (a crossing fragment whose interior brushes a
+    # street), and exactly the point the citywide audit measured and the
+    # satellite sample reviews.
+    for ci in scrap_comps:
+        osm_nodes = [n for n in components[ci] if isinstance(n, int) and n > 0]
+        welded_here = False
+        for node in osm_nodes:
+            if undirected.degree(node) <= 1 and try_weld(ci, node):
+                welded_here = True
+        if welded_here:
+            continue
+        best = None
+        best_d = None
+        for node in osm_nodes:
+            point_m = Point(_TO_METRIC_CRS(graph.nodes[node]["x"], graph.nodes[node]["y"]))
+            d = point_m.distance(target_lines_m[target_tree.nearest(point_m)])
+            if best_d is None or d < best_d:
+                best, best_d = node, d
+        if best is not None and best_d <= DRAWING_ERROR_WELD_MAX_M:
+            try_weld(ci, best)
+
+    if not splits_by_edge:
+        if candidate_comps:
+            print(f"  [streets] {tile_id}: drawing-error welds: 0 of "
+                  f"{len(candidate_comps)} candidate fragment(s) welded "
+                  f"({vetoed_elevation} elevation-vetoed, {vetoed_barrier} barrier-vetoed)")
+        return graph
+
+    existing_negative_ids = [n for n in graph.nodes if isinstance(n, int) and n < 0]
+    next_id = (min(existing_negative_ids) - 1) if existing_negative_ids else -1
+    existing_negative_osmids = [
+        data.get("osmid") for _, _, data in graph.edges(data=True)
+        if isinstance(data.get("osmid"), int) and data["osmid"] < 0
+    ]
+    next_edge_osmid = (min(existing_negative_osmids) - 1) if existing_negative_osmids else -1
+    for (u, v, k), splits in splits_by_edge.items():
+        next_id, next_edge_osmid = _apply_edge_splits(
+            graph, graph, u, v, k, splits, next_id, next_edge_osmid
+        )
+
+    print(f"  [streets] {tile_id}: drawing-error welds: connected "
+          f"{len(welded_comps)} fragment(s) at {welded_nodes} node(s) "
+          f"({vetoed_elevation} elevation-vetoed, {vetoed_barrier} barrier-vetoed)")
+    return graph
+
+
 def _uncovered_trail_segments(
     trail_line_m: LineString, covered_m, min_length_m: float
 ) -> list[LineString]:
@@ -1434,6 +1660,17 @@ def fetch_streets(
             graph, trail_graph, barrier_graph, tile_id,
             snap_max_m=PARK_TRAIL_SNAP_MAX_M, label="park trails",
         )
+
+    # Connection Batch A (FIXES.md item 1): weld OSM drawing-error
+    # fragments -- see _weld_drawing_error_components. Runs AFTER every
+    # source above is composed and snapped, so a fragment those passes
+    # already connected no longer counts as disconnected, and BEFORE the
+    # vertical audit below, which reviews these welds along with every
+    # other manufactured connector.
+    if not barrier_fetched:
+        barrier_graph = _aux_layer_graph(bbox, tile_id, "barriers")
+        barrier_fetched = True
+    graph = _weld_drawing_error_components(graph, barrier_graph, tile_id)
 
     # Audit the welds this build just manufactured, BEFORE simplification
     # (scalar osmids, weld=True intact). Report-only -- see
