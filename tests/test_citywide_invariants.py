@@ -445,3 +445,25 @@ def test_merge_pair_fixture_contains_cross_tile_synthetic_data(merge_pair_store)
         "load() stitched nothing -- the fixture no longer contains cross-tile "
         "duplicate synthetic paths, so the stitch pass ran unexercised"
     )
+
+
+@pytest.mark.citywide
+def test_hide_rule_keeps_real_isolated_places_and_hides_junk(citywide_store):
+    # The hide rule's two user-reviewed guarantees, pinned on real places
+    # (FIXES item 1, 2026-08-17). Liberty Island: ferry-served public
+    # paths, curated keep-visible -- clicks there must still route within
+    # the island. North Brother Island: a closed bird sanctuary whose 52
+    # bare OSM footways were the scraps arc's canonical trap (see HISTORY
+    # 2026-08-16) -- it must be neither snappable nor advertised as
+    # covered. If Liberty ever fails here, check that its component still
+    # matches KEEP_VISIBLE_ISOLATED_PLACES' coordinate; if North Brother
+    # ever fails, someone connected it -- verify that's real before
+    # trusting it.
+    store = citywide_store
+
+    assert store.in_coverage(40.690830, -74.045350) is True  # Liberty
+    liberty = store.snap_pair(40.690100, -74.046900, 40.691700, -74.043900)
+    assert liberty is not None, "Liberty Island should route within itself"
+
+    assert store.in_coverage(40.801850, -73.898830) is False  # North Brother
+    assert store.snap_pair(40.801000, -73.899800, 40.802600, -73.897900) is None
