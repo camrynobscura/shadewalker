@@ -37,13 +37,27 @@ def _isolate_citywide_layers(monkeypatch, tmp_path):
     data/raw/citywide_layers/."""
     monkeypatch.setattr(citywide_layers, "CACHE_DIR", tmp_path / "citywide_layers")
     monkeypatch.setattr(citywide_layers, "_MEMO", {})
+    monkeypatch.setattr(citywide_layers, "_FRESHENED", set())
 
 
 def _mock_fetch(monkeypatch, tmp_path, graph_from_bbox):
     monkeypatch.setattr(streets, "STREETS_DIR", tmp_path)
+    monkeypatch.setattr(streets, "RAW_STREETS_DIR", tmp_path / "streets_raw")
     monkeypatch.setattr(streets.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(streets.ox, "graph_from_bbox", graph_from_bbox)
-    monkeypatch.setattr(streets.ox, "save_graphml", lambda graph, path: None)
+    # In-memory stand-ins for GraphML save/load, NOT a bare no-op save:
+    # the raw-cache layer (FIXES item 11) re-loads the snapshot it just
+    # saved, so a no-op save would crash it -- and these wiring tests use
+    # toy string node ids ("m1") that osmnx's REAL load would cast to int
+    # and choke on. The dedicated raw-cache tests further down use the
+    # real save/load with realistic int ids instead; wiring tests here are
+    # about composition, not GraphML fidelity. Returned so a test can
+    # inspect what got written where.
+    saved = {}
+    monkeypatch.setattr(
+        streets.ox, "save_graphml", lambda graph, path: saved.__setitem__(str(path), graph)
+    )
+    monkeypatch.setattr(streets.ox, "load_graphml", lambda path: saved[str(path)])
     _isolate_citywide_layers(monkeypatch, tmp_path)
     # Defaults to "no trails here" (the common real case) unless a test
     # overrides it -- unlike interior_sidewalks.fetch_interior_sidewalks,
@@ -54,6 +68,7 @@ def _mock_fetch(monkeypatch, tmp_path, graph_from_bbox):
         park_trails, "fetch_park_trails",
         lambda **kwargs: {"type": "FeatureCollection", "features": []},
     )
+    return saved
 
 
 def _by_filter(
@@ -559,12 +574,14 @@ def test_parking_aisle_filter_excludes_building_passages():
     assert '"foot"!~"no"' in streets.PARKING_AISLE_FILTER
 
 
-def _cache_roundtrip(monkeypatch, tmp_path, cached_graph, recorded_bbox_signature):
+def _cache_roundtrip(monkeypatch, tmp_path, cached_graph, recorded_bbox_signature,
+                     refresh_raw=False):
     """Put a graph in the cache with a given recorded fetch_bbox, then call
     fetch_streets and report whether it re-fetched. Uses osmnx's real
     save/load so the attribute genuinely survives a GraphML round trip
     rather than being asserted against a mock's in-memory dict."""
     monkeypatch.setattr(streets, "STREETS_DIR", tmp_path)
+    monkeypatch.setattr(streets, "RAW_STREETS_DIR", tmp_path / "streets_raw")
     monkeypatch.setattr(streets.time, "sleep", lambda seconds: None)
     _isolate_citywide_layers(monkeypatch, tmp_path)
 
@@ -583,12 +600,14 @@ def _cache_roundtrip(monkeypatch, tmp_path, cached_graph, recorded_bbox_signatur
 
     def record_fetch(**kwargs):
         fetched["count"] += 1
-        fresh = nx.MultiDiGraph()
+        # crs like a real osmnx graph: the raw-cache layer round-trips this
+        # through the real save/load before processing sees it.
+        fresh = nx.MultiDiGraph(crs="epsg:4326")
         fresh.add_node(2222, x=0.0, y=0.0)  # int ids: osmnx casts them on load
         return fresh
 
     monkeypatch.setattr(streets.ox, "graph_from_bbox", _by_filter(record_fetch))
-    result = streets.fetch_streets(BBOX, "cachetile")
+    result = streets.fetch_streets(BBOX, "cachetile", refresh_raw=refresh_raw)
     return result, fetched["count"]
 
 
@@ -637,20 +656,23 @@ def test_fetch_streets_refetches_a_cache_with_no_recorded_bbox(monkeypatch, tmp_
 
 
 def test_fetch_streets_records_the_fetch_bbox_it_used(monkeypatch, tmp_path):
-    # Without this the guard above can never fire on a freshly written file.
-    saved = {}
-
-    def capture(graph, path):
-        saved["fetch_bbox"] = graph.graph.get("fetch_bbox")
-
+    # Without this the guard above can never fire on a freshly written file
+    # -- and since FIXES item 11 there are TWO freshly written files, the
+    # raw snapshot and the processed graph, each with its own load-time
+    # bbox guard, so both must record it.
     main_graph = nx.MultiDiGraph()
     main_graph.add_node("m1", x=0.0, y=0.0)
-    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
-    monkeypatch.setattr(streets.ox, "save_graphml", capture)
+    saved = _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
 
     streets.fetch_streets(BBOX, "test-records-bbox-tile")
 
-    assert saved["fetch_bbox"] == streets._bbox_signature(BBOX)
+    recorded = [graph.graph.get("fetch_bbox") for graph in saved.values()]
+    processed_and_raw = [
+        graph.graph.get("fetch_bbox") for path, graph in saved.items()
+        if "test-records-bbox-tile" in path
+    ]
+    assert len(processed_and_raw) == 2, "expected one raw snapshot + one processed graph"
+    assert all(sig == streets._bbox_signature(BBOX) for sig in processed_and_raw), recorded
 
 
 def test_any_sidewalk_filter_matches_sidewalks_with_or_without_a_name():
@@ -793,16 +815,19 @@ def test_fetch_streets_caches_park_reach_and_plain_results_under_different_names
     main_graph = nx.MultiDiGraph()
     main_graph.add_node("m1", x=-73.95, y=40.05)
 
-    saved = []
-    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
-    monkeypatch.setattr(streets.ox, "save_graphml", lambda graph, path: saved.append(path))
+    saved = _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
 
     streets.fetch_streets(BBOX, "test-cache-variant-tile", park_reach=_park_reach_around(-73.95, 40.05))
     streets.fetch_streets(BBOX, "test-cache-variant-tile")
 
-    # save_graphml also fires for the citywide layer caches now (item 6b)
-    # -- only the two TILE cache writes are under test here.
-    saved_tiles = [path for path in saved if "test-cache-variant-tile" in str(path)]
+    # save_graphml also fires for the citywide layer caches (item 6b) and
+    # the raw WALK_FILTER snapshot (item 11, variant-INdependent by design:
+    # park_reach only changes processing, not what Overpass returned) --
+    # only the two PROCESSED tile cache writes are under test here.
+    saved_tiles = [
+        path for path in saved
+        if "test-cache-variant-tile" in path and "streets_raw" not in path
+    ]
     assert len(saved_tiles) == 2
     assert saved_tiles[0] != saved_tiles[1]
 
@@ -1699,9 +1724,9 @@ def test_citywide_layer_disk_cache_survives_a_new_process(monkeypatch, tmp_path)
 
     monkeypatch.setattr(citywide_layers.ox, "graph_from_bbox", fake_fetch)
 
-    first = citywide_layers.citywide_layer("cycleways", "unused-filter", 99)
+    first = citywide_layers.citywide_layer("cycleways", "unused-filter")
     citywide_layers._MEMO.clear()  # simulate a new process
-    second = citywide_layers.citywide_layer("cycleways", "unused-filter", 99)
+    second = citywide_layers.citywide_layer("cycleways", "unused-filter")
 
     assert fetches["count"] == 1
     assert 1111 in first.nodes
@@ -1723,13 +1748,13 @@ def test_citywide_layer_refetches_when_the_recorded_bbox_no_longer_matches(monke
 
     monkeypatch.setattr(citywide_layers.ox, "graph_from_bbox", fake_fetch)
 
-    citywide_layers.citywide_layer("cycleways", "unused-filter", 99)
+    citywide_layers.citywide_layer("cycleways", "unused-filter")
     citywide_layers._MEMO.clear()
     monkeypatch.setattr(
         citywide_layers, "_layer_fetch_bbox",
         lambda: Bbox(lat_min=41.0, lat_max=41.5, lon_min=-74.0, lon_max=-73.5),
     )
-    citywide_layers.citywide_layer("cycleways", "unused-filter", 99)
+    citywide_layers.citywide_layer("cycleways", "unused-filter")
 
     assert fetches["count"] == 2
 
@@ -1746,13 +1771,223 @@ def test_citywide_layer_caches_an_empty_layer_without_reasking(monkeypatch, tmp_
 
     monkeypatch.setattr(citywide_layers.ox, "graph_from_bbox", fake_fetch)
 
-    first = citywide_layers.citywide_layer("foot_overrides", "unused-filter", 99)
+    first = citywide_layers.citywide_layer("foot_overrides", "unused-filter")
     citywide_layers._MEMO.clear()
-    second = citywide_layers.citywide_layer("foot_overrides", "unused-filter", 99)
+    second = citywide_layers.citywide_layer("foot_overrides", "unused-filter")
 
     assert first is None
     assert second is None
     assert fetches["count"] == 1
+
+
+# ---- raw-fetch cache split (FIXES.md item 11) ------------------------------
+# The raw Overpass caches (per-tile WALK_FILTER snapshots + the citywide
+# layers) key on raw_fetch_key() -- what changes what Overpass RETURNS --
+# while the processed per-tile graph keeps GRAPH_CACHE_VERSION -- what
+# changes what we BUILD from it. A processing-only version bump must
+# rebuild locally from the raw snapshots; pulling fresh OSM is the
+# explicit --refresh-raw, never a side effect. (The v20 refetch
+# re-downloaded ~5h of byte-identical data for a purely-local weld pass.)
+
+
+def test_raw_fetch_key_changes_with_filter_and_retained_tags(monkeypatch):
+    base = citywide_layers.raw_fetch_key("filter-a")
+    # Stable for identical inputs -- it's a cache key, not a nonce.
+    assert citywide_layers.raw_fetch_key("filter-a") == base
+    # A filter edit must invalidate (the old GRAPH_CACHE_VERSION keying's
+    # one real job, preserved).
+    assert citywide_layers.raw_fetch_key("filter-b") != base
+    # So must a retained-way-tag change: v19 added `layer` to
+    # useful_tags_way with no filter edit at all, and that changed every
+    # fetched graph's content.
+    monkeypatch.setattr(
+        citywide_layers.ox.settings, "useful_tags_way",
+        list(citywide_layers.ox.settings.useful_tags_way) + ["zzz_new_tag"],
+    )
+    assert citywide_layers.raw_fetch_key("filter-a") != base
+
+
+def test_raw_fetch_key_changes_with_the_osmnx_version(monkeypatch):
+    # osmnx's bbox-truncation semantics are baked into a saved snapshot;
+    # an upgrade must invalidate rather than mix two versions' semantics
+    # in one cache.
+    base = citywide_layers.raw_fetch_key("filter-a")
+    monkeypatch.setattr(citywide_layers.ox, "__version__", "0.0.0-test")
+    assert citywide_layers.raw_fetch_key("filter-a") != base
+
+
+def _isolate_raw_streets(monkeypatch, tmp_path):
+    monkeypatch.setattr(streets, "RAW_STREETS_DIR", tmp_path / "streets_raw")
+    monkeypatch.setattr(streets.time, "sleep", lambda seconds: None)
+
+
+def _counting_raw_fetch(fetches):
+    """A realistic small WALK_FILTER response: int OSM ids and a crs, so
+    it survives osmnx's REAL save/load (these tests exercise the actual
+    GraphML round trip, unlike the wiring tests' in-memory stand-ins)."""
+    def fetch(**kwargs):
+        fetches["count"] += 1
+        graph = nx.MultiDiGraph(crs="epsg:4326")
+        graph.add_node(1111, x=-73.95, y=40.05)
+        graph.add_node(2222, x=-73.951, y=40.051)
+        graph.add_edge(1111, 2222, osmid=555, length=100.0, highway="residential")
+        return graph
+    return fetch
+
+
+def test_raw_walk_graph_downloads_once_then_reads_the_snapshot(monkeypatch, tmp_path):
+    _isolate_raw_streets(monkeypatch, tmp_path)
+    fetches = {"count": 0}
+    monkeypatch.setattr(streets.ox, "graph_from_bbox", _counting_raw_fetch(fetches))
+
+    first = streets._raw_walk_graph(BBOX, "rawtile")
+    second = streets._raw_walk_graph(BBOX, "rawtile")
+
+    assert fetches["count"] == 1
+    assert set(first.nodes) == set(second.nodes) == {1111, 2222}
+    # Identical in attributes AND types: the fresh build returns the
+    # re-loaded snapshot (not the in-memory original), so a later rebuild
+    # sees byte-for-byte the same input this build processed.
+    assert dict(first.nodes(data=True)) == dict(second.nodes(data=True))
+    assert list(first.edges(keys=True, data=True)) == list(second.edges(keys=True, data=True))
+
+
+def test_raw_walk_graph_returns_the_reloaded_snapshot_not_the_in_memory_graph(monkeypatch, tmp_path):
+    # The determinism guarantee is structural: processing always consumes
+    # what the GraphML round trip produces, whether the data was just
+    # downloaded or read back a month later.
+    _isolate_raw_streets(monkeypatch, tmp_path)
+    produced = {}
+
+    def fetch(**kwargs):
+        graph = nx.MultiDiGraph(crs="epsg:4326")
+        graph.add_node(1111, x=-73.95, y=40.05)
+        produced["graph"] = graph
+        return graph
+
+    monkeypatch.setattr(streets.ox, "graph_from_bbox", fetch)
+    result = streets._raw_walk_graph(BBOX, "rawtile-roundtrip")
+
+    assert result is not produced["graph"]
+    assert 1111 in result.nodes
+
+
+def test_raw_walk_graph_caches_an_empty_tile_without_reasking(monkeypatch, tmp_path):
+    # Open-water tiles are real and common at the coastline; the marker
+    # file keeps every later run from re-asking Overpass about them.
+    _isolate_raw_streets(monkeypatch, tmp_path)
+    fetches = {"count": 0}
+
+    def fetch(**kwargs):
+        fetches["count"] += 1
+        raise InsufficientResponseError("No data elements in server response.")
+
+    monkeypatch.setattr(streets.ox, "graph_from_bbox", fetch)
+
+    assert streets._raw_walk_graph(BBOX, "watertile") is None
+    assert streets._raw_walk_graph(BBOX, "watertile") is None
+    assert fetches["count"] == 1
+
+
+def test_raw_walk_graph_refetches_when_the_recorded_bbox_no_longer_matches(monkeypatch, tmp_path):
+    # Same discipline as both existing caches (the r17c14 grid-shift
+    # lesson): the filename alone can't be trusted across a grid
+    # redefinition.
+    _isolate_raw_streets(monkeypatch, tmp_path)
+    fetches = {"count": 0}
+    monkeypatch.setattr(streets.ox, "graph_from_bbox", _counting_raw_fetch(fetches))
+
+    streets._raw_walk_graph(BBOX, "shifttile")
+    shifted = Bbox(
+        lat_min=BBOX.lat_min + config.TILE_SIZE_LAT_DEG,
+        lat_max=BBOX.lat_max + config.TILE_SIZE_LAT_DEG,
+        lon_min=BBOX.lon_min,
+        lon_max=BBOX.lon_max,
+    )
+    streets._raw_walk_graph(shifted, "shifttile")
+
+    assert fetches["count"] == 2
+
+
+def test_raw_walk_graph_refresh_pulls_fresh_despite_a_valid_snapshot(monkeypatch, tmp_path):
+    _isolate_raw_streets(monkeypatch, tmp_path)
+    fetches = {"count": 0}
+    monkeypatch.setattr(streets.ox, "graph_from_bbox", _counting_raw_fetch(fetches))
+
+    streets._raw_walk_graph(BBOX, "freshtile")
+    streets._raw_walk_graph(BBOX, "freshtile", refresh=True)
+
+    assert fetches["count"] == 2
+
+
+def test_fetch_streets_refresh_raw_ignores_a_valid_processed_cache(monkeypatch, tmp_path):
+    # --refresh-raw means "pull fresh OSM": the processed cache was built
+    # from the old raw data by definition, so trusting it would silently
+    # hand back exactly what the flag exists to replace.
+    result, fetches = _cache_roundtrip(
+        monkeypatch, tmp_path, _cached_graph(), streets._bbox_signature(BBOX),
+        refresh_raw=True,
+    )
+    assert fetches > 0, "a valid processed cache must not satisfy --refresh-raw"
+    assert 1111 not in result.nodes
+
+
+def test_citywide_layer_refresh_refetches_a_valid_cache_once_per_process(monkeypatch, tmp_path):
+    # refresh=True must beat both the memo and the disk cache -- but only
+    # once per process, or a --refresh-raw borough run would re-download
+    # every layer per tile (the per-tile repetition item 6b removed).
+    _isolate_citywide_layers(monkeypatch, tmp_path)
+    fetches = {"count": 0}
+
+    def fake_fetch(**kwargs):
+        fetches["count"] += 1
+        graph = nx.MultiDiGraph(crs="epsg:4326")
+        graph.add_node(1111, x=-73.95, y=40.05)
+        return graph
+
+    monkeypatch.setattr(citywide_layers.ox, "graph_from_bbox", fake_fetch)
+
+    citywide_layers.citywide_layer("cycleways", "unused-filter")
+    assert fetches["count"] == 1
+
+    # Simulate a fresh process holding yesterday's disk cache.
+    citywide_layers._MEMO.clear()
+    citywide_layers._FRESHENED.clear()
+    citywide_layers.citywide_layer("cycleways", "unused-filter")
+    assert fetches["count"] == 1  # disk cache honored without refresh
+
+    citywide_layers.citywide_layer("cycleways", "unused-filter", refresh=True)
+    assert fetches["count"] == 2  # refresh beats memo + disk
+    citywide_layers.citywide_layer("cycleways", "unused-filter", refresh=True)
+    assert fetches["count"] == 2  # ...but only once per process
+
+
+def test_citywide_layer_cache_keys_on_the_filter_itself(monkeypatch, tmp_path):
+    # A filter edit lands in the key, so it can never silently reuse a
+    # layer fetched under the old definition -- while the old file just
+    # stops matching (kept on disk, not clobbered), so reverting the
+    # filter finds it again.
+    _isolate_citywide_layers(monkeypatch, tmp_path)
+    fetches = {"count": 0}
+
+    def fake_fetch(**kwargs):
+        fetches["count"] += 1
+        graph = nx.MultiDiGraph(crs="epsg:4326")
+        graph.add_node(1111, x=-73.95, y=40.05)
+        return graph
+
+    monkeypatch.setattr(citywide_layers.ox, "graph_from_bbox", fake_fetch)
+
+    citywide_layers.citywide_layer("cycleways", "filter-one")
+    assert fetches["count"] == 1
+
+    citywide_layers._MEMO.clear()
+    citywide_layers.citywide_layer("cycleways", "filter-two")
+    assert fetches["count"] == 2  # new filter = new key = cache miss
+
+    citywide_layers._MEMO.clear()
+    citywide_layers.citywide_layer("cycleways", "filter-one")
+    assert fetches["count"] == 2  # the original file still matches its key
 
 
 # ---- closure zones (FIXES.md item 0b, v19) --------------------------------

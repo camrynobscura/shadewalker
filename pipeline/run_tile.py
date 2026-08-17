@@ -3,6 +3,7 @@
     uv run python -m pipeline.run_tile pilot
     uv run python -m pipeline.run_tile pilot --refresh-trees
     uv run python -m pipeline.run_tile brooklyn
+    uv run python -m pipeline.run_tile brooklyn --refresh-raw
 
 Stages: fetch → boundary clip → graph → scoring → export. The fetch stage is disk-cached
 (the slow, network-bound part); the compute stages are fast enough to
@@ -40,7 +41,7 @@ def _remove_stale_export(tile_id: str) -> None:
         print(f"[{tile_id}] removed stale export from a previous run")
 
 
-def run(tile_id: str, refresh_trees: bool = False) -> None:
+def run(tile_id: str, refresh_trees: bool = False, refresh_raw: bool = False) -> None:
     bbox = config.get_tile_bbox(tile_id)
     print(f"[{tile_id}] lat {bbox.lat_min}–{bbox.lat_max}, lon {bbox.lon_min}–{bbox.lon_max}")
 
@@ -64,7 +65,9 @@ def run(tile_id: str, refresh_trees: bool = False) -> None:
     # fetch (cached). Streets first: a tile with no matching streets (open
     # water) needs no tree data either, so checking this first skips a
     # pointless Socrata call on top of the Overpass one.
-    street_graph = streets.fetch_streets(fetch_bbox, tile_id, park_reach=park_reach)
+    street_graph = streets.fetch_streets(
+        fetch_bbox, tile_id, park_reach=park_reach, refresh_raw=refresh_raw
+    )
     if street_graph is None:
         print(f"[{tile_id}] skipped -- no walkable streets in this area")
         _remove_stale_export(tile_id)
@@ -124,7 +127,7 @@ def run(tile_id: str, refresh_trees: bool = False) -> None:
     print(f"[{tile_id}] done")
 
 
-def run_borough(borough: str, refresh_trees: bool = False) -> None:
+def run_borough(borough: str, refresh_trees: bool = False, refresh_raw: bool = False) -> None:
     """Run every grid tile covering a borough, one at a time.
 
     Every borough resolves through the real NYC Open Data borough-boundary
@@ -142,7 +145,7 @@ def run_borough(borough: str, refresh_trees: bool = False) -> None:
     print(f"[{borough}] {len(tile_ids)} tiles to process: {', '.join(tile_ids)}")
     for i, tile_id in enumerate(tile_ids, start=1):
         print(f"[{borough}] tile {i}/{len(tile_ids)}")
-        run(tile_id, refresh_trees=refresh_trees)
+        run(tile_id, refresh_trees=refresh_trees, refresh_raw=refresh_raw)
     print(f"[{borough}] done -- {len(tile_ids)} tiles")
 
 
@@ -159,11 +162,18 @@ def main() -> None:
         action="store_true",  # boolean flag: present=True, absent=False
         help="Re-download tree data instead of using the cache (streets stay cached)",
     )
+    parser.add_argument(
+        "--refresh-raw",
+        action="store_true",
+        help="Re-download raw OSM data (per-tile streets + citywide layers) instead of "
+             "trusting the raw caches -- the ONLY way to pull fresh OSM (FIXES item 11): "
+             "a GRAPH_CACHE_VERSION bump rebuilds locally from the raw snapshots",
+    )
     args = parser.parse_args()
     if config.is_grid_tile_id(args.tile_id):
-        run(args.tile_id, refresh_trees=args.refresh_trees)
+        run(args.tile_id, refresh_trees=args.refresh_trees, refresh_raw=args.refresh_raw)
     else:
-        run_borough(args.tile_id, refresh_trees=args.refresh_trees)
+        run_borough(args.tile_id, refresh_trees=args.refresh_trees, refresh_raw=args.refresh_raw)
 
 
 # "Only run main() when executed as a script, not when imported."

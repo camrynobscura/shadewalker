@@ -17,13 +17,23 @@ fragments (WALK_FILTER, below) -- plus a narrow second query
 instead of a footway. One edge per block, carrying its street name.
 
 Caching (osmnx's own HTTP cache is deliberately disabled -- see the
-ox.settings.use_cache comment below):
-  1. our per-tile GraphML file in data/raw/streets/ — GraphML is a standard
-     XML graph format; loading it back skips all network + assembly work.
-  2. one-shot citywide GraphML caches for the six auxiliary layers in
+ox.settings.use_cache comment below). Two layers per tile, split so that
+what we downloaded and what we did with it invalidate independently
+(FIXES item 11, 2026-08-17):
+  1. RAW: the tile's unprocessed WALK_FILTER response in
+     data/raw/streets_raw/, keyed on citywide_layers.raw_fetch_key() --
+     the only things that change what Overpass returns. Re-downloading
+     this is an explicit act (run_tile's --refresh-raw), never a side
+     effect of a processing change.
+  2. PROCESSED: the fully-built tile graph (composed + snapped + welded
+     + simplified) in data/raw/streets/, keyed on GRAPH_CACHE_VERSION.
+     A version bump rebuilds this locally from the raw snapshot in
+     seconds-to-minutes instead of re-downloading the city (~5h).
+  3. one-shot citywide GraphML caches for the six auxiliary layers in
      data/raw/citywide_layers/ (FIXES item 6b) — each tile slices its own
      bbox out in memory instead of re-asking Overpass, leaving WALK_FILTER
-     as the only per-tile query. See pipeline/fetch/citywide_layers.py.
+     as the only per-tile query. Keyed on raw_fetch_key() too. See
+     pipeline/fetch/citywide_layers.py.
 """
 
 import json
@@ -46,6 +56,13 @@ from pipeline.graph import vertical_audit
 from pipeline.graph.centerline import METRIC_CRS
 
 STREETS_DIR = config.RAW_DIR / "streets"
+
+# Unprocessed per-tile WALK_FILTER responses (FIXES item 11) -- the "what
+# we downloaded" half of the cache split; STREETS_DIR above holds the
+# "what we built from it" half. Bulkier than the processed graphs
+# (unsimplified, every interstitial OSM node kept) but disk-cheap next to
+# a ~5h citywide re-download.
+RAW_STREETS_DIR = config.RAW_DIR / "streets_raw"
 
 # Park-reach shapes are measured in meters (see _park_reach_sidewalks) --
 # the one place this fetch module needs to leave lon/lat degrees.
@@ -169,6 +186,17 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # must match -- the phantom-vertical-connector lesson), and every
 # connector carries weld=True so vertical_audit reviews it like any
 # other manufactured edge.
+# 2026-08-17 (FIXES item 11): this version now keys ONLY the processed
+# per-tile graph in STREETS_DIR. Bumping it no longer re-downloads
+# anything -- fetch_streets rebuilds from the raw WALK_FILTER snapshot in
+# RAW_STREETS_DIR (and the citywide layer caches), which are keyed on
+# citywide_layers.raw_fetch_key() instead: the filter strings, the
+# retained-way-tag settings, and the osmnx version. A filter edit still
+# invalidates the raw caches it affects (the filter string is in that
+# key); pulling fresh OSM for unchanged filters is run_tile's explicit
+# --refresh-raw. So: processing change = bump this; filter/tag-retention
+# change = bump this AND the raw key shifts on its own; fresh OSM data =
+# --refresh-raw, no bump at all.
 GRAPH_CACHE_VERSION = 20
 
 # Overpass's public instance drops connections intermittently under sustained
@@ -726,7 +754,60 @@ def _fetch_with_retry(bbox: Bbox, custom_filter: str, tile_id: str, label: str) 
             time.sleep(wait_s)
 
 
-def _aux_layer_graph(bbox: Bbox, tile_id: str, layer_name: str) -> nx.MultiDiGraph | None:
+def _raw_walk_graph(bbox: Bbox, tile_id: str, refresh: bool = False) -> nx.MultiDiGraph | None:
+    """The tile's UNPROCESSED WALK_FILTER response, cached on disk (FIXES
+    item 11) -- what _fetch_with_retry hands back, before any composing/
+    snapping/welding/simplifying touches it. Keyed on raw_fetch_key()
+    (see citywide_layers.raw_fetch_key's docstring), with the same
+    recorded-bbox-inside-the-file guard as the processed cache
+    (_bbox_signature -- the filename alone can't be trusted across a grid
+    redefinition, the r17c14 lesson).
+
+    None means WALK_FILTER matched nothing here (open water) -- cached
+    too, via the same marker-graph pattern as citywide_layers, so a
+    re-run doesn't re-ask Overpass about every water tile.
+
+    After a fresh download the graph is saved and then RE-LOADED from the
+    file it was just written to, rather than returning the in-memory
+    original: a GraphML round trip normalizes attribute types (ints vs
+    strings, booleans), and processing must see the exact same input
+    whether this build downloaded the data or a later rebuild read it
+    back -- otherwise the first rebuild after a GRAPH_CACHE_VERSION bump
+    could silently differ from the build that preceded it.
+    """
+    raw_path = RAW_STREETS_DIR / f"{tile_id}_{citywide_layers.raw_fetch_key(WALK_FILTER)}.graphml"
+    wanted = _bbox_signature(bbox)
+
+    if raw_path.exists() and not refresh:
+        graph = ox.load_graphml(raw_path)
+        if graph.graph.get("fetch_bbox") == wanted:
+            if graph.graph.get("empty_raw"):
+                print(f"  [streets] {tile_id}: raw streets: empty (cached)")
+                return None
+            print(f"  [streets] {tile_id}: raw streets: {len(graph.edges)} edges (cached)")
+            return graph
+        print(f"  [streets] {tile_id}: raw cache covers "
+              f"{graph.graph.get('fetch_bbox') or 'an unrecorded area'}, not {wanted} "
+              f"-- re-fetching")
+
+    graph = _fetch_with_retry(bbox, WALK_FILTER, tile_id, "streets")
+
+    RAW_STREETS_DIR.mkdir(parents=True, exist_ok=True)
+    if graph is None:
+        marker = nx.MultiDiGraph(crs="epsg:4326")
+        marker.graph["fetch_bbox"] = wanted
+        marker.graph["empty_raw"] = True
+        ox.save_graphml(marker, raw_path)
+        return None
+
+    graph.graph["fetch_bbox"] = wanted
+    ox.save_graphml(graph, raw_path)
+    return ox.load_graphml(raw_path)
+
+
+def _aux_layer_graph(
+    bbox: Bbox, tile_id: str, layer_name: str, refresh: bool = False
+) -> nx.MultiDiGraph | None:
     """This tile's slice of one citywide auxiliary layer (FIXES item 6b)
     -- a drop-in replacement for the per-tile Overpass query it replaced,
     so it must reproduce ox.graph_from_bbox's own truncation exactly:
@@ -745,7 +826,7 @@ def _aux_layer_graph(bbox: Bbox, tile_id: str, layer_name: str) -> nx.MultiDiGra
     """
     custom_filter, label = CITYWIDE_LAYERS[layer_name]
     started = time.monotonic()
-    layer = citywide_layers.citywide_layer(layer_name, custom_filter, GRAPH_CACHE_VERSION)
+    layer = citywide_layers.citywide_layer(layer_name, custom_filter, refresh=refresh)
     if layer is None:
         print(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, empty")
         return None
@@ -1515,7 +1596,10 @@ def _missing_park_trail_graph(
 
 
 def fetch_streets(
-    bbox: Bbox, tile_id: str, park_reach: prepared.PreparedGeometry | None = None
+    bbox: Bbox,
+    tile_id: str,
+    park_reach: prepared.PreparedGeometry | None = None,
+    refresh_raw: bool = False,
 ) -> nx.MultiDiGraph | None:
     """Return the walkable street graph for the bbox, cached per tile --
     the union of WALK_FILTER's main centerline query, CYCLEWAY_FILTER's
@@ -1556,12 +1640,19 @@ def fetch_streets(
     for grid tiles that only clip a borough's real coastline at their
     edge (a tile can intersect a borough's polygon by a sliver that's
     still mostly open water; see PLAN.md), not a bug to retry.
+
+    refresh_raw=True pulls fresh OSM data instead of trusting ANY raw
+    cache (the per-tile WALK_FILTER snapshot and the citywide layers),
+    and skips the processed cache too -- it was built from the old raw
+    data by definition. The default trusts every cache: a
+    GRAPH_CACHE_VERSION bump misses the processed cache on its own and
+    rebuilds from the raw snapshots locally (FIXES item 11).
     """
     variant = "" if park_reach is not None else "_noparkreach"
     graphml_path = STREETS_DIR / f"{tile_id}_v{GRAPH_CACHE_VERSION}{variant}.graphml"
 
     wanted = _bbox_signature(bbox)
-    if graphml_path.exists():
+    if graphml_path.exists() and not refresh_raw:
         graph = ox.load_graphml(graphml_path)
         cached = graph.graph.get("fetch_bbox")
         if cached == wanted:
@@ -1575,7 +1666,7 @@ def fetch_streets(
         print(f"  [streets] {tile_id}: cached graph covers {cached or 'an unrecorded area'}, "
               f"not {wanted} -- re-fetching")
 
-    street_graph = _fetch_with_retry(bbox, WALK_FILTER, tile_id, "streets")
+    street_graph = _raw_walk_graph(bbox, tile_id, refresh=refresh_raw)
     if street_graph is None:
         print(f"  [streets] {tile_id}: no matching ways in this area (likely open water) -- skipping")
         return None
@@ -1584,15 +1675,15 @@ def fetch_streets(
     # error -- most tiles have neither, and that's fine: street_graph
     # alone is a complete, valid result.
     graph = street_graph
-    cycleway_graph = _aux_layer_graph(bbox, tile_id, "cycleways")
+    cycleway_graph = _aux_layer_graph(bbox, tile_id, "cycleways", refresh=refresh_raw)
     if cycleway_graph is not None:
         graph = nx.compose(graph, cycleway_graph)
 
-    access_override_graph = _aux_layer_graph(bbox, tile_id, "foot_overrides")
+    access_override_graph = _aux_layer_graph(bbox, tile_id, "foot_overrides", refresh=refresh_raw)
     if access_override_graph is not None:
         graph = nx.compose(graph, access_override_graph)
 
-    named_sidewalk_graph = _aux_layer_graph(bbox, tile_id, "named_sidewalks")
+    named_sidewalk_graph = _aux_layer_graph(bbox, tile_id, "named_sidewalks", refresh=refresh_raw)
     if named_sidewalk_graph is not None:
         graph = nx.compose(graph, named_sidewalk_graph)
 
@@ -1602,7 +1693,7 @@ def fetch_streets(
     # docstring.
     any_sidewalk_graph = None
     if park_reach is not None:
-        any_sidewalk_graph = _aux_layer_graph(bbox, tile_id, "any_sidewalks")
+        any_sidewalk_graph = _aux_layer_graph(bbox, tile_id, "any_sidewalks", refresh=refresh_raw)
         park_sidewalk_graph = _park_reach_sidewalks(any_sidewalk_graph, park_reach, tile_id)
         if park_sidewalk_graph is not None:
             graph = nx.compose(graph, park_sidewalk_graph)
@@ -1612,7 +1703,7 @@ def fetch_streets(
     # ordering as park-reach sidewalks above -- filtering afterwards would
     # strand intersection nodes the same way, see _park_reach_sidewalks()'s
     # own measured comment on this.
-    parking_aisle_graph = _aux_layer_graph(bbox, tile_id, "parking_aisles")
+    parking_aisle_graph = _aux_layer_graph(bbox, tile_id, "parking_aisles", refresh=refresh_raw)
     through_path_aisles = _through_path_parking_aisles(graph, parking_aisle_graph, tile_id)
     if through_path_aisles is not None:
         graph = nx.compose(graph, through_path_aisles)
@@ -1636,7 +1727,7 @@ def fetch_streets(
     interior_segments = _interior_sidewalks_for_tile(interior_geojson, bbox)
     interior_graph = _build_interior_sidewalk_graph(interior_segments, tile_id)
     if interior_graph is not None:
-        barrier_graph = _aux_layer_graph(bbox, tile_id, "barriers")
+        barrier_graph = _aux_layer_graph(bbox, tile_id, "barriers", refresh=refresh_raw)
         barrier_fetched = True
         graph = _snap_interior_sidewalks(graph, interior_graph, barrier_graph, tile_id)
 
@@ -1654,7 +1745,7 @@ def fetch_streets(
     trail_graph = _missing_park_trail_graph(graph, trail_lines, tile_id)
     if trail_graph is not None:
         if not barrier_fetched:
-            barrier_graph = _aux_layer_graph(bbox, tile_id, "barriers")
+            barrier_graph = _aux_layer_graph(bbox, tile_id, "barriers", refresh=refresh_raw)
             barrier_fetched = True
         graph = _snap_interior_sidewalks(
             graph, trail_graph, barrier_graph, tile_id,
@@ -1668,7 +1759,7 @@ def fetch_streets(
     # vertical audit below, which reviews these welds along with every
     # other manufactured connector.
     if not barrier_fetched:
-        barrier_graph = _aux_layer_graph(bbox, tile_id, "barriers")
+        barrier_graph = _aux_layer_graph(bbox, tile_id, "barriers", refresh=refresh_raw)
         barrier_fetched = True
     graph = _weld_drawing_error_components(graph, barrier_graph, tile_id)
 
