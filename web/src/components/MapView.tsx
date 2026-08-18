@@ -66,38 +66,52 @@ function maskRing(coverageRings: [number, number][][]): [number, number][] {
   ]
 }
 
-/** Dims everything outside the routable area(s), plus a dashed line
- * marking each piece's edge. Two separate Polygons rather than one: the
- * dimming needs one hole per piece (a single polygon: outer mask + every
- * coverage ring as a hole); the edges need their own stroke-only pass, one
- * closed shape per piece, so each boundary reads crisply on top and
- * disjoint pieces (mainland NYC, Governors Island) never get connected by
- * a stray line between them. */
+/** The offshore frame (FIXES 12, redesigned with the user 2026-08-18):
+ * ONE generous dashed boundary drawn through the WATER around the whole
+ * routable world — never tracing coastlines — with the outside dim
+ * feathering in over two steps (~800m) instead of starting hard at the
+ * line. The frame geometry comes from the server
+ * (server/coverage_frame.py: coverage buffered offshore, closed across
+ * the harbor, clipped to political geometry incl. three user-designed
+ * corridors); the true click-acceptance region stays
+ * coverage.geometry, which the server checks — the frame is
+ * deliberately more generous, and the water inside it isn't clickable
+ * anyway.
+ *
+ * Three stacked dim masks make the feather: each dims a little more the
+ * further outside the frame you are (0.06 + 0.05 + 0.05 = the old 0.16
+ * full strength past ~800m). The line itself is soft on purpose —
+ * lighter and thinner than any route line, so the map's subject stays
+ * the route (the user's design review picked soft over the old 3px). */
 function CoverageOverlay({ coverage }: { coverage: CoverageFeature }) {
-  const rings = coverage.geometry.coordinates.map((polygon) => polygon[0])
-  const outer = maskRing(rings)
+  const { frame, frame_feather_350, frame_feather_800 } = coverage.properties
+  const outer = maskRing(frame_feather_800.length ? frame_feather_800 : frame)
   const toLatLng = ([lon, lat]: [number, number]): [number, number] => [lat, lon]
+
+  // Hole rings have to wind opposite the outer ring — Leaflet's SVG
+  // paths use the default (nonzero) fill-rule, which fills straight
+  // through a same-direction inner ring instead of punching a hole.
+  // Reversing point order flips winding without changing the shape.
+  const dim = (holes: [number, number][][], opacity: number) => (
+    <Polygon
+      positions={[outer.map(toLatLng), ...holes.map((ring) => [...ring].reverse().map(toLatLng))]}
+      pathOptions={{ stroke: false, fillColor: '#0b2418', fillOpacity: opacity }}
+      interactive={false}
+    />
+  )
 
   return (
     <>
+      {dim(frame, 0.06)}
+      {dim(frame_feather_350, 0.05)}
+      {dim(frame_feather_800, 0.05)}
       <Polygon
-        // Hole rings have to wind opposite the outer ring — Leaflet's SVG
-        // paths use the default (nonzero) fill-rule, which fills straight
-        // through a same-direction inner ring instead of punching a hole.
-        // Reversing point order flips winding without changing the shape.
-        // One polygon, N+1 rings: index 0 is the fill boundary, every ring
-        // after it is its own hole.
-        positions={[outer.map(toLatLng), ...rings.map((ring) => [...ring].reverse().map(toLatLng))]}
-        pathOptions={{ stroke: false, fillColor: '#0b2418', fillOpacity: 0.16 }}
-        interactive={false}
-      />
-      <Polygon
-        // Same weight/dash/opacity as the fastest route's pink line below —
-        // green instead, so it reads as "a line like that one" rather than
-        // an unrelated new style. Array-of-arrays: each piece is its own
-        // separate closed shape, not one polygon connecting them all.
-        positions={rings.map((ring) => [ring.map(toLatLng)])}
-        pathOptions={{ color: '#00a86b', weight: 3, dashArray: '6 8', opacity: 0.85, fill: false }}
+        // Dashed like the fastest route's pink line but green, thinner,
+        // and quieter — reads as "a line in that family" without
+        // competing with the routes. Array-of-arrays: each frame piece
+        // (there's normally exactly one) is its own closed shape.
+        positions={frame.map((ring) => [ring.map(toLatLng)])}
+        pathOptions={{ color: '#00a86b', weight: 1.5, dashArray: '6 8', opacity: 0.45, fill: false }}
         interactive={false}
       />
     </>

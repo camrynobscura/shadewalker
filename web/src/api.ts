@@ -99,6 +99,15 @@ export interface CoverageFeature {
     type: 'MultiPolygon'
     coordinates: [number, number][][][]
   }
+  /** The offshore frame (FIXES 12): what MapView actually draws — one
+   * generous dashed boundary through the water + a two-step feathered
+   * dim — while `geometry` above remains the true click-acceptance
+   * region the server checks. Rings are closed [lon, lat] lists. */
+  properties: {
+    frame: [number, number][][]
+    frame_feather_350: [number, number][][]
+    frame_feather_800: [number, number][][]
+  }
 }
 
 export async function fetchCoverage(): Promise<CoverageFeature> {
