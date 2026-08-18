@@ -85,11 +85,21 @@ def coverage() -> dict:
     every real connected component now, not just the largest — Governors
     Island and eventually Staten Island get their own separate piece
     rather than being silently left off the map while still routable."""
+    frame = store.coverage_frame()
     return {
         "type": "Feature",
         "geometry": {
             "type": "MultiPolygon",
             "coordinates": [[ring] for ring in store.coverage_rings()],
+        },
+        # The offshore frame (FIXES item 12): what the frontend actually
+        # DRAWS -- one generous dashed boundary through the water plus a
+        # two-step feathered dim -- while the geometry above remains the
+        # true click-acceptance region. See server/coverage_frame.py.
+        "properties": {
+            "frame": frame.get("frame", []),
+            "frame_feather_350": frame.get("feather_350", []),
+            "frame_feather_800": frame.get("feather_800", []),
         },
     }
 
@@ -131,12 +141,12 @@ def route(
     if not store.in_coverage(from_lat, from_lon):
         raise HTTPException(
             status_code=422,
-            detail="Start point is outside our current coverage area — pick a point inside the dashed boundary shown on the map.",
+            detail="Start point is outside our current coverage area — pick a point on land inside the dashed frame shown on the map.",
         )
     if not store.in_coverage(to_lat, to_lon):
         raise HTTPException(
             status_code=422,
-            detail="End point is outside our current coverage area — pick a point inside the dashed boundary shown on the map.",
+            detail="End point is outside our current coverage area — pick a point on land inside the dashed frame shown on the map.",
         )
 
     pair = store.snap_pair(from_lat, from_lon, to_lat, to_lon)

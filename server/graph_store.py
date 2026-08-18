@@ -41,6 +41,7 @@ from shapely.ops import substring
 from shapely.strtree import STRtree
 
 from pipeline import config
+from server import coverage_frame
 
 logger = logging.getLogger(__name__)
 
@@ -191,14 +192,19 @@ def _tiles_fingerprint(tile_paths: list) -> str:
     FIXES item 1 warned about)."""
     parts = sorted(f"{p.name}:{p.stat().st_size}:{p.stat().st_mtime_ns}" for p in tile_paths)
     rule = f"hide<{HIDDEN_COMPONENT_MAX_LEN_M}|keep:{sorted(KEEP_VISIBLE_ISOLATED_PLACES)}"
+    # The offshore frame (server/coverage_frame.py) is cached alongside
+    # the rings, so its recipe parameters invalidate the cache the same
+    # way the hide rule's do.
+    rule += "|" + coverage_frame.FRAME_PARAMS
     return hashlib.sha256(("\n".join(parts) + "\n" + rule).encode()).hexdigest()
 
 
-def _load_cached_coverage_rings(cache_path, fingerprint: str) -> list[list[list[float]]] | None:
-    """The on-disk coverage cache, if its fingerprint matches the tiles
-    being loaded right now — None on any mismatch, missing file, or
-    corrupt cache, all treated the same way (recompute), since this is
-    strictly a speed optimization with no correctness dependency on it."""
+def _load_cached_coverage(cache_path, fingerprint: str) -> dict | None:
+    """The on-disk coverage cache ({"rings": ..., "frame": ...}), if its
+    fingerprint matches the tiles being loaded right now — None on any
+    mismatch, missing file, corrupt cache, or pre-frame cache format, all
+    treated the same way (recompute), since this is strictly a speed
+    optimization with no correctness dependency on it."""
     if not cache_path.exists():
         return None
     try:
@@ -207,11 +213,13 @@ def _load_cached_coverage_rings(cache_path, fingerprint: str) -> list[list[list[
         return None
     if cached.get("fingerprint") != fingerprint:
         return None
-    return cached.get("rings")
+    if "rings" not in cached or "frame" not in cached:
+        return None
+    return cached
 
 
-def _save_cached_coverage_rings(cache_path, fingerprint: str, rings: list[list[list[float]]]) -> None:
-    cache_path.write_text(json.dumps({"fingerprint": fingerprint, "rings": rings}))
+def _save_cached_coverage(cache_path, fingerprint: str, rings, frame: dict) -> None:
+    cache_path.write_text(json.dumps({"fingerprint": fingerprint, "rings": rings, "frame": frame}))
 
 
 # Manually verified real-world OSM node-id pairs that are the same
@@ -553,6 +561,9 @@ class GraphStore:
         self._id_to_idx: dict[str, int] = {}
         self._node_lonlat: np.ndarray | None = None  # (N, 2) float64
         self._coverage_rings: list[list[list[float]]] = []  # closed [lon, lat] rings, CCW, one per piece
+        # The offshore frame + feather rings (server/coverage_frame.py),
+        # computed from the rings above at load, cached alongside them.
+        self._coverage_frame: dict = {}
         self._edge_lines_scaled: np.ndarray | None = None  # see _build_edge_index
         self._strtree: STRtree | None = None
         self._lat_scale = 1.0  # see _build_edge_index
@@ -843,12 +854,15 @@ class GraphStore:
         self._build_edge_index()
         self._apply_hide_rule(len(components))
 
-        cached_rings = _load_cached_coverage_rings(coverage_cache_path, coverage_fingerprint)
-        if cached_rings is not None:
-            self._coverage_rings = cached_rings
+        cached = _load_cached_coverage(coverage_cache_path, coverage_fingerprint)
+        if cached is not None:
+            self._coverage_rings = cached["rings"]
+            self._coverage_frame = cached["frame"]
         else:
             self._coverage_rings = self._compute_coverage_rings()
-            _save_cached_coverage_rings(coverage_cache_path, coverage_fingerprint, self._coverage_rings)
+            self._coverage_frame = coverage_frame.build_frame(self._coverage_rings)
+            _save_cached_coverage(coverage_cache_path, coverage_fingerprint,
+                                  self._coverage_rings, self._coverage_frame)
 
         logger.info(f"[graph_store] {len(tile_paths)} tile(s): "
               f"{len(node_lonlat)} nodes, {len(edge_pairs)} edges loaded")
@@ -903,6 +917,14 @@ class GraphStore:
         """One closed [lon, lat] ring per disjoint coverage piece — see
         _compute_coverage_rings for shape and winding guarantees."""
         return self._coverage_rings
+
+    def coverage_frame(self) -> dict:
+        """The offshore frame + feather rings the frontend draws instead
+        of tracing the rings above — {"frame": rings, "feather_350":
+        rings, "feather_800": rings}, lon/lat (server/coverage_frame.py).
+        The rings above stay the ACCEPTANCE region (in_coverage); the
+        frame is the generous visual boundary drawn through the water."""
+        return self._coverage_frame
 
     def _edge_coords(self, edge: int) -> np.ndarray:
         """Edge `edge`'s [lon, lat] points — a zero-copy view into the
