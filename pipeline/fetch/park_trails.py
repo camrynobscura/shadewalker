@@ -10,12 +10,16 @@ on parks.py's own dataset -- so PAGE_LIMIT must stay comfortably above
 this dataset's real row count too, not just "big enough to look safe".
 """
 
+import logging
 import json
 
 import requests
 
 from pipeline import config
 from pipeline.fetch import socrata
+
+logger = logging.getLogger(__name__)
+
 
 CACHE_PATH = config.RAW_DIR / "socrata" / f"park_trails_{config.PARK_TRAILS_DATASET_ID}.geojson"
 PAGE_LIMIT = 10_000
@@ -27,7 +31,7 @@ def fetch_park_trails(refresh: bool = False) -> dict:
     `geometry` a LineString or MultiLineString."""
     if CACHE_PATH.exists() and not refresh:
         geojson = json.loads(CACHE_PATH.read_text())
-        print(f"  [park_trails] {len(geojson['features'])} segments (cached)")
+        logger.info(f"  [park_trails] {len(geojson['features'])} segments (cached)")
         return geojson
 
     url = f"{config.SOCRATA_BASE_URL}/{config.PARK_TRAILS_DATASET_ID}.geojson?$limit={PAGE_LIMIT}"
@@ -37,5 +41,5 @@ def fetch_park_trails(refresh: bool = False) -> dict:
 
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     CACHE_PATH.write_text(json.dumps(geojson))
-    print(f"  [park_trails] {len(geojson['features'])} segments (downloaded + cached)")
+    logger.info(f"  [park_trails] {len(geojson['features'])} segments (downloaded + cached)")
     return geojson

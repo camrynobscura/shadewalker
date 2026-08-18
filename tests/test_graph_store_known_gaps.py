@@ -13,6 +13,7 @@ the real data on disk.
 
 import gzip
 import json
+import logging
 
 import pytest
 
@@ -194,19 +195,20 @@ def test_known_node_gaps_load_from_an_external_file(tmp_path):
     ]
 
 
-def test_load_prints_one_summary_line_not_one_per_gap(tmp_path, monkeypatch, capsys):
+def test_load_logs_one_summary_line_not_one_per_gap(tmp_path, monkeypatch, caplog):
     # Regression guard for a real problem the bulk batch would otherwise
-    # cause: the old per-entry print (fine at 25 entries) would print
+    # cause: the old per-entry line (fine at 25 entries) would log
     # ~14,000 lines at every server startup once the bulk batch is loaded.
+    # caplog, not capsys, since FIXES item 9 moved output to logging.
     monkeypatch.setattr(config, "TILES_DIR", tmp_path)
     _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
     _write_tile(tmp_path / "island.json.gz", ISLAND_NODES, ISLAND_EDGES)
 
     store = GraphStore()
-    store.load()
+    with caplog.at_level(logging.INFO):
+        store.load()
 
-    captured = capsys.readouterr()
-    gap_lines = [line for line in captured.out.splitlines() if "known node gap" in line]
+    gap_lines = [r.message for r in caplog.records if "known node gap" in r.message]
     assert len(gap_lines) == 1, f"expected one summary line, got {gap_lines!r}"
     assert GAP_NODE_A not in gap_lines[0]
     assert GAP_NODE_B not in gap_lines[0]
@@ -234,7 +236,7 @@ def test_bulk_verified_gaps_load_from_file_with_a_plain_label():
 
 
 def test_load_warns_loudly_when_a_mostly_bridged_dataset_has_dead_entries(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch, caplog
 ):
     # The v18 refetch silently orphaned 11 hand-curated bridges (incl.
     # "Manhattan Bridge Pedestrian Path") and nothing noticed for a day
@@ -251,16 +253,18 @@ def test_load_warns_loudly_when_a_mostly_bridged_dataset_has_dead_entries(
     ])
 
     store = GraphStore()
-    store.load()
+    with caplog.at_level(logging.INFO):
+        store.load()
 
-    out = capsys.readouterr().out
-    assert "WARNING" in out
-    assert "Ghost Fix" in out
-    assert "999999991" in out
+    # The LEVEL is the loudness now (FIXES item 9): a production handler
+    # filtering to WARNING+ still surfaces exactly these records.
+    warnings = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("Ghost Fix" in m for m in warnings)
+    assert any("999999991" in m for m in warnings)
 
 
 def test_load_stays_quiet_about_dangling_entries_on_a_partial_dataset(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch, caplog
 ):
     # The pilot/CI tile legitimately misses almost every entry -- that's
     # a partial dataset, not dead fixes, and must not scream per entry.
@@ -274,8 +278,8 @@ def test_load_stays_quiet_about_dangling_entries_on_a_partial_dataset(
     ])
 
     store = GraphStore()
-    store.load()
+    with caplog.at_level(logging.INFO):
+        store.load()
 
-    out = capsys.readouterr().out
-    assert "WARNING" not in out
-    assert "not in this dataset" in out
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("not in this dataset" in r.message for r in caplog.records)

@@ -1,9 +1,10 @@
 """Tests for pipeline/fetch/socrata.py's auth-header logic and
-_get_with_retry()'s transient-failure handling.
+get_with_retry()'s transient-failure handling.
 
 fetch_all_rows() itself (pagination, caching, the real live request) stays
 out of pytest's scope on purpose (see PLAN.md) -- no network calls here.
-_get_with_retry() earned mock-based coverage the same way streets.py's own
+get_with_retry() earned (public since FIXES item 10:
+parks.py and boundaries.py now share it) mock-based coverage the same way streets.py's own
 retry logic did during Brooklyn: a real transient failure (a 503 from
 Socrata, mid-Queens-fetch, after 144/154 tiles had already fetched clean)
 found this code with no retry logic at all.
@@ -38,7 +39,7 @@ class _FakeResponse:
 
 def test_get_with_retry_succeeds_without_retrying_on_a_clean_response(monkeypatch):
     monkeypatch.setattr(socrata.requests, "get", lambda *args, **kwargs: _FakeResponse(200))
-    response = socrata._get_with_retry("http://example.test", {}, {})
+    response = socrata.get_with_retry("http://example.test", {}, {})
     assert response.status_code == 200
 
 
@@ -50,7 +51,7 @@ def test_get_with_retry_recovers_from_a_transient_503(monkeypatch):
     monkeypatch.setattr(socrata.requests, "get", lambda *args, **kwargs: next(responses))
     monkeypatch.setattr(socrata.time, "sleep", lambda seconds: None)
 
-    response = socrata._get_with_retry("http://example.test", {}, {})
+    response = socrata.get_with_retry("http://example.test", {}, {})
     assert response.status_code == 200
 
 
@@ -59,7 +60,7 @@ def test_get_with_retry_gives_up_after_max_retries_of_5xx(monkeypatch):
     monkeypatch.setattr(socrata.time, "sleep", lambda seconds: None)
 
     try:
-        socrata._get_with_retry("http://example.test", {}, {})
+        socrata.get_with_retry("http://example.test", {}, {})
         assert False, "expected HTTPError to propagate"
     except requests.exceptions.HTTPError:
         pass
@@ -78,7 +79,7 @@ def test_get_with_retry_does_not_retry_a_4xx(monkeypatch):
     monkeypatch.setattr(socrata.requests, "get", fake_get)
 
     try:
-        socrata._get_with_retry("http://example.test", {}, {})
+        socrata.get_with_retry("http://example.test", {}, {})
         assert False, "expected HTTPError to propagate"
     except requests.exceptions.HTTPError:
         pass

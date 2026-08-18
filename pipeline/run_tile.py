@@ -14,12 +14,16 @@ re-fetching tiles it already finished.
 """
 
 import argparse
+import logging
+import sys
 
 from pipeline import config, export
 from pipeline.fetch import boundaries, streets, trees
 from pipeline.graph import boundary, centerline
 from pipeline.scoring import canopy as canopy_scoring
 from pipeline.scoring import trees as tree_scoring
+
+logger = logging.getLogger(__name__)
 
 
 def _remove_stale_export(tile_id: str) -> None:
@@ -38,12 +42,12 @@ def _remove_stale_export(tile_id: str) -> None:
     stale_path = config.TILES_DIR / f"{tile_id}.json.gz"
     if stale_path.exists():
         stale_path.unlink()
-        print(f"[{tile_id}] removed stale export from a previous run")
+        logger.info(f"[{tile_id}] removed stale export from a previous run")
 
 
 def run(tile_id: str, refresh_trees: bool = False, refresh_raw: bool = False) -> None:
     bbox = config.get_tile_bbox(tile_id)
-    print(f"[{tile_id}] lat {bbox.lat_min}–{bbox.lat_max}, lon {bbox.lon_min}–{bbox.lon_max}")
+    logger.info(f"[{tile_id}] lat {bbox.lat_min}–{bbox.lat_max}, lon {bbox.lon_min}–{bbox.lon_max}")
 
     # Fetch bbox is padded past the tile's true edges (FETCH_BUFFER_M) so
     # neighboring tiles' data genuinely overlaps at their shared border --
@@ -69,7 +73,7 @@ def run(tile_id: str, refresh_trees: bool = False, refresh_raw: bool = False) ->
         fetch_bbox, tile_id, park_reach=park_reach, refresh_raw=refresh_raw
     )
     if street_graph is None:
-        print(f"[{tile_id}] skipped -- no walkable streets in this area")
+        logger.info(f"[{tile_id}] skipped -- no walkable streets in this area")
         _remove_stale_export(tile_id)
         return
 
@@ -88,7 +92,7 @@ def run(tile_id: str, refresh_trees: bool = False, refresh_raw: bool = False) ->
         # rather than nodes catches this; centerline.build_edge_table()
         # crashes on an edgeless graph (osmnx's own to_undirected() raises
         # "Graph contains no edges" via graph_to_gdfs()).
-        print(f"[{tile_id}] skipped -- no edges remain inside NYC after boundary clipping")
+        logger.info(f"[{tile_id}] skipped -- no edges remain inside NYC after boundary clipping")
         _remove_stale_export(tile_id)
         return
 
@@ -124,7 +128,7 @@ def run(tile_id: str, refresh_trees: bool = False, refresh_raw: bool = False) ->
 
     export.write_tile(tile_id, nodes, edges)
 
-    print(f"[{tile_id}] done")
+    logger.info(f"[{tile_id}] done")
 
 
 def run_borough(borough: str, refresh_trees: bool = False, refresh_raw: bool = False) -> None:
@@ -142,14 +146,26 @@ def run_borough(borough: str, refresh_trees: bool = False, refresh_raw: bool = F
     polygon = boundary.borough_polygon(geojson, borough)
     tile_ids = boundary.tile_ids_for_polygon(polygon)
 
-    print(f"[{borough}] {len(tile_ids)} tiles to process: {', '.join(tile_ids)}")
+    logger.info(f"[{borough}] {len(tile_ids)} tiles to process: {', '.join(tile_ids)}")
     for i, tile_id in enumerate(tile_ids, start=1):
-        print(f"[{borough}] tile {i}/{len(tile_ids)}")
+        logger.info(f"[{borough}] tile {i}/{len(tile_ids)}")
         run(tile_id, refresh_trees=refresh_trees, refresh_raw=refresh_raw)
-    print(f"[{borough}] done -- {len(tile_ids)} tiles")
+    logger.info(f"[{borough}] done -- {len(tile_ids)} tiles")
 
 
 def main() -> None:
+    # Route every module's logger to stdout with timestamps (FIXES item 9).
+    # Configured HERE, at the CLI entrypoint, never at module import --
+    # libraries don't get to decide their host's logging. Timestamps earn
+    # their keep on multi-hour borough runs (we used to reconstruct run
+    # timing from the [timing] lines alone).
+    # stream=stdout, not logging's stderr default: every runbook command
+    # pipes/tees this CLI's progress output, and those pipelines predate
+    # the logging conversion.
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S", stream=sys.stdout,
+    )
     # argparse is Python's built-in CLI-argument parser (JS analogy: commander,
     # but in the standard library). It also generates --help for free.
     parser = argparse.ArgumentParser(description="Run the preprocessing pipeline for one tile or borough.")

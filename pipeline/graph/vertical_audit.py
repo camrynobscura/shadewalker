@@ -32,6 +32,7 @@ Runs pre-simplify, where osmids are still scalar and the weld=True
 attribute marks exactly the edges the pipeline manufactured.
 """
 
+import logging
 import json
 
 import networkx as nx
@@ -42,6 +43,9 @@ from shapely.strtree import STRtree
 
 from pipeline import config
 from pipeline.graph.centerline import METRIC_CRS
+
+logger = logging.getLogger(__name__)
+
 
 _TO_METRIC = Transformer.from_crs("EPSG:4326", METRIC_CRS, always_xy=True).transform
 
@@ -261,6 +265,6 @@ def report_vertical_suspects(
         out_path = REPORTS_DIR / f"{tile_id}.json"
         with open(out_path, "w") as f:
             json.dump(report, f, indent=1)
-        print(f"  [vertical] {tile_id}: {len(report)} suspect weld(s) of "
+        logger.info(f"  [vertical] {tile_id}: {len(report)} suspect weld(s) of "
               f"{len(welds)} -- review against the blocklist ({out_path})")
     return report

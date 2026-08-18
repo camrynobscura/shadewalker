@@ -10,13 +10,18 @@ the export, or the frontend would try to draw UTM coordinates on a map.
 Coordinate pairs are [lon, lat] to match the GeoJSON convention.
 """
 
+import logging
 import gzip
 import json
+import os
 from datetime import date
 
 import geopandas as gpd
 
 from pipeline import config
+
+logger = logging.getLogger(__name__)
+
 
 
 def _node_id_str(node_id, tile_id: str) -> str:
@@ -82,11 +87,29 @@ def write_tile(tile_id: str, nodes: gpd.GeoDataFrame, edges: gpd.GeoDataFrame) -
 
     config.TILES_DIR.mkdir(parents=True, exist_ok=True)
     out_path = config.TILES_DIR / f"{tile_id}.json.gz"
+    # Atomic write (FIXES item 8, audit §2.5): write to a temp name in the
+    # SAME directory, then os.replace() -- which POSIX guarantees is
+    # all-or-nothing -- so no reader (a live server's load(), a
+    # mid-refresh restart) can ever see a truncated tile, whether from a
+    # concurrent read or a crash mid-write. Same directory matters:
+    # os.replace() is only atomic within one filesystem, and a temp dir
+    # like /tmp can be a different one. The ".tmp" suffix keeps
+    # GraphStore.load()'s *.json.gz glob from ever matching a half-written
+    # file even before the rename.
+    #
     # gzip.open in text mode ("wt") lets json.dump write straight into a
     # compressed file — no intermediate uncompressed copy.
-    with gzip.open(out_path, "wt") as f:
-        json.dump(tile, f)
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    try:
+        with gzip.open(tmp_path, "wt") as f:
+            json.dump(tile, f)
+        os.replace(tmp_path, out_path)
+    except BaseException:
+        # a crashed write must not leave a stray .tmp behind to confuse
+        # the next run (missing_ok: the open() itself may have failed)
+        tmp_path.unlink(missing_ok=True)
+        raise
 
     size_kb = out_path.stat().st_size / 1024
-    print(f"  [export] {out_path.relative_to(config.REPO_ROOT)}: "
+    logger.info(f"  [export] {out_path.relative_to(config.REPO_ROOT)}: "
           f"{len(node_records)} nodes, {len(edge_records)} edges, {size_kb:.0f} KB gzipped")

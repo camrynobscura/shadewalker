@@ -23,6 +23,7 @@ Three steps:
    nearest one. (See PLAN.md's 2026-07-22/23 scoring investigation.)
 """
 
+import logging
 import math
 
 import geopandas as gpd
@@ -31,6 +32,9 @@ from shapely.strtree import STRtree
 
 from pipeline import config
 from pipeline.graph.centerline import METRIC_CRS
+
+logger = logging.getLogger(__name__)
+
 
 # ── Sibling-carriageway detection thresholds ──────────────────────────────
 # Validated citywide against the loaded graph (4,201 genuine pairs found;
@@ -90,7 +94,7 @@ def score_and_join(edges: gpd.GeoDataFrame, tree_rows: list[dict]) -> gpd.GeoDat
     edges["tree_park_canopy"] = 0.0
 
     with_trees = (edges["tree_count"] > 0).sum()
-    print(f"  [scoring] {len(trees)} scoreable trees → "
+    logger.info(f"  [scoring] {len(trees)} scoreable trees → "
           f"{with_trees} of {len(edges)} edges have trees")
     return edges
 

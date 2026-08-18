@@ -13,12 +13,14 @@ silently caps at 1,000 rows without an explicit $limit -- confirmed live
 dataset's real row count, not just "big enough to look safe".
 """
 
+import logging
 import json
-
-import requests
 
 from pipeline import config
 from pipeline.fetch import socrata
+
+logger = logging.getLogger(__name__)
+
 
 CACHE_PATH = config.RAW_DIR / "socrata" / f"parks_properties_{config.PARKS_DATASET_ID}.geojson"
 PAGE_LIMIT = 10_000
@@ -30,15 +32,17 @@ def fetch_park_properties(refresh: bool = False) -> dict:
     a Polygon or MultiPolygon."""
     if CACHE_PATH.exists() and not refresh:
         geojson = json.loads(CACHE_PATH.read_text())
-        print(f"  [parks] {len(geojson['features'])} properties (cached)")
+        logger.info(f"  [parks] {len(geojson['features'])} properties (cached)")
         return geojson
 
     url = f"{config.SOCRATA_BASE_URL}/{config.PARKS_DATASET_ID}.geojson?$limit={PAGE_LIMIT}"
-    response = requests.get(url, headers=socrata.auth_headers(), timeout=60)
-    response.raise_for_status()
+    # socrata.get_with_retry, not a bare requests.get (FIXES item 10):
+    # a single transient 5xx/connection blip here used to kill a whole
+    # pipeline run while every other fetcher retried through it.
+    response = socrata.get_with_retry(url, headers=socrata.auth_headers())
     geojson = response.json()
 
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     CACHE_PATH.write_text(json.dumps(geojson))
-    print(f"  [parks] {len(geojson['features'])} properties (downloaded + cached)")
+    logger.info(f"  [parks] {len(geojson['features'])} properties (downloaded + cached)")
     return geojson
