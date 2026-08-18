@@ -36,6 +36,7 @@ what we downloaded and what we did with it invalidate independently
      pipeline/fetch/citywide_layers.py.
 """
 
+import logging
 import json
 import time
 from pathlib import Path
@@ -54,6 +55,9 @@ from pipeline.config import Bbox
 from pipeline.fetch import citywide_layers, interior_sidewalks, park_trails
 from pipeline.graph import vertical_audit
 from pipeline.graph.centerline import METRIC_CRS
+
+logger = logging.getLogger(__name__)
+
 
 STREETS_DIR = config.RAW_DIR / "streets"
 
@@ -739,17 +743,17 @@ def _fetch_with_retry(bbox: Bbox, custom_filter: str, tile_id: str, label: str) 
             # Pure instrumentation (2026-08-14): per-query timing, to size
             # the "fetch heavy layers citywide once" optimization from real
             # data instead of guessing which of the seven queries dominates.
-            print(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, "
+            logger.info(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, "
                   f"{len(graph.edges)} edges")
             return graph
         except ValueError:
-            print(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, empty")
+            logger.info(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, empty")
             return None
         except (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError):
             if attempt == MAX_FETCH_RETRIES:
                 raise
             wait_s = FETCH_RETRY_BACKOFF_S * (2 ** (attempt - 1))
-            print(f"  [streets] {tile_id}: connection error fetching {label} "
+            logger.warning(f"  [streets] {tile_id}: connection error fetching {label} "
                   f"(attempt {attempt}/{MAX_FETCH_RETRIES}), retrying in {wait_s}s...")
             time.sleep(wait_s)
 
@@ -782,11 +786,11 @@ def _raw_walk_graph(bbox: Bbox, tile_id: str, refresh: bool = False) -> nx.Multi
         graph = ox.load_graphml(raw_path)
         if graph.graph.get("fetch_bbox") == wanted:
             if graph.graph.get("empty_raw"):
-                print(f"  [streets] {tile_id}: raw streets: empty (cached)")
+                logger.info(f"  [streets] {tile_id}: raw streets: empty (cached)")
                 return None
-            print(f"  [streets] {tile_id}: raw streets: {len(graph.edges)} edges (cached)")
+            logger.info(f"  [streets] {tile_id}: raw streets: {len(graph.edges)} edges (cached)")
             return graph
-        print(f"  [streets] {tile_id}: raw cache covers "
+        logger.info(f"  [streets] {tile_id}: raw cache covers "
               f"{graph.graph.get('fetch_bbox') or 'an unrecorded area'}, not {wanted} "
               f"-- re-fetching")
 
@@ -828,7 +832,7 @@ def _aux_layer_graph(
     started = time.monotonic()
     layer = citywide_layers.citywide_layer(layer_name, custom_filter, refresh=refresh)
     if layer is None:
-        print(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, empty")
+        logger.info(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, empty")
         return None
 
     keep = [
@@ -837,7 +841,7 @@ def _aux_layer_graph(
         and bbox.lat_min <= data["y"] <= bbox.lat_max
     ]
     if not keep:
-        print(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, empty")
+        logger.info(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, empty")
         return None
 
     sliced = layer.subgraph(keep).copy()
@@ -845,7 +849,7 @@ def _aux_layer_graph(
     # in particular would otherwise leak through nx.compose (second graph's
     # attrs win) and misdescribe the tile until fetch_streets overwrites it.
     sliced.graph.pop("fetch_bbox", None)
-    print(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, "
+    logger.info(f"  [timing] {tile_id}: {label}: {time.monotonic() - started:.1f}s, "
           f"{len(sliced.edges)} edges")
     return sliced
 
@@ -921,7 +925,7 @@ def _park_reach_sidewalks(
             keep_edges.append((u, v, key))
 
     dropped = graph.number_of_edges() - len(keep_edges)
-    print(f"  [streets] {tile_id}: park-reach sidewalks: kept {len(keep_edges)}, "
+    logger.info(f"  [streets] {tile_id}: park-reach sidewalks: kept {len(keep_edges)}, "
           f"dropped {dropped} duplicate-of-street segments")
     if not keep_edges:
         return None
@@ -968,7 +972,7 @@ def _through_path_parking_aisles(
         else:
             dropped_clusters += 1
 
-    print(f"  [streets] {tile_id}: parking aisles: kept {len(keep_edges)} through-path edges, "
+    logger.info(f"  [streets] {tile_id}: parking aisles: kept {len(keep_edges)} through-path edges, "
           f"dropped {dropped_clusters} dead-end clusters")
     if not keep_edges:
         return None
@@ -1101,7 +1105,7 @@ def _build_interior_sidewalk_graph(
                 )
                 next_edge_osmid -= 1
 
-    print(f"  [streets] {tile_id}: {label}: {graph.number_of_nodes()} points "
+    logger.info(f"  [streets] {tile_id}: {label}: {graph.number_of_nodes()} points "
           f"from {len(segments)} segments")
     return graph
 
@@ -1272,7 +1276,7 @@ def _snap_interior_sidewalks(
 
     edge_keys = list(graph.edges(keys=True))
     if not edge_keys:
-        print(f"  [streets] {tile_id}: {label}: no street edges to connect "
+        logger.info(f"  [streets] {tile_id}: {label}: no street edges to connect "
               f"{len(loose_ends)} loose ends to")
         return result
 
@@ -1317,7 +1321,7 @@ def _snap_interior_sidewalks(
         )
 
     dropped = len(loose_ends) - connected_count
-    print(f"  [streets] {tile_id}: {label}: connected {connected_count} loose ends "
+    logger.info(f"  [streets] {tile_id}: {label}: connected {connected_count} loose ends "
           f"to the street network, left {dropped} unconnected (too far or blocked by a barrier)")
     return result
 
@@ -1493,7 +1497,7 @@ def _weld_drawing_error_components(
 
     if not splits_by_edge:
         if candidate_comps:
-            print(f"  [streets] {tile_id}: drawing-error welds: 0 of "
+            logger.info(f"  [streets] {tile_id}: drawing-error welds: 0 of "
                   f"{len(candidate_comps)} candidate fragment(s) welded "
                   f"({vetoed_elevation} elevation-vetoed, {vetoed_barrier} barrier-vetoed)")
         return graph
@@ -1510,7 +1514,7 @@ def _weld_drawing_error_components(
             graph, graph, u, v, k, splits, next_id, next_edge_osmid
         )
 
-    print(f"  [streets] {tile_id}: drawing-error welds: connected "
+    logger.info(f"  [streets] {tile_id}: drawing-error welds: connected "
           f"{len(welded_comps)} fragment(s) at {welded_nodes} node(s) "
           f"({vetoed_elevation} elevation-vetoed, {vetoed_barrier} barrier-vetoed)")
     return graph
@@ -1656,19 +1660,19 @@ def fetch_streets(
         graph = ox.load_graphml(graphml_path)
         cached = graph.graph.get("fetch_bbox")
         if cached == wanted:
-            print(f"  [streets] {tile_id}: {len(graph.nodes)} nodes, {len(graph.edges)} edges (cached)")
+            logger.info(f"  [streets] {tile_id}: {len(graph.nodes)} nodes, {len(graph.edges)} edges (cached)")
             return graph
         # Deliberately a cache MISS, not an error: re-fetching self-heals,
         # and the alternative (trusting the filename) is what let two tiles
         # publish another neighbourhood's streets for twelve days. A cache
         # with no recorded bbox at all is equally untrustworthy -- it was
         # written before this check existed, so nothing verified it.
-        print(f"  [streets] {tile_id}: cached graph covers {cached or 'an unrecorded area'}, "
+        logger.info(f"  [streets] {tile_id}: cached graph covers {cached or 'an unrecorded area'}, "
               f"not {wanted} -- re-fetching")
 
     street_graph = _raw_walk_graph(bbox, tile_id, refresh=refresh_raw)
     if street_graph is None:
-        print(f"  [streets] {tile_id}: no matching ways in this area (likely open water) -- skipping")
+        logger.info(f"  [streets] {tile_id}: no matching ways in this area (likely open water) -- skipping")
         return None
 
     # Neither extra query matching anything is the common case, not an
@@ -1777,5 +1781,5 @@ def fetch_streets(
 
     STREETS_DIR.mkdir(parents=True, exist_ok=True)
     ox.save_graphml(graph, graphml_path)
-    print(f"  [streets] {tile_id}: {len(graph.nodes)} nodes, {len(graph.edges)} edges (downloaded + cached)")
+    logger.info(f"  [streets] {tile_id}: {len(graph.nodes)} nodes, {len(graph.edges)} edges (downloaded + cached)")
     return graph

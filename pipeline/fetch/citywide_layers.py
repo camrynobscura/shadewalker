@@ -38,6 +38,7 @@ process a refresh only re-asks Overpass once per layer (_FRESHENED), or
 a borough run would re-download every layer per tile.
 """
 
+import logging
 import hashlib
 import time
 from pathlib import Path
@@ -48,6 +49,9 @@ import requests
 
 from pipeline import config
 from pipeline.config import Bbox
+
+logger = logging.getLogger(__name__)
+
 
 CACHE_DIR = config.RAW_DIR / "citywide_layers"
 
@@ -148,11 +152,11 @@ def _fetch_citywide(custom_filter: str, name: str) -> nx.MultiDiGraph | None:
                     retain_all=True,
                     simplify=False,
                 )
-                print(f"  [citywide_layers] {name}: {time.monotonic() - started:.1f}s, "
+                logger.info(f"  [citywide_layers] {name}: {time.monotonic() - started:.1f}s, "
                       f"{len(graph.nodes)} nodes, {len(graph.edges)} edges (downloaded)")
                 return graph
             except ValueError:
-                print(f"  [citywide_layers] {name}: {time.monotonic() - started:.1f}s, "
+                logger.info(f"  [citywide_layers] {name}: {time.monotonic() - started:.1f}s, "
                       f"nothing matched citywide")
                 return None
             except (requests.exceptions.ConnectionError,
@@ -160,7 +164,7 @@ def _fetch_citywide(custom_filter: str, name: str) -> nx.MultiDiGraph | None:
                 if attempt == MAX_FETCH_RETRIES:
                     raise
                 wait_s = FETCH_RETRY_BACKOFF_S * (2 ** (attempt - 1))
-                print(f"  [citywide_layers] {name}: connection error "
+                logger.warning(f"  [citywide_layers] {name}: connection error "
                       f"(attempt {attempt}/{MAX_FETCH_RETRIES}), retrying in {wait_s}s...")
                 time.sleep(wait_s)
     finally:
@@ -202,13 +206,13 @@ def citywide_layer(
         if graph.graph.get("fetch_bbox") == wanted:
             if graph.graph.get("empty_layer"):
                 _MEMO[name] = None
-                print(f"  [citywide_layers] {name}: empty citywide (cached)")
+                logger.info(f"  [citywide_layers] {name}: empty citywide (cached)")
                 return None
             _MEMO[name] = graph
-            print(f"  [citywide_layers] {name}: {len(graph.nodes)} nodes, "
+            logger.info(f"  [citywide_layers] {name}: {len(graph.nodes)} nodes, "
                   f"{len(graph.edges)} edges (cached)")
             return graph
-        print(f"  [citywide_layers] {name}: cached layer covers "
+        logger.info(f"  [citywide_layers] {name}: cached layer covers "
               f"{graph.graph.get('fetch_bbox') or 'an unrecorded area'}, not {wanted} "
               f"-- re-fetching")
 

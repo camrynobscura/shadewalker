@@ -12,6 +12,7 @@ folium is a Python wrapper around Leaflet (the same map library the real
 frontend will use) — dev-only dependency, not part of the shipped app.
 """
 
+import logging
 import argparse
 import gzip
 import json
@@ -20,6 +21,9 @@ import folium
 
 from pipeline import config
 from pipeline.fetch import trees as tree_fetch
+
+logger = logging.getLogger(__name__)
+
 
 DEBUG_DIR = config.DATA_DIR / "debug"
 
@@ -77,7 +81,7 @@ def render(tile_id: str) -> None:
     DEBUG_DIR.mkdir(parents=True, exist_ok=True)
     out_path = DEBUG_DIR / f"{tile_id}.html"
     fmap.save(str(out_path))
-    print(f"  [debug] map written to {out_path.relative_to(config.REPO_ROOT)}")
+    logger.info(f"  [debug] map written to {out_path.relative_to(config.REPO_ROOT)}")
 
 
 def main() -> None:
@@ -88,4 +92,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     main()

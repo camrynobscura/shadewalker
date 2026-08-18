@@ -17,11 +17,15 @@ pyproj step for this one dataset -- confirmed this works against the live
 API.
 """
 
+import logging
 import json
 
 import requests
 
 from pipeline import config
+
+logger = logging.getLogger(__name__)
+
 
 CACHE_PATH = config.RAW_DIR / "arcgis" / "interior_sidewalks_2022.geojson"
 FEATURE_SERVER_URL = (
@@ -37,7 +41,7 @@ def fetch_interior_sidewalks(refresh: bool = False) -> dict:
     EPSG:4326."""
     if CACHE_PATH.exists() and not refresh:
         geojson = json.loads(CACHE_PATH.read_text())
-        print(f"  [interior_sidewalks] {len(geojson['features'])} segments (cached)")
+        logger.info(f"  [interior_sidewalks] {len(geojson['features'])} segments (cached)")
         return geojson
 
     features = []
@@ -63,5 +67,5 @@ def fetch_interior_sidewalks(refresh: bool = False) -> dict:
     geojson = {"type": "FeatureCollection", "features": features}
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     CACHE_PATH.write_text(json.dumps(geojson))
-    print(f"  [interior_sidewalks] {len(features)} segments (downloaded + cached)")
+    logger.info(f"  [interior_sidewalks] {len(features)} segments (downloaded + cached)")
     return geojson

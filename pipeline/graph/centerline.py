@@ -17,9 +17,13 @@ Two transformations happen here, both with important "why"s:
    grab the right one.
 """
 
+import logging
 import geopandas as gpd
 import networkx as nx
 import osmnx as ox
+
+logger = logging.getLogger(__name__)
+
 
 METRIC_CRS = "EPSG:32618"  # UTM 18N — meter units, accurate for NYC
 
@@ -71,7 +75,7 @@ def build_edge_table(street_graph: nx.MultiDiGraph) -> tuple[gpd.GeoDataFrame, g
     # Keep only what downstream stages use.
     edges = edges[["length_m", "name", "geometry", "geometry_m"]]
 
-    print(f"  [graph] {len(nodes)} nodes, {len(edges)} undirected edges")
+    logger.info(f"  [graph] {len(nodes)} nodes, {len(edges)} undirected edges")
     return nodes, edges
 
 

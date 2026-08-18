@@ -23,6 +23,7 @@ fresh cost array with two vectorized numpy lines — microseconds for the
 whole graph — which keeps every slider value exact rather than quantized.
 """
 
+import logging
 import gzip
 import hashlib
 import json
@@ -40,6 +41,9 @@ from shapely.ops import substring
 from shapely.strtree import STRtree
 
 from pipeline import config
+
+logger = logging.getLogger(__name__)
+
 
 # igraph's C layer emits this RuntimeWarning from get_shortest_paths()
 # whenever the two endpoints sit in different components. snap_pair()
@@ -691,7 +695,7 @@ class GraphStore:
                 coords_per_edge.append(edge["coords"])
 
         if phantom_skipped:
-            print(f"[graph_store] skipped {phantom_skipped} confirmed phantom connector(s)")
+            logger.info(f"[graph_store] skipped {phantom_skipped} confirmed phantom connector(s)")
 
         bridged_count = 0
         dangling: list[tuple[str, str, str]] = []
@@ -728,22 +732,26 @@ class GraphStore:
         # batch (server/known_node_gaps.json) makes that ~14k lines on every
         # startup instead -- a single count is all a normal boot needs.
         if bridged_count:
-            print(f"[graph_store] bridged {bridged_count} known node gap(s)")
+            logger.info(f"[graph_store] bridged {bridged_count} known node gap(s)")
         # Mostly-bridged with a few dangling = a citywide dataset where
         # entries went dead (refetch drift) -- say so LOUDLY, per entry.
         # Mostly-dangling = a partial dataset (pilot/CI) -- one quiet line.
         if dangling and bridged_count > len(dangling):
-            print(f"[graph_store] WARNING: {len(dangling)} known-gap entr"
+            # logger.warning, and no literal "WARNING" in the text -- the
+            # level carries it now (FIXES item 9), and the caplog-based
+            # tests assert the LEVEL, which a filtered production handler
+            # also acts on.
+            logger.warning(f"[graph_store] {len(dangling)} known-gap entr"
                   f"{'y' if len(dangling) == 1 else 'ies'} reference nodes "
                   f"missing from this dataset -- each was a shipped fix that "
                   f"is now silently inactive (OSM drift after a refetch?); "
                   f"re-derive or retire them:")
             for node_a, node_b, gap_name in dangling[:20]:
-                print(f"[graph_store]   dead entry: {node_a} <-> {node_b} ({gap_name!r})")
+                logger.warning(f"[graph_store]   dead entry: {node_a} <-> {node_b} ({gap_name!r})")
             if len(dangling) > 20:
-                print(f"[graph_store]   ...and {len(dangling) - 20} more")
+                logger.warning(f"[graph_store]   ...and {len(dangling) - 20} more")
         elif dangling:
-            print(f"[graph_store] {len(dangling)} known-gap entries not in "
+            logger.info(f"[graph_store] {len(dangling)} known-gap entries not in "
                   f"this dataset (partial dataset, e.g. the pilot tile)")
 
         # Cross-tile duplicate synthetic paths (see
@@ -769,7 +777,7 @@ class GraphStore:
             coords_per_edge.append([[lon_a, lat_a], [lon_b, lat_b]])
         self._stitch_count = len(stitches)
         if stitches:
-            print(f"[graph_store] stitched {len(stitches)} cross-tile synthetic duplicate(s)")
+            logger.info(f"[graph_store] stitched {len(stitches)} cross-tile synthetic duplicate(s)")
 
         self._names = names
         self._node_lonlat = np.array(node_lonlat)
@@ -829,7 +837,7 @@ class GraphStore:
         self._edge_component = membership[[u for u, _ in edge_pairs]]
         if len(components) > 1:
             sizes = sorted((len(component) for component in components), reverse=True)
-            print(f"[graph_store] {len(components)} disconnected components "
+            logger.info(f"[graph_store] {len(components)} disconnected components "
                   f"(sizes, largest 5: {sizes[:5]})")
 
         self._build_edge_index()
@@ -842,7 +850,7 @@ class GraphStore:
             self._coverage_rings = self._compute_coverage_rings()
             _save_cached_coverage_rings(coverage_cache_path, coverage_fingerprint, self._coverage_rings)
 
-        print(f"[graph_store] {len(tile_paths)} tile(s): "
+        logger.info(f"[graph_store] {len(tile_paths)} tile(s): "
               f"{len(node_lonlat)} nodes, {len(edge_pairs)} edges loaded")
 
     def _compute_coverage_rings(self) -> list[list[list[float]]]:
@@ -956,7 +964,7 @@ class GraphStore:
             component = int(self._edge_component[int(idx[0])])
             if hidden[component]:
                 hidden[component] = False
-                print(f"[graph_store] keep-visible: {name} "
+                logger.info(f"[graph_store] keep-visible: {name} "
                       f"({comp_len[component] / 1000:.1f}km, curated exception)")
 
         self._visible_edge_mask = ~hidden[self._edge_component]
@@ -964,7 +972,7 @@ class GraphStore:
         if hidden_edges:
             hidden_comps = int(hidden.sum())
             hidden_km = float(comp_len[hidden].sum()) / 1000
-            print(f"[graph_store] hide rule: {hidden_comps} small component(s) "
+            logger.info(f"[graph_store] hide rule: {hidden_comps} small component(s) "
                   f"({hidden_edges} edges, {hidden_km:.0f}km) excluded from "
                   f"snapping + coverage")
             self._strtree_edge_ids = np.where(self._visible_edge_mask)[0]

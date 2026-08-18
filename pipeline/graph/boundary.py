@@ -13,12 +13,16 @@ breaking the per-tile GraphML cache's assumption that a tile's content
 depends only on its own id, not on who asked for it.
 """
 
+import logging
 import networkx as nx
 import shapely
 from shapely.geometry import Point, box, shape
 from shapely.geometry.base import BaseGeometry
 
 from pipeline import config
+
+logger = logging.getLogger(__name__)
+
 
 
 def nyc_boundary(geojson: dict) -> BaseGeometry:
@@ -132,5 +136,5 @@ def clip_to_nyc(street_graph: nx.MultiDiGraph, nyc_shape: BaseGeometry) -> nx.Mu
     ]
     clipped = street_graph.copy()
     clipped.remove_nodes_from(outside_nyc)
-    print(f"  [boundary] dropped {len(outside_nyc)}/{street_graph.number_of_nodes()} nodes outside NYC")
+    logger.info(f"  [boundary] dropped {len(outside_nyc)}/{street_graph.number_of_nodes()} nodes outside NYC")
     return clipped
