@@ -7,7 +7,7 @@ keeping network-dependent checks out of the automated suite."""
 
 import json
 
-from pipeline.fetch import boundaries
+from pipeline.fetch import boundaries, socrata
 
 FAKE_GEOJSON = {
     "type": "FeatureCollection",
@@ -35,7 +35,7 @@ class _FakeResponse:
 def test_fetch_borough_boundaries_downloads_and_caches(monkeypatch, tmp_path):
     cache_path = tmp_path / "borough_boundaries.geojson"
     monkeypatch.setattr(boundaries, "CACHE_PATH", cache_path)
-    monkeypatch.setattr(boundaries.requests, "get", lambda *a, **k: _FakeResponse(FAKE_GEOJSON))
+    monkeypatch.setattr(socrata.requests, "get", lambda *a, **k: _FakeResponse(FAKE_GEOJSON))
 
     result = boundaries.fetch_borough_boundaries()
 
@@ -51,7 +51,7 @@ def test_fetch_borough_boundaries_reads_cache_without_a_network_call(monkeypatch
     def fail_if_called(*args, **kwargs):
         raise AssertionError("should not hit the network on a cache hit")
 
-    monkeypatch.setattr(boundaries.requests, "get", fail_if_called)
+    monkeypatch.setattr(socrata.requests, "get", fail_if_called)
 
     assert boundaries.fetch_borough_boundaries() == FAKE_GEOJSON
 
@@ -60,6 +60,6 @@ def test_fetch_borough_boundaries_refresh_forces_a_new_download(monkeypatch, tmp
     cache_path = tmp_path / "borough_boundaries.geojson"
     cache_path.write_text(json.dumps({"stale": True}))
     monkeypatch.setattr(boundaries, "CACHE_PATH", cache_path)
-    monkeypatch.setattr(boundaries.requests, "get", lambda *a, **k: _FakeResponse(FAKE_GEOJSON))
+    monkeypatch.setattr(socrata.requests, "get", lambda *a, **k: _FakeResponse(FAKE_GEOJSON))
 
     assert boundaries.fetch_borough_boundaries(refresh=True) == FAKE_GEOJSON

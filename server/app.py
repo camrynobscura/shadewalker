@@ -20,8 +20,20 @@ was firing a fresh network request on every click. Each extra Dijkstra run
 costs microseconds on this in-memory graph, so computing all four up front
 and letting the frontend cache + switch between them locally is strictly
 better than re-fetching per click.
+
+Data refresh = restart, by design (FIXES item 8, decided 2026-08-17):
+tiles load once at startup and there is deliberately NO live-reload
+path. The refresh cadence is monthly (a tree re-score; the source
+dataset only updates biweekly), so the refresh story is: re-run the
+pipeline (exports are atomic, tmp+rename — a running server can never
+read a half-written tile), then restart the server (~15s + a coverage
+recompute when the tile set changed). Building a safe in-flight reload
+mechanism costs real threading care and buys nothing at that cadence;
+revisit only if the hosting platform's restart story turns out to be
+painful or the refresh cadence tightens dramatically.
 """
 
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -29,6 +41,17 @@ from fastapi import FastAPI, HTTPException, Query
 
 from pipeline import config
 from server.graph_store import GraphStore, clamp_shade_monotonic
+
+# Route graph_store's loggers somewhere visible under uvicorn, which
+# configures its own loggers but leaves the root logger bare (FIXES item
+# 9) -- without this, load()'s startup summary and the dead-gap-entry
+# WARNING would silently vanish. basicConfig is a no-op if some outer
+# process (tests, a managed host) already configured handlers, so this
+# never overrides a real deployment's logging setup.
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 store = GraphStore()
 
@@ -86,6 +109,14 @@ def route(
         raise HTTPException(status_code=400, detail="month must be 1-12")
     if not tree_weights:
         raise HTTPException(status_code=400, detail="tree_weights must include at least one value")
+    # Each weight is a real ~13ms Dijkstra pass on a worker thread; the
+    # frontend sends 4. Uncapped, one request with hundreds of weights
+    # blocks a worker for seconds (FIXES item 7 / audit §2.1).
+    if len(tree_weights) > config.MAX_TREE_WEIGHTS_PER_REQUEST:
+        raise HTTPException(
+            status_code=400,
+            detail=f"tree_weights accepts at most {config.MAX_TREE_WEIGHTS_PER_REQUEST} values",
+        )
     for tree_weight in tree_weights:
         if not 0 <= tree_weight <= config.MAX_TREE_WEIGHT:
             raise HTTPException(

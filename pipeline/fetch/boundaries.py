@@ -20,12 +20,14 @@ GeoJSON export request, cached whole rather than through socrata.py's
 paginated fetch_all_rows.
 """
 
+import logging
 import json
-
-import requests
 
 from pipeline import config
 from pipeline.fetch import socrata
+
+logger = logging.getLogger(__name__)
+
 
 # Filename keyed to the dataset id so switching datasets (as just happened)
 # can't silently keep serving a stale cache from the old one -- exactly
@@ -38,15 +40,16 @@ def fetch_borough_boundaries(refresh: bool = False) -> dict:
     `boroname`/`borocode` properties, `geometry` a MultiPolygon."""
     if CACHE_PATH.exists() and not refresh:
         geojson = json.loads(CACHE_PATH.read_text())
-        print(f"  [boundaries] {len(geojson['features'])} boroughs (cached)")
+        logger.info(f"  [boundaries] {len(geojson['features'])} boroughs (cached)")
         return geojson
 
     url = f"{config.SOCRATA_BASE_URL}/{config.BOUNDARIES_DATASET_ID}.geojson"
-    response = requests.get(url, headers=socrata.auth_headers(), timeout=60)
-    response.raise_for_status()
+    # socrata.get_with_retry, not a bare requests.get (FIXES item 10) --
+    # same one-blip-kills-the-run hole parks.py had.
+    response = socrata.get_with_retry(url, headers=socrata.auth_headers())
     geojson = response.json()
 
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     CACHE_PATH.write_text(json.dumps(geojson))
-    print(f"  [boundaries] {len(geojson['features'])} boroughs (downloaded + cached)")
+    logger.info(f"  [boundaries] {len(geojson['features'])} boroughs (downloaded + cached)")
     return geojson

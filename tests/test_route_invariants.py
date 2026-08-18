@@ -325,6 +325,37 @@ def test_tree_weight_out_of_range_is_rejected(client):
         assert "tree_weight" in res.json()["detail"]
 
 
+def test_oversized_tree_weights_list_is_rejected(client):
+    """Each requested weight costs a real ~13ms Dijkstra pass on a worker
+    thread, so an uncapped list is a denial-of-service hole once public
+    (FIXES item 7): one request with hundreds of weights blocks a worker
+    for seconds. The frontend sends 4; the cap is 8 (config.
+    MAX_TREE_WEIGHTS_PER_REQUEST). Exactly-at-cap must still work -- the
+    guard is about unbounded lists, not about breaking legitimate
+    experimentation."""
+    at_cap = list(range(config.MAX_TREE_WEIGHTS_PER_REQUEST))
+    res = client.get(
+        "/route",
+        params={
+            "from_lat": FROM["lat"], "from_lon": FROM["lon"],
+            "to_lat": TO["lat"], "to_lon": TO["lon"],
+            "tree_weights": at_cap,
+        },
+    )
+    assert res.status_code == 200
+
+    res = client.get(
+        "/route",
+        params={
+            "from_lat": FROM["lat"], "from_lon": FROM["lon"],
+            "to_lat": TO["lat"], "to_lon": TO["lon"],
+            "tree_weights": at_cap + [15],
+        },
+    )
+    assert res.status_code == 400
+    assert "at most" in res.json()["detail"]
+
+
 def test_two_points_on_the_same_block_route_directly_not_via_a_corner(graph_store):
     """Without the same-edge "direct" candidate in route(), two nearby
     clicks on one block would be forced through a real intersection and

@@ -13,6 +13,7 @@ import json
 
 import geopandas as gpd
 import pandas as pd
+import pytest
 from shapely.geometry import LineString
 
 from pipeline import config, export
@@ -144,3 +145,59 @@ def test_write_tile_namespaces_synthetic_node_ids_per_tile(tmp_path, monkeypatch
     for edge in tile["edges"]:
         assert edge["u"] in tile["nodes"]
         assert edge["v"] in tile["nodes"]
+
+
+def _minimal_tile_frames():
+    """The smallest nodes/edges pair write_tile() accepts -- for tests
+    about the WRITE mechanics (atomicity), not the exported content."""
+    nodes = gpd.GeoDataFrame({"x": [-73.99, -73.989], "y": [40.68, 40.681]}, index=[1, 2])
+    edges = gpd.GeoDataFrame(
+        {
+            "length_m": [150.0],
+            "name": ["Test St"],
+            "tree_deciduous": [2.5],
+            "tree_evergreen": [0.0],
+            "tree_count": [3],
+            "tree_park_canopy": [0.0],
+            "geometry": [LineString([(-73.99, 40.68), (-73.989, 40.681)])],
+        },
+        index=pd.MultiIndex.from_tuples([(1, 2, 0)], names=["u", "v", "key"]),
+        geometry="geometry",
+    )
+    return nodes, edges
+
+
+def test_write_tile_leaves_no_temp_file_after_a_clean_write(tmp_path, monkeypatch):
+    # The atomic-write path (FIXES item 8) goes through <name>.json.gz.tmp
+    # + os.replace(); a leftover .tmp after success would accumulate one
+    # stray file per tile per run.
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path / "tiles")
+    nodes, edges = _minimal_tile_frames()
+
+    export.write_tile("test_tile", nodes, edges)
+
+    leftovers = list((tmp_path / "tiles").glob("*.tmp"))
+    assert leftovers == []
+    assert (tmp_path / "tiles" / "test_tile.json.gz").exists()
+
+
+def test_write_tile_crash_mid_write_leaves_no_partial_final_file(tmp_path, monkeypatch):
+    # The bug the atomic write exists for (audit §2.5): the old direct
+    # write could die halfway and leave a truncated test_tile.json.gz that
+    # GraphStore.load()'s glob would happily pick up. Now the final name
+    # must either not exist at all or be the complete previous version --
+    # and the crashed attempt must clean up its own .tmp.
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path / "tiles")
+    nodes, edges = _minimal_tile_frames()
+
+    def explode(*args, **kwargs):
+        raise OSError("disk full halfway through")
+
+    monkeypatch.setattr(export.json, "dump", explode)
+    with pytest.raises(OSError):
+        export.write_tile("test_tile", nodes, edges)
+
+    assert not (tmp_path / "tiles" / "test_tile.json.gz").exists()
+    assert list((tmp_path / "tiles").glob("*")) == []

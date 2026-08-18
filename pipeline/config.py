@@ -267,6 +267,14 @@ EVERGREEN_GENERA = {
 # blocks, breaking Dijkstra's non-negative-edge-weight assumption.
 MAX_TREE_WEIGHT = 40.0
 
+# How many tree_weights one /route request may ask for (FIXES item 7,
+# audit §2.1). Each weight costs a synchronous ~13ms two-Dijkstra pass
+# that blocks a worker thread, so an uncapped list is a denial-of-service
+# hole once the API is public: one curl with hundreds of weights ties up
+# a worker for seconds. 8 = double the frontend's four presets -- room to
+# experiment from a script without ever being a meaningful load.
+MAX_TREE_WEIGHTS_PER_REQUEST = 8
+
 # When computing tree density (score ÷ length), treat very short edges as at
 # least this long. Tiny intersection stubs (2 m edges) inherit the cross
 # street's trees in their buffer corridor and would otherwise post absurd
