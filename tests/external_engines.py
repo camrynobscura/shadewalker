@@ -16,6 +16,17 @@ re-learned per ad-hoc script:
   5 flags in a 100-route batch were OSRM taking the E 34th St ferry;
   Valhalla-no-ferry read all four at ratio 1.01-1.03). This OSRM instance
   rejects exclude=ferry, so the arbitration has to live in Valhalla.
+- BRouter is a THIRD independent engine, wired in as a hot-swap fallback
+  (2026-08-19): it stands in as the primary comparison when OSRM is down,
+  and as the arbiter when Valhalla is down (which has happened twice
+  mid-batch). It is called only when needed, to stay polite. It exposes no
+  snapped-waypoint location, so it can't carry OSRM's snap guard -- fine,
+  because pairs are sampled from OUR OWN network nodes (BRouter snaps them
+  trivially) and a bad snap surfaces as a human-triaged flag, not silent
+  corruption; a crow-flight floor catches gross errors. Not a new coverage
+  class: it shares the other engines' pedestrian-profile blind spots (a
+  DUMBO spot-check had all three avoiding a stepped walkway we correctly
+  used) -- its value is resilience and tie-breaking, not new signal.
 - Both engines snap endpoints too; if any snap moved an endpoint more
   than SNAP_MAX_M, the comparison is no longer about the requested pair
   and must be discarded, not compared.
@@ -30,6 +41,13 @@ import requests
 
 OSRM_FOOT_URL = "https://routing.openstreetmap.de/routed-foot/route/v1/foot"
 VALHALLA_URL = "https://valhalla1.openstreetmap.de/route"
+BROUTER_URL = "https://brouter.de/brouter"
+# A foot profile, not a bike one. hiking-mountain is BRouter's standard
+# pedestrian profile; on flat NYC its elevation weighting is negligible, and
+# a DUMBO->LES spot-check read 4,583m vs OSRM 4,576m / Valhalla 4,575m (within
+# 0.2%), so it tracks the others closely. One constant to swap if a plainer
+# walking profile proves better across a batch.
+BROUTER_PROFILE = "hiking-mountain"
 USER_AGENT = "shadewalker-validation-harness (personal project; tests/external_engines.py)"
 
 SNAP_MAX_M = 40.0
@@ -101,6 +119,39 @@ def valhalla_no_ferry_length_m(a, b):
     return trip["summary"]["length"] * 1000.0, None
 
 
+def brouter_foot_length_m(a, b):
+    """Walking distance per BRouter, or (None, reason). a/b are (lat, lon).
+
+    The fallback engine: used only when OSRM or Valhalla is unavailable (see
+    the module docstring). BRouter reports the total metres as track-length
+    and takes lon,lat order. It exposes no snapped-waypoint location, so
+    instead of OSRM's snap guard we apply a crow-flight floor: a real walking
+    route can never be shorter than the straight line between its endpoints,
+    so a track-length below that means the request went wrong (a wild snap or
+    a truncated route) and must not be compared."""
+    params = {
+        "lonlats": f"{a[1]},{a[0]}|{b[1]},{b[0]}",
+        "profile": BROUTER_PROFILE,
+        "alternativeidx": 0,
+        "format": "geojson",
+    }
+    try:
+        resp = requests.get(BROUTER_URL, params=params, timeout=30,
+                            headers={"User-Agent": USER_AGENT})
+        data = resp.json()
+    except Exception as exc:  # noqa: BLE001 -- advisory oracle, log and move on
+        return None, f"brouter error: {exc}"
+    try:
+        length = float(data["features"][0]["properties"]["track-length"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        # BRouter reports routing failures as a plain-text body, not geojson.
+        return None, f"brouter: no track ({str(data)[:80]})"
+    crow = haversine_m(a[0], a[1], b[0], b[1])
+    if length < crow:
+        return None, f"brouter track {length:.0f}m < crow-flight {crow:.0f}m"
+    return length, None
+
+
 def our_none_priority_length_m(store, a, b):
     """Our own NONE-priority (tree_weight=0) length, or (None, reason) --
     the plain shortest walking path, the same thing the external engines
@@ -116,6 +167,47 @@ def our_none_priority_length_m(store, a, b):
     if route is None:
         return None, "no path"
     return route["length_m"], None
+
+
+def primary_comparison(a, b, ours_m, osrm_fn=osrm_foot_length_m,
+                       brouter_fn=brouter_foot_length_m, pause_fn=polite_pause):
+    """The length to compare OURS against: OSRM, or BRouter if OSRM is DOWN.
+
+    Returns (length, engine, err). A per-pair "osrm snap moved" is a real
+    skip (BRouter can't be snap-guarded, so we don't paper over it); only a
+    service/network error (or a bad code) triggers the BRouter stand-in, so
+    the batch doesn't shrink whenever OSRM is flaky. Engine callables are
+    injectable so this is unit-testable without live calls."""
+    theirs, err = osrm_fn(a, b)
+    pause_fn()
+    if theirs is None and err is not None and not err.startswith("osrm snap"):
+        brouter, brouter_err = brouter_fn(a, b)
+        pause_fn()
+        if brouter is not None:
+            return brouter, "brouter", None
+    if theirs is None:
+        return None, "osrm", err
+    return theirs, "osrm", None
+
+
+def arbitrate(a, b, ours_m, primary_engine, valhalla_fn=valhalla_no_ferry_length_m,
+              brouter_fn=brouter_foot_length_m, pause_fn=polite_pause):
+    """Second opinion on a flagged pair: Valhalla-no-ferry, or BRouter if
+    Valhalla is down (recorded twice mid-batch). BRouter never self-arbitrates
+    -- if it was already the primary there is no independent second engine, so
+    the pair stays an honest unarbitrated lead. Returns
+    (arbiter_m, engine, err, agrees)."""
+    arbiter, err = valhalla_fn(a, b)
+    pause_fn()
+    engine = "valhalla-no-ferry"
+    if arbiter is None and primary_engine != "brouter":
+        arbiter, err = brouter_fn(a, b)
+        pause_fn()
+        engine = "brouter"
+    agrees = arbiter is not None and (
+        1 / ARBITER_AGREE_RATIO <= arbiter / ours_m <= ARBITER_AGREE_RATIO
+    )
+    return arbiter, engine, err, agrees
 
 
 def classify_flag(ours_m, theirs_m):

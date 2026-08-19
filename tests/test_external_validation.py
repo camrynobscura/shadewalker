@@ -36,14 +36,12 @@ from pathlib import Path
 import pytest
 
 from external_engines import (
+    arbitrate,
     classify_flag,
     google_walking_directions_url,
     haversine_m,
-    osrm_foot_length_m,
     our_none_priority_length_m,
-    polite_pause,
-    valhalla_no_ferry_length_m,
-    ARBITER_AGREE_RATIO,
+    primary_comparison,
 )
 
 # Same-ish-length pairs: long enough that a detour is unambiguous, short
@@ -101,8 +99,7 @@ def test_random_batch_against_external_engines(citywide_store, request):
             skips[our_err] = skips.get(our_err, 0) + 1
             continue
 
-        theirs, their_err = osrm_foot_length_m(a, b)
-        polite_pause()
+        theirs, primary_engine, their_err = primary_comparison(a, b, ours)
         if theirs is None:
             skips[their_err] = skips.get(their_err, 0) + 1
             continue
@@ -112,22 +109,24 @@ def test_random_batch_against_external_engines(citywide_store, request):
         flag = classify_flag(ours, theirs)
         row = {
             "a": a, "b": b,
-            "ours_m": round(ours), "osrm_m": round(theirs),
+            "ours_m": round(ours), "theirs_m": round(theirs),
+            "primary_engine": primary_engine,
             "ratio": round(ratio, 3), "flag": flag,
         }
 
         if flag:
-            # Arbitration (the ferry lesson): Valhalla-no-ferry agreeing
-            # with US means the disagreement is OSRM-specific, not a lead.
-            valhalla, valhalla_err = valhalla_no_ferry_length_m(a, b)
-            polite_pause()
-            row["valhalla_no_ferry_m"] = round(valhalla) if valhalla else None
-            row["valhalla_err"] = valhalla_err
-            agrees = valhalla is not None and (
-                1 / ARBITER_AGREE_RATIO <= valhalla / ours <= ARBITER_AGREE_RATIO
+            # Arbitration (the ferry lesson): a second engine agreeing with
+            # US means the disagreement is primary-engine-specific, not a
+            # lead. See external_engines.arbitrate for the Valhalla->BRouter
+            # fallback and the no-self-arbitration rule.
+            arbiter, arbiter_engine, arbiter_err, agrees = arbitrate(
+                a, b, ours, primary_engine
             )
+            row["arbiter_m"] = round(arbiter) if arbiter else None
+            row["arbiter_engine"] = arbiter_engine
+            row["arbiter_err"] = arbiter_err
             if agrees:
-                row["verdict"] = "explained (Valhalla-no-ferry agrees with us; OSRM-specific)"
+                row["verdict"] = f"explained ({arbiter_engine} agrees with us; {primary_engine}-specific)"
                 explained.append(row)
             else:
                 row["verdict"] = "LEAD -- needs human triage"
@@ -135,7 +134,7 @@ def test_random_batch_against_external_engines(citywide_store, request):
 
         rows.append(row)
         mark = f"  <-- {row.get('verdict', flag)}" if flag else ""
-        print(f"  [{compared:3d}/{n_pairs}] ours={ours:6.0f}m osrm={theirs:6.0f}m ratio={ratio:.2f}{mark}")
+        print(f"  [{compared:3d}/{n_pairs}] ours={ours:6.0f}m {primary_engine}={theirs:6.0f}m ratio={ratio:.2f}{mark}")
 
     # Report file first, so it exists even if the assertions below fire.
     today = datetime.date.today().isoformat()
@@ -158,8 +157,8 @@ def test_random_batch_against_external_engines(citywide_store, request):
 
     for i, lead in enumerate(leads, 1):
         a, b = lead["a"], lead["b"]
-        print(f"\nLEAD {i}: ours={lead['ours_m']}m osrm={lead['osrm_m']}m "
-              f"valhalla-no-ferry={lead['valhalla_no_ferry_m']}m (ratio {lead['ratio']})")
+        print(f"\nLEAD {i}: ours={lead['ours_m']}m {lead['primary_engine']}={lead['theirs_m']}m "
+              f"{lead['arbiter_engine']}={lead['arbiter_m']}m (ratio {lead['ratio']})")
         print(f"  pair: {a[0]},{a[1]} -> {b[0]},{b[1]}")
         print(f"  route: {google_walking_directions_url(a, b)}")
         print("  triage ritual (see HISTORY 2026-08-15, Queensboro):")
