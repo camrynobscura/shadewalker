@@ -24,7 +24,7 @@ from shapely.geometry import LineString, box
 
 from pipeline import config
 from pipeline.config import Bbox
-from pipeline.fetch import citywide_layers, park_trails, streets
+from pipeline.fetch import citywide_layers, interior_sidewalks, park_trails, streets
 
 BBOX = Bbox(lat_min=40.0, lat_max=40.1, lon_min=-74.0, lon_max=-73.9)
 
@@ -584,6 +584,20 @@ def _cache_roundtrip(monkeypatch, tmp_path, cached_graph, recorded_bbox_signatur
     monkeypatch.setattr(streets, "RAW_STREETS_DIR", tmp_path / "streets_raw")
     monkeypatch.setattr(streets.time, "sleep", lambda seconds: None)
     _isolate_citywide_layers(monkeypatch, tmp_path)
+    # These cache-behavior tests are about fetch_streets's OWN graph cache,
+    # not the imported layers -- but fetch_streets still calls the two direct
+    # HTTP fetches _by_filter doesn't intercept: interior_sidewalks (ArcGIS)
+    # and park_trails (NYC Open Data). Locally a warm cache hides them; in CI
+    # (cold cache) they go live, and a transient park-trails 500 failed the
+    # whole suite. Mock both to empty so these tests never touch the network.
+    monkeypatch.setattr(
+        interior_sidewalks, "fetch_interior_sidewalks",
+        lambda **kwargs: {"type": "FeatureCollection", "features": []},
+    )
+    monkeypatch.setattr(
+        park_trails, "fetch_park_trails",
+        lambda **kwargs: {"type": "FeatureCollection", "features": []},
+    )
 
     if recorded_bbox_signature is not None:
         cached_graph.graph["fetch_bbox"] = recorded_bbox_signature
