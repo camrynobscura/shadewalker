@@ -1416,6 +1416,10 @@ def test_snap_interior_sidewalks_result_survives_build_edge_table():
 
     result = streets._snap_interior_sidewalks(graph, interior, None, "test-tile")
 
+    # Mirror the pipeline: annotate node_ids (normally done right after
+    # simplify) before build_edge_table, which now requires it (FIXES 13).
+    streets._annotate_node_ids(result, streets._capture_coord_to_id(result))
+
     build_edge_table(result)  # must not raise
 
 

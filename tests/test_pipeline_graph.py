@@ -46,8 +46,11 @@ def _two_way_graph() -> nx.MultiDiGraph:
     g = nx.MultiDiGraph(crs="epsg:4326")
     g.add_node(1, x=-73.99, y=40.68)
     g.add_node(2, x=-73.989, y=40.681)
-    g.add_edge(1, 2, key=0, length=150.0, name="Test St", oneway=False, osmid=42)
-    g.add_edge(2, 1, key=0, length=150.0, name="Test St", oneway=False, osmid=42)
+    # node_ids: what _annotate_node_ids (pipeline/fetch/streets.py) attaches
+    # to every edge after simplify -- a two-point edge has no interior, so
+    # its chain is just [u, v]. build_edge_table now requires it (FIXES 13).
+    g.add_edge(1, 2, key=0, length=150.0, name="Test St", oneway=False, osmid=42, node_ids=[1, 2])
+    g.add_edge(2, 1, key=0, length=150.0, name="Test St", oneway=False, osmid=42, node_ids=[2, 1])
     return g
 
 
@@ -81,8 +84,8 @@ def test_missing_name_column_entirely_falls_back_to_empty_string():
     g = nx.MultiDiGraph(crs="epsg:4326")
     g.add_node(1, x=-73.99, y=40.68)
     g.add_node(2, x=-73.989, y=40.681)
-    g.add_edge(1, 2, key=0, length=40.0, oneway=False, osmid=99)
-    g.add_edge(2, 1, key=0, length=40.0, oneway=False, osmid=99)
+    g.add_edge(1, 2, key=0, length=40.0, oneway=False, osmid=99, node_ids=[1, 2])
+    g.add_edge(2, 1, key=0, length=40.0, oneway=False, osmid=99, node_ids=[2, 1])
 
     _, edges = build_edge_table(g)
     assert edges.iloc[0]["name"] == ""

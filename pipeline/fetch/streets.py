@@ -201,7 +201,17 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # --refresh-raw. So: processing change = bump this; filter/tag-retention
 # change = bump this AND the raw key shifts on its own; fresh OSM data =
 # --refresh-raw, no bump at all.
-GRAPH_CACHE_VERSION = 20
+# v21 (2026-08-18, FIXES item 13): every simplified edge now carries
+# node_ids -- its original OSM node-id chain, aligned 1:1 with its
+# geometry points (None where two distinct nodes share one exact
+# coordinate, so a lookup would be a guess). Captured from the composed
+# graph right before the single simplify pass (_annotate_node_ids) and
+# exported per edge, so server/graph_store.py can reconcile cross-tile
+# severed overlaps on node identity -- adjacent tiles simplify the same
+# way through different nodes, leaving overlapping spans that share no
+# joinable node and silently severing a real street at the tile border
+# (the Meredith Avenue class, data/audits/2026-08-18/).
+GRAPH_CACHE_VERSION = 21
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -1599,6 +1609,57 @@ def _missing_park_trail_graph(
     )
 
 
+def _capture_coord_to_id(graph):
+    """Map each node's exact (x, y) coordinate to its node id.
+
+    simplify_graph() collapses degree-2 chains into a single edge whose
+    LineString vertices are the collapsed nodes' coordinates copied
+    verbatim -- osmnx does no point reduction -- so an exact float lookup
+    on this map recovers which OSM node each geometry vertex was. That
+    node identity is the "bead" server/graph_store.py rejoins cross-tile
+    severed overlaps on (FIXES item 13): a bead only becomes a split
+    point when SOME OTHER tile exported it as an endpoint node.
+
+    Two distinct node ids at one exact coordinate (an OSM data defect)
+    can't be told apart by coordinate, so that coordinate maps to None --
+    never a guess. Counted and logged.
+    """
+    coord_to_id = {}
+    collisions = set()
+    for node_id, data in graph.nodes(data=True):
+        key = (data["x"], data["y"])
+        if key in coord_to_id and coord_to_id[key] != node_id:
+            collisions.add(key)
+        coord_to_id[key] = node_id
+    for key in collisions:
+        coord_to_id[key] = None
+    if collisions:
+        logger.warning(
+            f"  [streets] {len(collisions)} coordinate(s) shared by multiple "
+            f"distinct OSM nodes -- node_ids set to null there (no guess)"
+        )
+    return coord_to_id
+
+
+def _annotate_node_ids(graph, coord_to_id):
+    """Attach `node_ids` to every simplified edge: the OSM node id at each
+    of the edge's geometry vertices, aligned 1:1 with the geometry.
+
+    None where a vertex is a mere shape point (a way's coordinate that was
+    never a graph node -- not in coord_to_id) or a coordinate collision.
+    That distinction is exactly what we want: only true graph nodes become
+    beads the server may split on. Edges osmnx kept without an explicit
+    geometry are two-point (u -> v) straight segments with no interior, so
+    their chain is just [u, v]. See _capture_coord_to_id / FIXES item 13.
+    """
+    for u, v, key, data in graph.edges(keys=True, data=True):
+        geom = data.get("geometry")
+        if geom is None:
+            data["node_ids"] = [u, v]
+        else:
+            data["node_ids"] = [coord_to_id.get((x, y)) for x, y in geom.coords]
+
+
 def fetch_streets(
     bbox: Bbox,
     tile_id: str,
@@ -1657,6 +1718,12 @@ def fetch_streets(
 
     wanted = _bbox_signature(bbox)
     if graphml_path.exists() and not refresh_raw:
+        # node_ids round-trips without an edge_dtypes converter: osmnx's
+        # load_graphml auto-evals any "[...]"-shaped attribute back to a
+        # Python list (of ints, with None for unknown vertices) on its own.
+        # Passing a converter here is actively wrong -- osmnx would apply it
+        # per-list-ITEM after that auto-eval, so a str-expecting converter
+        # like ast.literal_eval receives an int and raises (FIXES 13).
         graph = ox.load_graphml(graphml_path)
         cached = graph.graph.get("fetch_bbox")
         if cached == wanted:
@@ -1773,7 +1840,15 @@ def fetch_streets(
     # removes anything.
     vertical_audit.report_vertical_suspects(graph, any_sidewalk_graph, tile_id)
 
+    # Capture the coord->node-id map from the COMPOSED (pre-simplify) graph
+    # while every node still exists, then simplify, then annotate each
+    # collapsed edge's geometry with the node id at each vertex. Order
+    # matters: after simplify the interior nodes are gone from the graph
+    # but survive as geometry vertices, recoverable only via this map.
+    # (FIXES item 13 -- bead-identity reconciliation.)
+    coord_to_id = _capture_coord_to_id(graph)
     graph = ox.simplification.simplify_graph(graph)
+    _annotate_node_ids(graph, coord_to_id)
 
     # Record what this graph actually covers, so a later run can tell
     # whether the filename still means the same area (see _bbox_signature).
