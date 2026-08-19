@@ -59,13 +59,20 @@ def _mock_fetch(monkeypatch, tmp_path, graph_from_bbox):
     )
     monkeypatch.setattr(streets.ox, "load_graphml", lambda path: saved[str(path)])
     _isolate_citywide_layers(monkeypatch, tmp_path)
-    # Defaults to "no trails here" (the common real case) unless a test
-    # overrides it -- unlike interior_sidewalks.fetch_interior_sidewalks,
-    # nothing else in this suite implicitly relies on a real cache file
-    # existing on disk, so every test needs this mocked, not just the ones
-    # that care about park trails specifically.
+    # Both direct-HTTP layers _by_filter can't intercept -- park_trails (NYC
+    # Open Data) and interior_sidewalks (ArcGIS) -- default to "nothing here"
+    # (the common real case). Every test needs both mocked, not just the ones
+    # that care: unmocked, they go live on a cold CI cache and fail on any
+    # transient upstream hiccup (a park-trails 500 once failed the whole
+    # suite; interior_sidewalks is the same latent flake -- FIXES item 14).
+    # A test that WANTS data overrides the relevant one with its own geojson
+    # AFTER calling _mock_fetch, so the override wins (see the union tests).
     monkeypatch.setattr(
         park_trails, "fetch_park_trails",
+        lambda **kwargs: {"type": "FeatureCollection", "features": []},
+    )
+    monkeypatch.setattr(
+        interior_sidewalks, "fetch_interior_sidewalks",
         lambda **kwargs: {"type": "FeatureCollection", "features": []},
     )
     return saved
@@ -1496,9 +1503,11 @@ def test_fetch_streets_unions_in_interior_sidewalks(monkeypatch, tmp_path):
     interior_geojson = {"type": "FeatureCollection", "features": [
         _segment_feature([[-73.9500, 40.05003], [-73.9490, 40.05003]]),
     ]}
-    monkeypatch.setattr(interior_sidewalks, "fetch_interior_sidewalks", lambda **kwargs: interior_geojson)
 
     _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    # Override _mock_fetch's empty default AFTER it, same as the park-trail
+    # union test below -- so this test's own segment wins.
+    monkeypatch.setattr(interior_sidewalks, "fetch_interior_sidewalks", lambda **kwargs: interior_geojson)
     result = streets.fetch_streets(BBOX, "test-interior-sidewalk-tile")
 
     assert nx.has_path(result.to_undirected(), "other_a", "other_b")
@@ -1506,16 +1515,11 @@ def test_fetch_streets_unions_in_interior_sidewalks(monkeypatch, tmp_path):
 
 def test_fetch_streets_works_with_no_interior_sidewalks_in_the_area(monkeypatch, tmp_path):
     # Most tiles have none -- the common real case, same as every other
-    # narrower query.
-    from pipeline.fetch import interior_sidewalks
-
+    # narrower query. (_mock_fetch's default already covers this, but an
+    # explicit test documents the behavior same as every other source.)
     main_graph = nx.MultiDiGraph()
     main_graph.add_node("m1", x=-73.95, y=40.05)
 
-    monkeypatch.setattr(
-        interior_sidewalks, "fetch_interior_sidewalks",
-        lambda **kwargs: {"type": "FeatureCollection", "features": []},
-    )
     _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
     result = streets.fetch_streets(BBOX, "test-no-interior-sidewalk-tile")
 
@@ -1597,9 +1601,8 @@ def test_fetch_streets_leaves_a_too_far_interior_sidewalk_unconnected(monkeypatc
     interior_geojson = {"type": "FeatureCollection", "features": [
         _segment_feature([[-73.9495, 40.05020], [-73.9495, 40.06]]),
     ]}
-    monkeypatch.setattr(interior_sidewalks, "fetch_interior_sidewalks", lambda **kwargs: interior_geojson)
-
     _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    monkeypatch.setattr(interior_sidewalks, "fetch_interior_sidewalks", lambda **kwargs: interior_geojson)
     result = streets.fetch_streets(BBOX, "test-far-interior-sidewalk-tile")
 
     # The interior segment's nodes get synthetic ids assigned internally
@@ -1628,7 +1631,6 @@ def test_fetch_streets_fetches_barrier_ways_once_for_both_interior_sidewalks_and
     interior_geojson = {"type": "FeatureCollection", "features": [
         _segment_feature([[-73.9495, 40.05020], [-73.9495, 40.06]]),
     ]}
-    monkeypatch.setattr(interior_sidewalks, "fetch_interior_sidewalks", lambda **kwargs: interior_geojson)
 
     trail_geojson = {"type": "FeatureCollection", "features": [
         _trail_feature([[-73.9480, 40.0700], [-73.9470, 40.0700]]),
@@ -1641,6 +1643,8 @@ def test_fetch_streets_fetches_barrier_ways_once_for_both_interior_sidewalks_and
         raise ValueError("no barrier ways here")
 
     _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph, barrier_fn=barrier_fn))
+    # Both overrides after _mock_fetch, so each source's own geojson wins.
+    monkeypatch.setattr(interior_sidewalks, "fetch_interior_sidewalks", lambda **kwargs: interior_geojson)
     monkeypatch.setattr(park_trails, "fetch_park_trails", lambda **kwargs: trail_geojson)
     streets.fetch_streets(BBOX, "test-shared-barrier-fetch-tile")
 
