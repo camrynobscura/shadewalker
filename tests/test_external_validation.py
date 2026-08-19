@@ -40,7 +40,9 @@ from external_engines import (
     classify_flag,
     google_walking_directions_url,
     haversine_m,
+    osrm_route_uses_ferry,
     our_none_priority_length_m,
+    polite_pause,
     primary_comparison,
 )
 
@@ -115,22 +117,38 @@ def test_random_batch_against_external_engines(citywide_store, request):
         }
 
         if flag:
-            # Arbitration (the ferry lesson): a second engine agreeing with
-            # US means the disagreement is primary-engine-specific, not a
-            # lead. See external_engines.arbitrate for the Valhalla->BRouter
-            # fallback and the no-self-arbitration rule.
-            arbiter, arbiter_engine, arbiter_err, agrees = arbitrate(
-                a, b, ours, primary_engine
-            )
-            row["arbiter_m"] = round(arbiter) if arbiter else None
-            row["arbiter_engine"] = arbiter_engine
-            row["arbiter_err"] = arbiter_err
-            if agrees:
-                row["verdict"] = f"explained ({arbiter_engine} agrees with us; {primary_engine}-specific)"
+            # Ferry short-circuit: OSRM rides ferries and we don't, so an
+            # OURS_LONG flag against OSRM is most often just a ferry. Ask
+            # OSRM's OWN route (steps carry mode=ferry) before spending an
+            # arbiter call -- 11 of the 1,000-route campaign's 13 flags were
+            # this. Only meaningful when OSRM was the primary and OSRM read
+            # short; a ferry can't explain an OURS_SHORT flag.
+            ferry = None
+            if primary_engine == "osrm" and flag.startswith("OURS_LONG"):
+                ferry, _ferry_err = osrm_route_uses_ferry(a, b)
+                polite_pause()  # stay polite after the extra OSRM call
+            if ferry:
+                row["ferry"] = True
+                row["verdict"] = "explained (OSRM route uses a ferry; we don't)"
                 explained.append(row)
             else:
-                row["verdict"] = "LEAD -- needs human triage"
-                leads.append(row)
+                # Arbitration (the ferry lesson generalized): a second engine
+                # agreeing with US means the disagreement is
+                # primary-engine-specific, not a lead. See
+                # external_engines.arbitrate for the Valhalla->BRouter
+                # fallback and the no-self-arbitration rule.
+                arbiter, arbiter_engine, arbiter_err, agrees = arbitrate(
+                    a, b, ours, primary_engine
+                )
+                row["arbiter_m"] = round(arbiter) if arbiter else None
+                row["arbiter_engine"] = arbiter_engine
+                row["arbiter_err"] = arbiter_err
+                if agrees:
+                    row["verdict"] = f"explained ({arbiter_engine} agrees with us; {primary_engine}-specific)"
+                    explained.append(row)
+                else:
+                    row["verdict"] = "LEAD -- needs human triage"
+                    leads.append(row)
 
         rows.append(row)
         mark = f"  <-- {row.get('verdict', flag)}" if flag else ""
