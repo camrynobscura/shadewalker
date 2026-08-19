@@ -48,6 +48,31 @@ def _require_osmid_on_every_edge(street_graph: nx.MultiDiGraph) -> None:
             raise ValueError(f"edge ({u!r}, {v!r}, key={k!r}) is missing 'osmid'")
 
 
+def _require_node_ids_aligned(edges: gpd.GeoDataFrame) -> None:
+    """Fail fast if node_ids is missing or not 1:1 with the geometry.
+
+    node_ids (pipeline/fetch/streets.py's _annotate_node_ids, FIXES item
+    13) is what lets the server rejoin cross-tile severed overlaps on node
+    identity, and every downstream step assumes node_ids[i] names the node
+    at geometry vertex i. A misaligned chain would split edges at the wrong
+    place, so this is checked at build -- with the exact edge named -- not
+    left to surface as a silent routing error at load.
+    """
+    if "node_ids" not in edges.columns:
+        raise ValueError(
+            "edge table has no 'node_ids' column -- rebuild the street graph "
+            "(GRAPH_CACHE_VERSION must be >= 21)"
+        )
+    for idx, row in edges.iterrows():
+        n_ids = len(row["node_ids"])
+        n_pts = len(row["geometry"].coords)
+        if n_ids != n_pts:
+            raise ValueError(
+                f"edge {idx!r}: node_ids has {n_ids} entries but geometry has "
+                f"{n_pts} vertices -- they must align 1:1"
+            )
+
+
 def build_edge_table(street_graph: nx.MultiDiGraph) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     """Return (nodes, edges) GeoDataFrames for routing.
 
@@ -63,6 +88,10 @@ def build_edge_table(street_graph: nx.MultiDiGraph) -> tuple[gpd.GeoDataFrame, g
     # without an explicit shape.
     nodes, edges = ox.graph_to_gdfs(undirected, fill_edge_geometry=True)
 
+    # fill_edge_geometry just gave two-point edges a straight geometry, so
+    # every edge now has coords to check node_ids against.
+    _require_node_ids_aligned(edges)
+
     # Reproject a *copy* of the edge shapes into meters and keep both.
     edges["geometry_m"] = edges["geometry"].to_crs(METRIC_CRS)
 
@@ -72,8 +101,9 @@ def build_edge_table(street_graph: nx.MultiDiGraph) -> tuple[gpd.GeoDataFrame, g
 
     edges["name"] = edges["name"].apply(_normalize_name) if "name" in edges.columns else ""
 
-    # Keep only what downstream stages use.
-    edges = edges[["length_m", "name", "geometry", "geometry_m"]]
+    # Keep only what downstream stages use. node_ids rides through to the
+    # export so the server can reconcile severed overlaps (FIXES item 13).
+    edges = edges[["length_m", "name", "geometry", "geometry_m", "node_ids"]]
 
     logger.info(f"  [graph] {len(nodes)} nodes, {len(edges)} undirected edges")
     return nodes, edges

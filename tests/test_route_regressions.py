@@ -329,11 +329,18 @@ def test_max_shade_prefers_central_park_west_over_the_block_one_west(citywide_st
 
 V19_ANCHOR_PINS = [
     pytest.param(
-        (40.704456, -73.986651), (40.717267, -73.977333), 4400.0, 5100.0,
-        "measured 4,721m twice on 2026-08-15 (OSRM foot: 4,576m). The "
-        "blocklisted DUMBO phantom weld read 3,372m, so the floor catches "
-        "that weld class returning; the ceiling catches the Manhattan Bridge "
-        "approach severing again",
+        (40.704456, -73.986651), (40.717267, -73.977333), 3700.0, 4400.0,
+        "4,102m on v21 after FIXES 13 reconnected the Manhattan Bridge "
+        "Pedestrian Path, severed mid-span at a tile border pre-fix (v20 read "
+        "4,721m, forced onto a ~2km unnamed-footway detour). Ground-truthed "
+        "2026-08-19: this IS Google Maps' shortest walking route, straight "
+        "over the Manhattan Bridge walkway. OSRM and Valhalla both read 4,575m "
+        "because their foot profiles avoid the walkway's stairs (Google's own "
+        "directions say 'Take the stairs') and detour ~470m -- the documented "
+        "'engines miss a real stepped pedestrian connection' case (cf. Clark "
+        "St). Floor 3,700m still catches the 3,372m blocklisted DUMBO phantom "
+        "weld returning; ceiling 4,400m catches the walkway re-severing (which "
+        "balloons the route back toward the ~4,669m detour)",
         id="dumbo-to-les-over-manhattan-bridge",
     ),
     pytest.param(
@@ -492,3 +499,60 @@ def test_central_park_area_route_descriptions_stay_mostly_named(citywide_store):
         "fetch-filter change admitting more unnamed edges; see PLAN.md's "
         "'route descriptions lean unnamed' note before assuming this is fine"
     )
+
+
+# ── FIXES 13: severed-overlap streets at tile borders ───────────────────────
+# Meredith Avenue (Staten Island) is one physical street simplified through
+# different nodes in tiles r6c2 and r7c2, so their exported spans overlap
+# mid-street but share no joinable node -- pre-fix, load() left the two spans
+# in DIFFERENT connected components: a real, continuous street severed at the
+# tile border (census index case, data/audits/2026-08-18/). Bead-identity
+# reconciliation (node_ids carried to the export, split at shared beads on
+# load) rejoins it. Runs on the committed two-tile fixture, so CI covers it.
+#
+# The far endpoints of the two spans: 42990458 (r6c2 end) and 42971221
+# (r7c2 end). Between them the street runs ~820m through the shared beads
+# 42990447 and 679217719, each a degree-1 dead end before the fix.
+MEREDITH_R6C2_END = "42990458"
+MEREDITH_R7C2_END = "42971221"
+
+
+def test_meredith_severed_street_is_reconnected_across_the_tile_border(meredith_sever_store):
+    store = meredith_sever_store
+
+    # Precondition: the fixture must actually exercise the split, or this
+    # whole regression passes vacuously (same guard philosophy as the
+    # synthetic-id merge fixture -- see history/synthetic-id-collision.md).
+    assert store._edges_split > 0, (
+        "the Meredith fixture produced zero bead splits -- it can no longer "
+        "exhibit the severed-overlap bug; regenerate it from r6c2 + r7c2 (v21)"
+    )
+
+    a = store._id_to_idx[MEREDITH_R6C2_END]
+    b = store._id_to_idx[MEREDITH_R7C2_END]
+    membership = store._graph.connected_components().membership
+    assert membership[a] == membership[b], (
+        "Meredith Avenue's two spans are still in different components -- the "
+        "street is severed at the r6c2/r7c2 border (FIXES 13 regressed)"
+    )
+
+    # And the reconnection is the real street (~820m), not some far detour.
+    dist = store._graph.distances(
+        source=a, target=b, weights=store._length.tolist()
+    )[0][0]
+    assert 700 <= dist <= 950, (
+        f"reconnected Meredith distance {dist:.0f}m is outside the expected "
+        f"~820m band -- the split joined the wrong beads"
+    )
+
+
+def test_meredith_shared_beads_are_no_longer_dead_ends(meredith_sever_store):
+    # The two shared beads went from degree-1 (dead end on a foreign edge) to
+    # degree-2 (a real through-node) -- the direct signature of the fix.
+    store = meredith_sever_store
+    for bead in ("42990447", "679217719"):
+        idx = store._id_to_idx[bead]
+        assert store._graph.degree(idx) >= 2, (
+            f"bead {bead} is still a dead end (degree {store._graph.degree(idx)}) "
+            f"-- the severed-overlap split did not reach it"
+        )

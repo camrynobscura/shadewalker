@@ -70,6 +70,16 @@ def write_tile(tile_id: str, nodes: gpd.GeoDataFrame, edges: gpd.GeoDataFrame) -
             "tree_park_canopy": round(float(row["tree_park_canopy"]), 3),
             # row["geometry"] is the LAT/Lon one — see module docstring.
             "coords": [[round(lon, 6), round(lat, 6)] for lon, lat in row["geometry"].coords],
+            # The OSM node id at each geometry vertex, aligned 1:1 with
+            # "coords" (FIXES item 13). Namespaced exactly like u/v so the
+            # server matches them; null where the vertex is a shape point
+            # or a coordinate collision, never a guess. The server splits
+            # cross-tile edges at interior ids it also loaded as nodes,
+            # rejoining streets severed at a tile border.
+            "node_ids": [
+                None if nid is None else _node_id_str(nid, tile_id)
+                for nid in row["node_ids"]
+            ],
         })
 
     tile = {
@@ -111,5 +121,13 @@ def write_tile(tile_id: str, nodes: gpd.GeoDataFrame, edges: gpd.GeoDataFrame) -
         raise
 
     size_kb = out_path.stat().st_size / 1024
-    logger.info(f"  [export] {out_path.relative_to(config.REPO_ROOT)}: "
+    # A relative path is nicer in the log, but TILES_DIR can point outside
+    # the repo (SHADEWALKER_TILES_DIR, e.g. a scratch dir for a rebuild that
+    # must not touch data/tiles/) -- relative_to() raises then, so fall back
+    # to the absolute path rather than crashing after the tile is written.
+    try:
+        display_path = out_path.relative_to(config.REPO_ROOT)
+    except ValueError:
+        display_path = out_path
+    logger.info(f"  [export] {display_path}: "
           f"{len(node_records)} nodes, {len(edge_records)} edges, {size_kb:.0f} KB gzipped")

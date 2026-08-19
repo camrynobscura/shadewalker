@@ -40,6 +40,9 @@ def test_write_tile_exports_lon_lat_degrees_not_utm_meters(tmp_path, monkeypatch
             # so this test would catch write_tile() ever reading the wrong
             # one of the two columns.
             "geometry_m": [LineString([(585435.9, 4503837.4), (585352.7, 4503950.1)])],
+            # node_ids: one per geometry vertex (FIXES 13); a two-point edge
+            # is just [u, v].
+            "node_ids": [[1, 2]],
         },
         index=pd.MultiIndex.from_tuples([(1, 2, 0)], names=["u", "v", "key"]),
         geometry="geometry",
@@ -120,6 +123,9 @@ def test_write_tile_namespaces_synthetic_node_ids_per_tile(tmp_path, monkeypatch
                 LineString([(585435.9, 4503837.4), (585352.7, 4503950.1)]),
                 LineString([(585352.7, 4503950.1), (585269.5, 4504062.8)]),
             ],
+            # node_ids carry synthetic ids too, so they must be namespaced by
+            # the same rule as u/v (FIXES 13) -- asserted below.
+            "node_ids": [[42424089, -1], [-1, -2]],
         },
         index=pd.MultiIndex.from_tuples(
             [(42424089, -1, 0), (-1, -2, 0)], names=["u", "v", "key"]
@@ -146,6 +152,14 @@ def test_write_tile_namespaces_synthetic_node_ids_per_tile(tmp_path, monkeypatch
         assert edge["u"] in tile["nodes"]
         assert edge["v"] in tile["nodes"]
 
+    # node_ids get the same namespacing as u/v, and every id in them
+    # resolves to an exported node -- so the server can split on them.
+    assert connector["node_ids"] == ["42424089", "test_tile:-1"]
+    assert interior["node_ids"] == ["test_tile:-1", "test_tile:-2"]
+    for edge in tile["edges"]:
+        for nid in edge["node_ids"]:
+            assert nid in tile["nodes"]
+
 
 def _minimal_tile_frames():
     """The smallest nodes/edges pair write_tile() accepts -- for tests
@@ -160,6 +174,7 @@ def _minimal_tile_frames():
             "tree_count": [3],
             "tree_park_canopy": [0.0],
             "geometry": [LineString([(-73.99, 40.68), (-73.989, 40.681)])],
+            "node_ids": [[1, 2]],
         },
         index=pd.MultiIndex.from_tuples([(1, 2, 0)], names=["u", "v", "key"]),
         geometry="geometry",
