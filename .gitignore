@@ -23,22 +23,17 @@ web/dist/
 # Claude Code local (per-machine) state — settings, plans, scheduled-task locks
 .claude/
 
-# Every CLAUDE.md, at any depth — deliberately NOT anchored with a leading
-# slash, so nested per-area ones (web/CLAUDE.md, and any future server/ or
-# pipeline/ equivalent) are covered automatically without editing this file.
-# Don't narrow this to /CLAUDE.md.
-CLAUDE.md
-
-# Personal project plan/notes — not shared. HISTORY.md is an index into
-# history/, which holds the split-out parts (see HISTORY.md's own map) —
-# ignore the whole directory, not individual files, so new parts are covered
-# without editing this. FIXES.md is a running punch list of known bugs/
-# design issues not yet addressed, separate from PLAN.md's broader
-# current-state/next-steps.
-PLAN.md
-HISTORY.md
+# Every .md file is a personal/working note and stays OUT of git -- the sole
+# exception is the public README. This un-anchored *.md (with the README
+# negation) covers, at any depth and automatically as new ones appear:
+#   - CLAUDE.md, incl. nested per-area ones (web/CLAUDE.md, any future
+#     server//pipeline/ equivalent) -- these MUST stay in place, Claude Code
+#     auto-loads them by walking the tree; they are ignored, never moved.
+#   - PLAN.md (current state/next steps), HISTORY.md + history/ (the narrative
+#     it indexes), FIXES.md (open-bug punch list), REFETCH.md (per-refetch
+#     rituals), EXTERNAL_AUDIT.md, and any ad-hoc note (accessibility-audit.md).
+# If a doc ever SHOULD be tracked (a committed spec, an ADR), add its own
+# `!path` negation alongside README's below.
+*.md
+!README.md
 history/
-FIXES.md
-
-# External/one-off audit write-ups — not shared, same spirit as the above.
-EXTERNAL_AUDIT.md
