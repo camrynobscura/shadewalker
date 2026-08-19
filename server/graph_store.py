@@ -145,6 +145,14 @@ COVERAGE_SIMPLIFY_DEG = 0.0002
 # file instead of its own sandboxed one.
 COVERAGE_CACHE_FILENAME = ".coverage_cache.json"
 
+# A version tag for load()'s MERGE SEMANTICS, folded into the coverage
+# fingerprint (see _tiles_fingerprint). The drawn coverage depends on which
+# components exist, and bead-identity splitting (FIXES item 13) changes
+# connectivity without changing any tile's bytes -- so a cached coverage
+# from before this fix must be invalidated even when every tile file is
+# unchanged. Bump when load()'s edge topology can change for identical tiles.
+LOAD_PARAMS = "load-v21|bead-split"
+
 # The hide rule (FIXES item 1, the scraps arc's final step, 2026-08-17):
 # a disconnected component whose total edge length is under this bar is
 # excluded from click-snapping AND the drawn coverage boundary. The 2026-
@@ -196,6 +204,7 @@ def _tiles_fingerprint(tile_paths: list) -> str:
     # the rings, so its recipe parameters invalidate the cache the same
     # way the hide rule's do.
     rule += "|" + coverage_frame.FRAME_PARAMS
+    rule += "|" + LOAD_PARAMS
     return hashlib.sha256(("\n".join(parts) + "\n" + rule).encode()).hexdigest()
 
 
@@ -416,6 +425,89 @@ def _local_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
     return math.hypot(dlat_m, dlon_m)
 
 
+def _polyline_length_m(coords: list[list[float]]) -> float:
+    """Metric length of a [lon, lat] polyline, summing _local_distance_m
+    over each segment. Used only to split a severed-overlap edge's length
+    and tree credit PROPORTIONALLY between its pieces (FIXES item 13), so
+    the flat-earth approximation is fine -- only the ratio matters, and the
+    edge already carries its own authoritative total length_m."""
+    total = 0.0
+    for (lon1, lat1), (lon2, lat2) in zip(coords, coords[1:]):
+        total += _local_distance_m(lat1, lon1, lat2, lon2)
+    return total
+
+
+def _bead_split_points(node_ids, coords, id_to_idx) -> list[int]:
+    """Interior geometry indices where an edge passes through a node that
+    some tile exported as an endpoint (so it is in id_to_idx).
+
+    These are the exact points a neighbouring tile simplified THROUGH,
+    leaving the two tiles' overlapping spans sharing no joinable node --
+    the severed-overlap mechanism (FIXES item 13). Splitting here, then
+    letting the existing border-dedupe collapse the now-identical copies,
+    rejoins the street on node identity alone. No distance or name
+    heuristic: a bead is a real shared OSM node or it is nothing.
+
+    Empty (edge left whole) for the common case of no such interior bead,
+    for pre-v21 tiles with no node_ids at all (backward-compatible no-op),
+    for a mis-aligned chain, and when either endpoint is an unresolved
+    coordinate (None) -- splitting there would have no node to attach to,
+    so we leave the edge exactly as today rather than guess.
+    """
+    if not node_ids or len(node_ids) != len(coords) or len(coords) < 3:
+        return []
+    if node_ids[0] is None or node_ids[-1] is None:
+        return []
+    if node_ids[0] not in id_to_idx or node_ids[-1] not in id_to_idx:
+        return []
+    points = []
+    for i in range(1, len(node_ids) - 1):
+        nid = node_ids[i]
+        if nid is not None and nid in id_to_idx:
+            points.append(i)
+    return points
+
+
+def _split_edge_at_beads(u_id, v_id, key, coords, node_ids, length_m,
+                         decid, everg, cnt, canopy, id_to_idx):
+    """Split one edge at every interior bead that is a loaded node, returning
+    the pieces (FIXES item 13). One piece (the whole edge, unchanged) when
+    there is no such bead -- the common case and the pre-v21 no-op.
+
+    Each piece is a tuple:
+      (u, v, key, length_m, decid, everg, cnt, canopy, coords)
+    Piece endpoints come from node_ids (aligned to geometry), never from the
+    edge's own u/v, whose order relative to the geometry is unreliable. Length
+    and tree credit are apportioned by each piece's share of the metric arc
+    length -- so the float quantities are conserved exactly (the fracs sum to
+    1); tree_count is a reported integer, rounded per piece, so its pieces sum
+    to within len(pieces) of the original. The piece key is a direction-
+    insensitive geometry hash so the identical piece from a neighbouring tile
+    lands on the same dedupe key and the keep-better-score rule applies across
+    the border.
+    """
+    split_points = _bead_split_points(node_ids, coords, id_to_idx)
+    if not split_points:
+        return [(u_id, v_id, key, length_m, decid, everg, cnt, canopy, coords)]
+
+    boundaries = [0] + split_points + [len(coords) - 1]
+    seg_arcs = [_polyline_length_m(coords[a:b + 1])
+                for a, b in zip(boundaries, boundaries[1:])]
+    total_arc = sum(seg_arcs) or 1.0
+    pieces = []
+    for (a, b), arc in zip(zip(boundaries, boundaries[1:]), seg_arcs):
+        frac = arc / total_arc
+        seg_coords = coords[a:b + 1]
+        seg_forward = tuple(tuple(point) for point in seg_coords)
+        seg_key = min(hash(seg_forward), hash(seg_forward[::-1]))
+        pieces.append((
+            node_ids[a], node_ids[b], seg_key,
+            length_m * frac, decid * frac, everg * frac,
+            int(round(cnt * frac)), canopy * frac, seg_coords,
+        ))
+    return pieces
+
+
 # How close a synthetic node must sit to ANOTHER tile's synthetic-path line
 # to count as provably the same physical path (see
 # _cross_tile_synthetic_stitches). Deliberately tight: duplicate copies come
@@ -606,6 +698,11 @@ class GraphStore:
         # would make the merge-integrity tests pass vacuously -- exactly how
         # the id-collision bug stayed invisible).
         self._stitch_count = 0
+        # How many cross-tile edges load() split at shared beads (FIXES 13).
+        # Kept for the same precondition reason as _stitch_count: a severed-
+        # overlap fixture that produced zero splits would test the fix
+        # vacuously.
+        self._edges_split = 0
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -632,15 +729,89 @@ class GraphStore:
         seen_edges: dict[tuple, int] = {}  # (u, v, key, side) -> position in the lists above
         seen_geometries: set[tuple] = set()  # (u, v, side, geometry hash) -- see below
         phantom_skipped = 0
+        edges_split = 0
+        segments_emitted = 0
 
+        # Pass 1: every node from every tile, so the COMPLETE node universe
+        # is known before any edge is split. An interior bead of one tile's
+        # edge is a real, splittable node only because some OTHER tile
+        # exported it as an endpoint (FIXES item 13 -- severed overlap); we
+        # can't know that until every tile's nodes are in _id_to_idx. Nodes
+        # and edges used to be ingested interleaved in one pass; splitting
+        # needs the two passes separated. (Tiles are re-read in pass 2
+        # rather than held in memory -- one tile at a time keeps peak RAM
+        # flat across a citywide load.)
         for path in tile_paths:
             tile = json.loads(gzip.open(path, "rt").read())
-
             for node_id, (lon, lat) in tile["nodes"].items():
                 if node_id not in self._id_to_idx:
                     self._id_to_idx[node_id] = len(node_lonlat)
                     node_lonlat.append([lon, lat])
 
+        def _emit(u_id, v_id, key, side, seg_length_m, decid, everg,
+                  cnt, canopy, name, coords):
+            """Add one edge (a whole edge, or one piece of a split one) to
+            the graph arrays, through the existing border-dedupe. Splitting
+            reduces the severed-overlap class to the already-solved
+            duplicate-border-edge class: after the split, two tiles'
+            overlapping copies have identical endpoints and identical coords,
+            so this same dedupe collapses them."""
+            # Border edges appear in two neighboring tiles; a canonical
+            # (sorted) node pair makes both copies hash identically. Each
+            # tile scored its copy against only its own tree fetch, so the
+            # copies can disagree -- when they do, keep the better-scored
+            # one, not the first-seen one. Both copies count trees in the
+            # identical corridor, so a copy can only be MISSING trees its
+            # tile's fetch didn't cover, never have extras: higher tree
+            # value == closer to complete. (First-seen-wins silently kept
+            # the worse copy 3,740 times citywide, including a 1.7km Harlem
+            # River Drive Greenway edge held at 0 trees while its other copy
+            # had 95.)
+            dedupe_key = (*sorted((u_id, v_id)), key, side)
+            existing = seen_edges.get(dedupe_key)
+            if existing is not None:
+                stored_value = deciduous[existing] + evergreen[existing]
+                if decid + everg > stored_value:
+                    length[existing] = seg_length_m
+                    deciduous[existing] = decid
+                    evergreen[existing] = everg
+                    counts[existing] = cnt
+                    canopy_credit[existing] = canopy
+                    names[existing] = name
+                    coords_per_edge[existing] = coords
+                return
+
+            # OSM itself sometimes contains the same way twice -- identical
+            # geometry between the same two nodes, which osmnx keeps as
+            # parallel edges under different multigraph keys (159 confirmed
+            # citywide, all within a single tile). Keep one: same endpoints,
+            # so dropping the extra copy can't disconnect anything. Hashing
+            # the coords (direction-insensitive) instead of storing them
+            # keeps this set small; genuinely different parallel edges
+            # between the same nodes (a street and a separate path) hash
+            # differently and both survive.
+            forward = tuple(tuple(point) for point in coords)
+            geometry_key = (*dedupe_key[:2], side,
+                            min(hash(forward), hash(forward[::-1])))
+            if geometry_key in seen_geometries:
+                return
+            seen_geometries.add(geometry_key)
+
+            seen_edges[dedupe_key] = len(edge_pairs)
+            edge_pairs.append((self._id_to_idx[u_id], self._id_to_idx[v_id]))
+            length.append(seg_length_m)
+            deciduous.append(decid)
+            evergreen.append(everg)
+            counts.append(cnt)
+            canopy_credit.append(canopy)
+            names.append(name)
+            coords_per_edge.append(coords)
+
+        # Pass 2: edges. Each edge is split at any interior bead that is a
+        # real loaded node (see _bead_split_points), then each piece is
+        # emitted through the dedupe above.
+        for path in tile_paths:
+            tile = json.loads(gzip.open(path, "rt").read())
             for edge in tile["edges"]:
                 # Confirmed-phantom connectors (see PHANTOM_CONNECTORS)
                 # never enter the graph. Only short edges can match --
@@ -652,58 +823,25 @@ class GraphStore:
                         phantom_skipped += 1
                         continue
 
-                # Border edges appear in two neighboring tiles; a canonical
-                # (sorted) node pair makes both copies hash identically.
-                # Each tile scored its copy against only its own tree
-                # fetch, so the copies can disagree -- when they do, keep
-                # the better-scored one, not the first-seen one. Both
-                # copies count trees in the identical corridor, so a copy
-                # can only be MISSING trees its tile's fetch didn't cover,
-                # never have extras: higher tree value == closer to
-                # complete. (First-seen-wins silently kept the worse copy
-                # 3,740 times citywide, including a 1.7km Harlem River
-                # Drive Greenway edge held at 0 trees while its other
-                # copy had 95.)
-                dedupe_key = (*sorted((edge["u"], edge["v"])), edge["key"], edge["side"])
-                existing = seen_edges.get(dedupe_key)
-                if existing is not None:
-                    stored_value = deciduous[existing] + evergreen[existing]
-                    if edge["tree_deciduous"] + edge["tree_evergreen"] > stored_value:
-                        length[existing] = edge["length_m"]
-                        deciduous[existing] = edge["tree_deciduous"]
-                        evergreen[existing] = edge["tree_evergreen"]
-                        counts[existing] = edge["tree_count"]
-                        canopy_credit[existing] = edge.get("tree_park_canopy", 0.0)
-                        names[existing] = edge["name"]
-                        coords_per_edge[existing] = edge["coords"]
-                    continue
+                pieces = _split_edge_at_beads(
+                    edge["u"], edge["v"], edge["key"], edge["coords"],
+                    edge.get("node_ids"), edge["length_m"],
+                    edge["tree_deciduous"], edge["tree_evergreen"],
+                    edge["tree_count"], edge.get("tree_park_canopy", 0.0),
+                    self._id_to_idx,
+                )
+                if len(pieces) > 1:
+                    edges_split += 1
+                    segments_emitted += len(pieces)
+                for u_id, v_id, key, seg_len, decid, everg, cnt, canopy, seg_coords in pieces:
+                    _emit(u_id, v_id, key, edge["side"], seg_len, decid,
+                          everg, cnt, canopy, edge["name"], seg_coords)
 
-                # OSM itself sometimes contains the same way twice --
-                # identical geometry between the same two nodes, which
-                # osmnx keeps as parallel edges under different multigraph
-                # keys (159 confirmed citywide, all within a single tile).
-                # Keep one: same endpoints, so dropping the extra copy
-                # can't disconnect anything. Hashing the coords (direction-
-                # insensitive) instead of storing them keeps this set small;
-                # genuinely different parallel edges between the same nodes
-                # (a street and a separate path) hash differently and both
-                # survive.
-                forward = tuple(tuple(point) for point in edge["coords"])
-                geometry_key = (*dedupe_key[:2], edge["side"],
-                                min(hash(forward), hash(forward[::-1])))
-                if geometry_key in seen_geometries:
-                    continue
-                seen_geometries.add(geometry_key)
-
-                seen_edges[dedupe_key] = len(edge_pairs)
-                edge_pairs.append((self._id_to_idx[edge["u"]], self._id_to_idx[edge["v"]]))
-                length.append(edge["length_m"])
-                deciduous.append(edge["tree_deciduous"])
-                evergreen.append(edge["tree_evergreen"])
-                counts.append(edge["tree_count"])
-                canopy_credit.append(edge.get("tree_park_canopy", 0.0))
-                names.append(edge["name"])
-                coords_per_edge.append(edge["coords"])
+        self._edges_split = edges_split
+        if edges_split:
+            logger.info(f"[graph_store] split {edges_split} cross-tile edge(s) at "
+                        f"shared beads into {segments_emitted} segment(s) "
+                        f"(FIXES 13 severed-overlap reconciliation)")
 
         if phantom_skipped:
             logger.info(f"[graph_store] skipped {phantom_skipped} confirmed phantom connector(s)")

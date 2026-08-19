@@ -275,6 +275,12 @@ def test_no_widespread_near_coincident_disconnected_nodes(citywide_store):
 
 MERGE_STORES = [
     "merge_pair_store",
+    # The Meredith severed-overlap fixture (FIXES 13) is loaded v21 and
+    # actually splits edges at shared beads, so these merge-integrity
+    # invariants also cover the geometry/length of SPLIT-produced edges --
+    # the one place split pieces meet the "no edge shorter than its chord"
+    # and "geometry ends at its own nodes" checks.
+    "meredith_sever_store",
     pytest.param("citywide_store", marks=pytest.mark.citywide),
 ]
 
