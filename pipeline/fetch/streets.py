@@ -211,7 +211,13 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # way through different nodes, leaving overlapping spans that share no
 # joinable node and silently severing a real street at the tile border
 # (the Meredith Avenue class, data/audits/2026-08-18/).
-GRAPH_CACHE_VERSION = 21
+# v22 (2026-08-19): foot/access regex clauses anchored across the filters
+# -- unanchored Overpass regexes are substring matches, so access=unknown
+# ways ("unknown" contains "no") were silently excluded citywide (Calvary
+# Cemetery's lane grid, a Bronx secondary; 130 ways measured). Processed
+# graphs gain those ways, so every cached tile must rebuild -- and the
+# raw WALK_FILTER snapshots re-key on the filter string by themselves.
+GRAPH_CACHE_VERSION = 22
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -258,14 +264,33 @@ WALK_FILTER = (
     '|unclassified|residential|living_street|pedestrian|footway|path|steps|service'
     '|bridleway|track"]'
     '["area"!~"yes"]'                                  # skip plaza *areas* (not lines)
-    '["foot"!~"no|private"]'                           # explicitly closed to pedestrians
+    '["foot"!~"^(no|private)$"]'                       # explicitly closed to pedestrians
                                                         # ("private" added 2026-08-09,
                                                         # FIXES.md item 1f: 4 real track
                                                         # ways found tagged foot=private,
                                                         # which "no" alone never caught --
                                                         # applies to every highway type
                                                         # here, not just track)
-    '["access"!~"private|no"]'                         # gated/private ways
+    '["access"!~"^(private|no)$"]'                     # gated/private ways.
+                                                        # ANCHORED (2026-08-19), and so is
+                                                        # the foot clause above: Overpass
+                                                        # regexes are unanchored substring
+                                                        # matches, and "unknown" contains
+                                                        # "no" -- the bare pattern silently
+                                                        # dropped every access=unknown way
+                                                        # (130 citywide, incl. Calvary
+                                                        # Cemetery's whole lane grid and a
+                                                        # Bronx secondary), which OSRM/
+                                                        # Valhalla/Google all treat as
+                                                        # walkable. Same substring-match
+                                                        # class CYCLEWAY_FILTER's foot
+                                                        # clause was anchored for in v19.
+                                                        # Census 2026-08-19: "unknown" is
+                                                        # the ONLY real value that collides,
+                                                        # and no semicolon multi-values
+                                                        # (e.g. "no;private") exist in NYC
+                                                        # -- re-checked per refetch
+                                                        # (REFETCH.md).
     '["service"!~"private|driveway|parking_aisle"]'    # not real walking streets
     '["footway"!~"sidewalk"]'                          # the separately-mapped sidewalk
                                                        # fragments (unnamed) — we model
@@ -342,8 +367,15 @@ FOOT_OVERRIDES_ACCESS_FILTER = (
     '["highway"~"primary|primary_link|secondary|secondary_link|tertiary|tertiary_link'
     '|unclassified|residential|living_street|pedestrian|footway|path|steps|service|track"]'
     '["area"!~"yes"]'
-    '["foot"~"designated|yes"]'
-    '["access"~"private|no"]'
+    # Both inclusions anchored (2026-08-19), same reasoning as CYCLEWAY_
+    # FILTER's v19 anchoring and WALK_FILTER's access clause: unanchored,
+    # foot="designated;no" would substring-match "designated" and
+    # access="unknown" would substring-match "no", pulling in ways this
+    # narrow override query never meant to claim. (access=unknown ways now
+    # enter through WALK_FILTER's anchored clause instead -- this filter
+    # stays scoped to the explicit private/no overrides it exists for.)
+    '["foot"~"^(designated|yes)$"]'
+    '["access"~"^(private|no)$"]'
     '["footway"!~"sidewalk"]'
     '["golf"!~"."]'
 )
@@ -374,8 +406,11 @@ NAMED_SIDEWALK_FILTER = (
     '["highway"~"primary|primary_link|secondary|secondary_link|tertiary|tertiary_link'
     '|unclassified|residential|living_street|pedestrian|footway|path|steps|service"]'
     '["area"!~"yes"]'
-    '["foot"!~"no"]'
-    '["access"!~"private|no"]'
+    # foot/access exclusions anchored (2026-08-19) -- see WALK_FILTER's
+    # access clause for the full story: unanchored, "unknown" substring-
+    # matches "no" and gets wrongly excluded.
+    '["foot"!~"^no$"]'
+    '["access"!~"^(private|no)$"]'
     '["service"!~"private|driveway|parking_aisle"]'
     '["footway"="sidewalk"]'
     '["name"]'
@@ -433,9 +468,56 @@ ANY_SIDEWALK_FILTER = NAMED_SIDEWALK_FILTER.replace('["name"]', '')
 # just a driveway into a building, not a public-feeling shortcut.
 PARKING_AISLE_FILTER = (
     '["highway"="service"]["service"="parking_aisle"]'
-    '["foot"!~"no"]'
+    # Anchored (2026-08-19): unanchored, foot=unknown substring-matches
+    # "no" -- see WALK_FILTER's access clause for the full story.
+    '["foot"!~"^no$"]'
     '["tunnel"!~"building_passage"]'
 )
+
+# OSM ways a human imagery review rejected: the tag data admits them, but
+# looking at the actual place says a pedestrian shouldn't be routed there.
+# Same ground-truth-outranks-tags principle as server/phantom_connectors.json,
+# applied at fetch time and keyed on OSM way ids (stable across refetches,
+# unlike synthetic node ids). Both entries are access=unknown ways the
+# 2026-08-19 anchoring fix would otherwise admit -- censused directly: they
+# are the ONLY informal/impassable members of that whole admitted class
+# citywide, so this list is complete, not a sample. If OSM ever redraws
+# these ways under new ids the exclusion silently rots -- re-check the ids
+# at every refetch (REFETCH.md).
+FIELD_CHECK_EXCLUDED_WAY_IDS = {
+    730113084: "unbuilt Waring Ave informal path (Bronx): 2024 imagery shows "
+               "it overgrown with no visible path (user field check 2026-08-19; "
+               "the mapper's own 'definitely usable' description tag predates it)",
+    1333099359: "Fort Washington Park informal trail: smoothness=impassable, "
+                "trail_visibility=intermediate, and Google routes 2.6mi AROUND "
+                "its two ends rather than along it (user field check 2026-08-19)",
+}
+
+
+def _drop_field_check_excluded_ways(graph: nx.MultiDiGraph, tile_id: str) -> nx.MultiDiGraph:
+    """Remove every edge belonging to a FIELD_CHECK_EXCLUDED_WAY_IDS way,
+    plus any node left stranded by that removal -- as if the way had never
+    matched a filter. Runs after all Overpass-sourced composition and
+    BEFORE the snapping/weld passes, so no loose end can snap onto an
+    edge that is about to disappear."""
+    doomed = []
+    for u, v, key, data in graph.edges(keys=True, data=True):
+        osmid = data.get("osmid")
+        osmids = osmid if isinstance(osmid, list) else [osmid]
+        if any(way_id in FIELD_CHECK_EXCLUDED_WAY_IDS for way_id in osmids):
+            doomed.append((u, v, key))
+    if not doomed:
+        return graph
+    touched = {u for u, v, key in doomed} | {v for u, v, key in doomed}
+    graph.remove_edges_from(doomed)
+    # Only nodes the removal itself stranded -- aux-layer slices keep
+    # genuinely isolated nodes on purpose, so a blanket degree-0 sweep
+    # would delete data this function never touched.
+    graph.remove_nodes_from([n for n in touched if graph.degree(n) == 0])
+    logger.info(f"  [streets] {tile_id}: dropped {len(doomed)} edge(s) from "
+                f"field-check-excluded ways (see FIELD_CHECK_EXCLUDED_WAY_IDS)")
+    return graph
+
 
 # Fence/wall/hedge ways, used to veto an interior-sidewalk connection
 # whose straight line to the street would cross one (see
@@ -1778,6 +1860,11 @@ def fetch_streets(
     through_path_aisles = _through_path_parking_aisles(graph, parking_aisle_graph, tile_id)
     if through_path_aisles is not None:
         graph = nx.compose(graph, through_path_aisles)
+
+    # Field-checked way exclusions, after every Overpass-sourced union
+    # above and before the snapping/weld passes below -- see
+    # FIELD_CHECK_EXCLUDED_WAY_IDS for the entries and the why.
+    graph = _drop_field_check_excluded_ways(graph, tile_id)
 
     # Shared by both snapping passes below -- same bbox/filter either way,
     # so fetch it once and reuse rather than asking Overpass for identical

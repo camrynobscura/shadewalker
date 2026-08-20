@@ -452,7 +452,7 @@ def test_walk_filter_admits_bridleway():
     assert "bridleway" in highway_clause.group(1).split("|")
     # The restricted mileage is excluded by access, not by omission -- so
     # that clause has to stay for admitting bridleway to remain safe.
-    assert '["access"!~"private|no"]' in streets.WALK_FILTER
+    assert '["access"!~"^(private|no)$"]' in streets.WALK_FILTER
 
 
 def test_walk_filter_admits_track():
@@ -475,7 +475,7 @@ def test_walk_filter_admits_track():
     # Same safety net bridleway's own test re-asserts above: admitting a
     # new type only stays safe as long as this clause keeps excluding
     # genuinely private/gated ways.
-    assert '["access"!~"private|no"]' in streets.WALK_FILTER
+    assert '["access"!~"^(private|no)$"]' in streets.WALK_FILTER
 
 
 def test_walk_filter_excludes_foot_private():
@@ -487,9 +487,93 @@ def test_walk_filter_excludes_foot_private():
     # filter admits, not just track.
     foot_clause = re.search(r'\["foot"!~"([^"]+)"\]', streets.WALK_FILTER)
     assert foot_clause is not None
-    excluded = foot_clause.group(1).split("|")
-    assert "no" in excluded
-    assert "private" in excluded
+    pattern = foot_clause.group(1)
+    # The pattern is anchored (see test_foot_and_access_clauses_are_anchored
+    # for why), so assert by matching values against it, not by splitting
+    # the string: exactly no and private excluded, unknown NOT excluded.
+    assert re.search(pattern, "no")
+    assert re.search(pattern, "private")
+    assert not re.search(pattern, "unknown")
+
+
+def test_field_check_excluded_ways_drop_their_edges_and_stranded_nodes():
+    # The two entries are real, field-checked 2026-08-19 (an overgrown
+    # informal path on unbuilt Waring Ave; an impassable Fort Washington
+    # trail Google routes 2.6mi around) -- see FIELD_CHECK_EXCLUDED_WAY_IDS.
+    excluded_id = next(iter(streets.FIELD_CHECK_EXCLUDED_WAY_IDS))
+    graph = nx.MultiDiGraph()
+    graph.add_edge("a", "b", osmid=excluded_id)          # scalar form
+    graph.add_edge("b", "c", osmid=[excluded_id, 42])    # merged-list form
+    graph.add_edge("c", "d", osmid=42)                   # unrelated, kept
+    graph.add_node("island")                             # pre-existing isolate, kept
+
+    result = streets._drop_field_check_excluded_ways(graph, "test-tile")
+
+    assert set(result.edges()) == {("c", "d")}
+    # "a"/"b" were stranded BY the drop and go; "c"/"d" still carry an
+    # edge; "island" was isolated before the drop and must survive (aux
+    # slices keep genuinely isolated nodes on purpose).
+    assert set(result.nodes) == {"c", "d", "island"}
+
+
+def test_field_check_excluded_ways_registry_is_documented():
+    # Every entry must say WHY (the field-check evidence) -- an id with no
+    # reason can't be re-verified when OSM drifts (REFETCH ritual).
+    assert streets.FIELD_CHECK_EXCLUDED_WAY_IDS  # never silently empty
+    for way_id, reason in streets.FIELD_CHECK_EXCLUDED_WAY_IDS.items():
+        assert isinstance(way_id, int)
+        assert "field check" in reason
+
+
+def test_fetch_streets_drops_field_check_excluded_ways(monkeypatch, tmp_path):
+    excluded_id = next(iter(streets.FIELD_CHECK_EXCLUDED_WAY_IDS))
+    main_graph = nx.MultiDiGraph()
+    main_graph.add_node("m1", x=-73.95, y=40.05)
+    main_graph.add_node("m2", x=-73.949, y=40.051)
+    main_graph.add_node("m3", x=-73.948, y=40.052)
+    main_graph.add_edge("m1", "m2", osmid=42)
+    main_graph.add_edge("m2", "m3", osmid=excluded_id)
+
+    _mock_fetch(monkeypatch, tmp_path, _by_filter(lambda **kwargs: main_graph))
+    result = streets.fetch_streets(BBOX, "test-field-check-excluded-tile")
+
+    assert "m3" not in result.nodes  # stranded by the drop
+    assert nx.has_path(result.to_undirected(), "m1", "m2")
+
+
+def test_foot_and_access_clauses_are_anchored_in_every_filter():
+    # Overpass regexes are UNANCHORED substring matches. An unanchored
+    # exclusion like ["access"!~"private|no"] therefore also excludes
+    # access=unknown -- "unknown" contains "no" -- which silently deleted
+    # 130 real walkable ways citywide (Calvary Cemetery's whole internal
+    # lane grid, a Bronx secondary street; found via a 1.35x routing
+    # detour vs OSRM/Valhalla, 2026-08-19). Inclusions have the mirror
+    # problem: foot~"designated|yes" would admit foot="designated;no".
+    # v19 anchored CYCLEWAY_FILTER's foot clause for exactly this; this
+    # test makes the rule stick for EVERY filter's foot/access clause so
+    # a future edit can't quietly reintroduce the class. Census
+    # 2026-08-19: "unknown" is the only real NYC value that collides, and
+    # no semicolon multi-values exist -- re-checked per refetch
+    # (REFETCH.md ritual).
+    filters = {
+        "WALK_FILTER": streets.WALK_FILTER,
+        "CYCLEWAY_FILTER": streets.CYCLEWAY_FILTER,
+        "FOOT_OVERRIDES_ACCESS_FILTER": streets.FOOT_OVERRIDES_ACCESS_FILTER,
+        "NAMED_SIDEWALK_FILTER": streets.NAMED_SIDEWALK_FILTER,
+        "ANY_SIDEWALK_FILTER": streets.ANY_SIDEWALK_FILTER,
+        "PARKING_AISLE_FILTER": streets.PARKING_AISLE_FILTER,
+    }
+    found_any = False
+    for name, filt in filters.items():
+        for key, op, pattern in re.findall(r'\["(foot|access)"(!?~)"([^"]+)"\]', filt):
+            found_any = True
+            assert pattern.startswith("^") and pattern.endswith("$"), (
+                f"{name}'s [{key}{op}\"{pattern}\"] clause is unanchored -- "
+                f"Overpass matches substrings, so e.g. {key}=unknown would "
+                f"{'wrongly be excluded' if op == '!~' else 'wrongly match'} "
+                f"(\"unknown\" contains \"no\")"
+            )
+    assert found_any  # the scan itself must keep finding clauses
 
 
 def test_cycleway_filter_requires_an_explicit_foot_allowance():
@@ -510,8 +594,8 @@ def test_foot_overrides_access_filter_requires_an_explicit_foot_override():
     # restriction -- not every access=no/private way, which would
     # reintroduce genuinely gated/private ways WALK_FILTER's own clause
     # exists to keep out.
-    assert '"foot"~"designated|yes"' in streets.FOOT_OVERRIDES_ACCESS_FILTER
-    assert '"access"~"private|no"' in streets.FOOT_OVERRIDES_ACCESS_FILTER
+    assert '"foot"~"^(designated|yes)$"' in streets.FOOT_OVERRIDES_ACCESS_FILTER
+    assert '"access"~"^(private|no)$"' in streets.FOOT_OVERRIDES_ACCESS_FILTER
 
 
 def test_foot_overrides_access_filter_excludes_golf_ways():
@@ -578,7 +662,7 @@ def test_parking_aisle_filter_excludes_building_passages():
     assert '"tunnel"!~"building_passage"' in streets.PARKING_AISLE_FILTER
     # Still excludes explicitly foot-prohibited aisles -- a much more
     # direct pedestrian-specific signal than access=private/customers.
-    assert '"foot"!~"no"' in streets.PARKING_AISLE_FILTER
+    assert '"foot"!~"^no$"' in streets.PARKING_AISLE_FILTER
 
 
 def _cache_roundtrip(monkeypatch, tmp_path, cached_graph, recorded_bbox_signature,
