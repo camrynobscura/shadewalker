@@ -337,6 +337,34 @@ _CURATED_KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
     # risk). Verified: the entry cuts the probe route to 14.5km, ratio
     # 1.15 vs OSRM, under the batch flag bar.
     ("466530483", "466530490", "Marine Parkway Bridge"),
+
+    # Sheridan Boulevard <-> Starlight Park east path, Bronx -- from the
+    # 2026-08-18 same-name facing-dead-end sweep's OSM-genuine residue
+    # (OSRM detours too, so no processing fix applies). The boulevard's
+    # walkable foot=yes stub and the parallel foot=designated cycleway
+    # run adjacent with no fence between (user Street View check
+    # 2026-08-20). Google's walking graph U-routes this hop 133m only
+    # because, like OSM, it links at mapped junctions -- mid-block
+    # adjacency can't appear in either graph, which is exactly why the
+    # bridge is needed. The facing pair's OTHER end (9902766679, 39m from
+    # the same path) was checked the same day and REJECTED: Google Routes
+    # needs 352m including stairs at E 174th St (grade separation),
+    # matching the user's no-crossing imagery verdict -- that dead-end is
+    # real, and the pair's remaining ~1,475m detour is legitimate.
+    ("9201570293", "9588222087", "Sheridan Boulevard"),
+
+    # Bruckner Boulevard at the Bruckner Interchange, west side -- same
+    # sweep. OSM maps a walkable 68m sidewalk chunk mid-interchange
+    # (way 46673605) but tags the ~74m of boulevard between it and the
+    # walkable western section foot=no; the chunk survives export as an
+    # isolated, hidden 2-node component. Google Routes walks the gap dead
+    # straight ("Head east on Bruckner Blvd", 72m vs 73.9m chord) and
+    # user imagery shows the sidewalk continuous (2026-08-20).
+    # Reconnecting also un-hides the island. The island's EAST hop
+    # (596455450 <-> 12121657367, 36m) was checked and REJECTED: Google
+    # detours 273m around it via Cross Bronx Service Rd N, agreeing with
+    # OSM's foot=no -- that side's gap is real.
+    ("596455464", "596455452", "Bruckner Boulevard"),
 ]
 
 

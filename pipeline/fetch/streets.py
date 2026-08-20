@@ -234,7 +234,19 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # merged edges / ~36 sites measured by the v23 tile census). Simulated
 # citywide before adoption: residual 3,636m -> 236m. Processing change
 # only; raw caches stay valid.
-GRAPH_CACHE_VERSION = 24
+# v25 (2026-08-20): fee-gated attraction grounds excluded -- zoos, the
+# aquarium, and ticketed botanical gardens (13 curated polygons in
+# pipeline/fee_gated_zones.json; ~137km of interior was routable across
+# 11 sites, measured via the Norwood->Bronx Park East lead whose
+# endpoint was a synthetic node inside the Bronx Zoo). Imported layers
+# are clipped at their _for_tile stage (_clip_fee_gated_zones); real
+# OSM path-class edges fully inside a zone are removed from the
+# composed graph (_drop_fee_gated_edges), with road classes and
+# verified-public walks exempt (FEE_GATED_EXEMPT_HIGHWAYS /
+# FEE_GATED_EXEMPT_NAMES -- the Bronx River Parkway frontage road and
+# Wien Walk). Processing change only -- no filter strings change, raw
+# caches stay valid.
+GRAPH_CACHE_VERSION = 25
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -809,6 +821,188 @@ def _clip_closure_zones(line: LineString) -> list[LineString]:
     return [transform(_FROM_METRIC_CRS, p) for p in kept_m]
 
 
+# Fee-gated attraction grounds (FIXES.md item 1, v25): zoos, the
+# aquarium, and ticketed botanical gardens are destinations, not public
+# thoroughfares -- but their interiors entered the graph through both
+# doors: untagged OSM footways pass WALK_FILTER, and the imported layers
+# sweep them up because they sit inside park polygons (the Bronx Zoo
+# sits inside Bronx Park). Measured 2026-08-20: ~137km of routable
+# interior across 11 sites; the Norwood->Bronx Park East external-batch
+# lead's endpoint was a synthetic node inside the Bronx Zoo. Google's
+# own routing matches the exclusion: probed 2026-08-20, it never
+# through-routes these grounds (starting INSIDE the zoo it walked out
+# and 3.5km around rather than 1.5km through), entering only when the
+# destination is inside. The polygons are committed curated evidence
+# (pipeline/fee_gated_zones.json) rather than a live tag query, because
+# the class needed human review: fee tags are inconsistent (Queens
+# Botanical charges but carries none; hundreds of free community
+# gardens carry leisure=garden), one polygon covers a public road, and
+# one public walk crosses a polygon (see the two exemption sets below)
+# -- the same curated-evidence philosophy as closure_zones.json above.
+# Way ids and polygon drift: re-diff against OSM at every refetch
+# (REFETCH.md).
+FEE_GATED_ZONES_PATH = Path(__file__).parent.parent / "fee_gated_zones.json"
+
+# Road classes the fee-gated exclusion never removes, even lying fully
+# inside a zone polygon -- measured: the Bronx Zoo polygon reaches the
+# public Bronx River Parkway frontage road (highway=primary, 25mph,
+# destination-signed). Attraction interiors are path-class
+# (footway/path/service/...), so exempting real road classes costs
+# nothing inside the actual grounds.
+FEE_GATED_EXEMPT_HIGHWAYS = frozenset({
+    "primary", "primary_link", "secondary", "secondary_link",
+    "tertiary", "tertiary_link", "residential", "living_street",
+    "unclassified",
+})
+
+# Named ways verified PUBLIC despite lying inside a fee-gated polygon.
+# Wien Walk (aka Park Rd): Central Park's southeast entrance walk from
+# Grand Army Plaza through the Delacorte Clock arch. The Central Park
+# Zoo polygon covers its courtyard stretch, but it's a free continuous
+# walk: Google Routes walks it straight through (389m, "Head north on
+# Park Rd/Wien Walk", probed 2026-08-20), the user confirms it, and the
+# OSM barrier=gate on it is an overnight park gate, not a ticket
+# barrier.
+FEE_GATED_EXEMPT_NAMES = frozenset({"Wien Walk"})
+
+# A leftover piece of an imported segment shorter than this after
+# clipping fee-gated zones out of it is a boundary sliver, not a path
+# -- same bar as CLOSURE_ZONE_MIN_REMNANT_M.
+FEE_GATED_MIN_REMNANT_M = 10.0
+
+
+def _load_fee_gated_zones(
+    path: Path = FEE_GATED_ZONES_PATH,
+) -> list[tuple[str, Polygon, Polygon]]:
+    """(name, lon/lat polygon, METRIC_CRS polygon) per zone. Containment
+    tests use the lon/lat polygon directly (containment is topological,
+    CRS-independent); the metric twin exists for the remnant-length bar
+    in _clip_fee_gated_zones (measuring happens in meters -- the
+    dual-CRS note in CLAUDE.md)."""
+    if not path.exists():
+        return []
+    zones = []
+    with open(path) as f:
+        for zone in json.load(f)["zones"]:
+            ring = [(lon, lat) for lon, lat in zone["polygon"]]
+            ring_m = [_TO_METRIC_CRS(lon, lat) for lon, lat in ring]
+            zones.append((zone["name"], Polygon(ring), Polygon(ring_m)))
+    return zones
+
+
+_FEE_GATED_ZONES = _load_fee_gated_zones()
+
+
+def _clip_fee_gated_zones(
+    line: LineString, zones: list | None = None,
+) -> list[LineString]:
+    """The portion(s) of an imported lon/lat segment OUTSIDE every
+    fee-gated zone -- same clip-and-keep-remnants shape as
+    _clip_closure_zones (see FEE_GATED_ZONES_PATH's comment for the
+    class). The exemption sets don't apply here: imported survey
+    geometry carries no highway class or name, and none of it belongs
+    inside ticketed grounds."""
+    zone_list = _FEE_GATED_ZONES if zones is None else zones
+    if not zone_list:
+        return [line]
+    line_m = transform(_TO_METRIC_CRS, line)
+    touched = False
+    remainder = line_m
+    for _name, _poly, zone_m in zone_list:
+        if remainder.is_empty or not remainder.intersects(zone_m):
+            continue
+        touched = True
+        remainder = remainder.difference(zone_m)
+    if not touched:
+        return [line]
+    parts = remainder.geoms if hasattr(remainder, "geoms") else [remainder]
+    kept_m = [p for p in parts
+              if isinstance(p, LineString) and p.length >= FEE_GATED_MIN_REMNANT_M]
+    return [transform(_FROM_METRIC_CRS, p) for p in kept_m]
+
+
+def _drop_fee_gated_edges(
+    graph: nx.MultiDiGraph, tile_id: str, zones: list | None = None,
+) -> nx.MultiDiGraph:
+    """Remove every path-class edge lying fully inside one fee-gated
+    zone (both endpoints contained in the SAME zone), plus any node the
+    removal strands -- see FEE_GATED_ZONES_PATH's comment for the class.
+    Boundary-crossing edges survive, so entrance stubs still reach the
+    gate. FEE_GATED_EXEMPT_HIGHWAYS keeps public roads a coarse polygon
+    overlaps; FEE_GATED_EXEMPT_NAMES keeps individually-verified public
+    walks. The same-zone requirement (not "inside any") keeps an edge
+    threading BETWEEN two nearby zones -- the public path between the
+    Queens Zoo's two rings -- out of scope by construction. Runs after
+    every source is composed and snapped (so synthetic leftovers are
+    covered too) and BEFORE the drawing-error weld pass, so nothing
+    welds onto an edge about to disappear."""
+    zone_list = _FEE_GATED_ZONES if zones is None else zones
+    if not zone_list or graph.number_of_edges() == 0:
+        return graph
+    lons = nx.get_node_attributes(graph, "x")
+    lats = nx.get_node_attributes(graph, "y")
+    min_lon, max_lon = min(lons.values()), max(lons.values())
+    min_lat, max_lat = min(lats.values()), max(lats.values())
+    candidates = []
+    for name, poly, _poly_m in zone_list:
+        zlon_min, zlat_min, zlon_max, zlat_max = poly.bounds
+        if (zlon_min > max_lon or zlon_max < min_lon
+                or zlat_min > max_lat or zlat_max < min_lat):
+            continue
+        candidates.append((name, poly))
+    if not candidates:
+        return graph
+    # Which zone (if any) contains each node -- computed once per node,
+    # not per edge. The per-zone bounds check keeps this linear in
+    # practice: most of a tile's nodes fail every bounds test.
+    contained: dict = {}
+    for name, poly in candidates:
+        zlon_min, zlat_min, zlon_max, zlat_max = poly.bounds
+        for node, lon in lons.items():
+            if node in contained:
+                continue
+            lat = lats[node]
+            if not (zlon_min <= lon <= zlon_max and zlat_min <= lat <= zlat_max):
+                continue
+            if poly.contains(Point(lon, lat)):
+                contained[node] = name
+    if not contained:
+        return graph
+    doomed = []
+    removed_m: dict[str, float] = {}
+    counted_pairs: set = set()
+    for u, v, key, data in graph.edges(keys=True, data=True):
+        zone = contained.get(u)
+        if zone is None or contained.get(v) != zone:
+            continue
+        highway = data.get("highway")
+        highways = highway if isinstance(highway, list) else [highway]
+        if any(h in FEE_GATED_EXEMPT_HIGHWAYS for h in highways):
+            continue
+        way_name = data.get("name")
+        way_names = way_name if isinstance(way_name, list) else [way_name]
+        if any(n in FEE_GATED_EXEMPT_NAMES for n in way_names):
+            continue
+        doomed.append((u, v, key))
+        # A two-way edge appears once per direction in the MultiDiGraph;
+        # count its meters once.
+        pair = (frozenset((u, v)), key)
+        if pair not in counted_pairs:
+            counted_pairs.add(pair)
+            removed_m[zone] = removed_m.get(zone, 0.0) + float(data.get("length", 0.0))
+    if not doomed:
+        return graph
+    touched = {u for u, v, key in doomed} | {v for u, v, key in doomed}
+    graph.remove_edges_from(doomed)
+    # Only nodes the removal itself stranded -- same reasoning as
+    # _drop_field_check_excluded_ways.
+    graph.remove_nodes_from([n for n in touched if graph.degree(n) == 0])
+    for zone, meters in sorted(removed_m.items()):
+        logger.info(f"  [streets] {tile_id}: fee-gated exclusion ({zone}): "
+                    f"removed {meters:.0f}m of interior paths")
+    return graph
+
+
 # One (STRtree, buffers) pair per process, same reasoning as
 # citywide_layers._MEMO: a borough run calls fetch_streets() up to 155
 # times, and re-buffering ~9k way segments per tile would waste minutes
@@ -1307,6 +1501,7 @@ def _interior_sidewalks_for_tile(
     tile_box = box(bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max)
     segments = []
     clipped_away_m = 0.0
+    fee_gated_away_m = 0.0
     for feature in geojson["features"]:
         coords = [tuple(point) for point in feature["geometry"]["coordinates"]]
         line = LineString(coords)
@@ -1316,17 +1511,29 @@ def _interior_sidewalks_for_tile(
         # paths inside a known construction closure -- see
         # CLOSURE_ZONES_PATH's comment for why this can't be tag-inferred
         for kept in _clip_closure_zones(line):
-            # foot-forbidden clip (FIXES.md item 1, v23): drop the
-            # portions duplicating a bike-only/private path -- see
-            # FOOT_FORBIDDEN_FILTER's comment for the measured why
-            parts = _clip_foot_forbidden(kept, forbidden_index)
-            if not (len(parts) == 1 and parts[0] is kept):
+            # fee-gated grounds (v25): drop the portions inside ticketed
+            # attractions -- see FEE_GATED_ZONES_PATH's comment
+            fee_parts = _clip_fee_gated_zones(kept)
+            if not (len(fee_parts) == 1 and fee_parts[0] is kept):
                 kept_m = transform(_TO_METRIC_CRS, kept).length
-                clipped_away_m += kept_m - sum(
-                    transform(_TO_METRIC_CRS, p).length for p in parts
+                fee_gated_away_m += kept_m - sum(
+                    transform(_TO_METRIC_CRS, p).length for p in fee_parts
                 )
-            for part in parts:
-                segments.append([tuple(point) for point in part.coords])
+            for fee_kept in fee_parts:
+                # foot-forbidden clip (FIXES.md item 1, v23): drop the
+                # portions duplicating a bike-only/private path -- see
+                # FOOT_FORBIDDEN_FILTER's comment for the measured why
+                parts = _clip_foot_forbidden(fee_kept, forbidden_index)
+                if not (len(parts) == 1 and parts[0] is fee_kept):
+                    kept_m = transform(_TO_METRIC_CRS, fee_kept).length
+                    clipped_away_m += kept_m - sum(
+                        transform(_TO_METRIC_CRS, p).length for p in parts
+                    )
+                for part in parts:
+                    segments.append([tuple(point) for point in part.coords])
+    if fee_gated_away_m > 0:
+        logger.info(f"  [streets] {tile_id}: interior sidewalks: fee-gated clip "
+                    f"removed {fee_gated_away_m:.0f}m")
     if clipped_away_m > 0:
         logger.info(f"  [streets] {tile_id}: interior sidewalks: foot-forbidden clip "
                     f"removed {clipped_away_m:.0f}m")
@@ -1356,6 +1563,7 @@ def _park_trails_for_tile(
     tile_box = box(bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max)
     lines = []
     clipped_away_m = 0.0
+    fee_gated_away_m = 0.0
     for feature in geojson["features"]:
         if feature["properties"].get("class") not in PARK_TRAIL_CLASSES:
             continue
@@ -1367,18 +1575,34 @@ def _park_trails_for_tile(
             # closure zones (FIXES.md item 0b) -- same clip as interior
             # sidewalks; see CLOSURE_ZONES_PATH's comment
             for kept in _clip_closure_zones(part):
-                # foot-forbidden clip (FIXES.md item 1, v23) -- same clip
-                # as interior sidewalks; the 2026-08-19 census measured 0
-                # park-trail duplicates, so this is expected to no-op, but
-                # both imports share the same blindness to access and
-                # there's no reason a future trails vintage stays clean.
-                survivors = _clip_foot_forbidden(kept, forbidden_index)
-                if not (len(survivors) == 1 and survivors[0] is kept):
+                # fee-gated grounds (v25) -- same clip as interior
+                # sidewalks. This one is expected to BITE for trails: the
+                # 2026-08-20 census measured 383 synthetic nodes inside
+                # the Bronx Zoo alone, imported because the zoo sits
+                # inside Bronx Park's polygon.
+                fee_parts = _clip_fee_gated_zones(kept)
+                if not (len(fee_parts) == 1 and fee_parts[0] is kept):
                     kept_m = transform(_TO_METRIC_CRS, kept).length
-                    clipped_away_m += kept_m - sum(
-                        transform(_TO_METRIC_CRS, p).length for p in survivors
+                    fee_gated_away_m += kept_m - sum(
+                        transform(_TO_METRIC_CRS, p).length for p in fee_parts
                     )
-                lines.extend(survivors)
+                for fee_kept in fee_parts:
+                    # foot-forbidden clip (FIXES.md item 1, v23) -- same
+                    # clip as interior sidewalks; the 2026-08-19 census
+                    # measured 0 park-trail duplicates, so this is
+                    # expected to no-op, but both imports share the same
+                    # blindness to access and there's no reason a future
+                    # trails vintage stays clean.
+                    survivors = _clip_foot_forbidden(fee_kept, forbidden_index)
+                    if not (len(survivors) == 1 and survivors[0] is fee_kept):
+                        kept_m = transform(_TO_METRIC_CRS, fee_kept).length
+                        clipped_away_m += kept_m - sum(
+                            transform(_TO_METRIC_CRS, p).length for p in survivors
+                        )
+                    lines.extend(survivors)
+    if fee_gated_away_m > 0:
+        logger.info(f"  [streets] {tile_id}: park trails: fee-gated clip "
+                    f"removed {fee_gated_away_m:.0f}m")
     if clipped_away_m > 0:
         logger.info(f"  [streets] {tile_id}: park trails: foot-forbidden clip "
                     f"removed {clipped_away_m:.0f}m")
@@ -2172,6 +2396,14 @@ def fetch_streets(
             graph, trail_graph, barrier_graph, tile_id,
             snap_max_m=PARK_TRAIL_SNAP_MAX_M, label="park trails",
         )
+
+    # Fee-gated grounds (v25): remove ticketed-attraction interiors from
+    # the composed graph. The imported layers were already clipped at
+    # their _for_tile stage above; this pass removes the real OSM
+    # path-class edges inside the zones, plus any synthetic leftovers
+    # (see FEE_GATED_ZONES_PATH's comment). BEFORE the weld pass below,
+    # so no fragment welds onto an edge about to disappear.
+    graph = _drop_fee_gated_edges(graph, tile_id)
 
     # Connection Batch A (FIXES.md item 1): weld OSM drawing-error
     # fragments -- see _weld_drawing_error_components. Runs AFTER every

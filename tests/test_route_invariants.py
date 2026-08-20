@@ -680,13 +680,18 @@ GOLDEN_ROUTE_LENGTHS_M = [
     ("10556968370", "541998127", 948.3),  # Prospect Park
     ("6604177794", "2377594454", 3022.1),  # Prospect Park
     ("42481443", "10742553722", 1829.9),  # Prospect Park
-    ("9634487166", "2645335202", 1475.0),  # Prospect Park. Was 1473.7; +1.3m
+    ("9634487166", "2645335202", 1488.3),  # Prospect Park. Was 1473.7; +1.3m
     # investigated 2026-08-19 (v22 refetch): the old route's exact Wellhouse
     # Drive micro-segment structure no longer exists in OSM -- changesets
     # 187661749 ("footpaths, park features") and 187658142 ("Merge duplicated
     # nodes") edited that area on Aug 18. Verified segment-by-segment: routes
     # identical except one ~120m stretch, 119.7m -> 121.0m. Real drift, not a
     # filter change.
+    # Then 1475.0 -> 1488.3 investigated 2026-08-20 (v25 fee-gated grounds
+    # exclusion): the v24 route ran 22 of its 52 nodes INSIDE the ticketed
+    # Brooklyn Botanic Garden (verified against the v24 backup store + the
+    # zone polygon); v25 removes garden interiors on purpose, so the +13.3m
+    # is the honest outside path. Deliberate exclusion, not drift.
 ]
 
 # A tiny amount of slack for floating-point accumulation in path summation,
