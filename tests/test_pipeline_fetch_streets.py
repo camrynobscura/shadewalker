@@ -21,6 +21,8 @@ import pytest
 import requests
 from osmnx._errors import InsufficientResponseError
 from shapely.geometry import LineString, box
+from shapely.ops import transform as shapely_transform
+from shapely.strtree import STRtree
 
 from pipeline import config
 from pipeline.config import Bbox
@@ -58,6 +60,10 @@ def _mock_fetch(monkeypatch, tmp_path, graph_from_bbox):
         streets.ox, "save_graphml", lambda graph, path: saved.__setitem__(str(path), graph)
     )
     monkeypatch.setattr(streets.ox, "load_graphml", lambda path: saved[str(path)])
+    # The foot-forbidden clip index is memoized per process (see
+    # streets._FOOT_FORBIDDEN_INDEX) -- reset per test for the same
+    # isolation reason citywide_layers._MEMO is.
+    monkeypatch.setattr(streets, "_FOOT_FORBIDDEN_INDEX", {})
     _isolate_citywide_layers(monkeypatch, tmp_path)
     # Both direct-HTTP layers _by_filter can't intercept -- park_trails (NYC
     # Open Data) and interior_sidewalks (ArcGIS) -- default to "nothing here"
@@ -86,8 +92,9 @@ def _by_filter(
     any_sidewalk_fn=None,
     parking_aisle_fn=None,
     barrier_fn=None,
+    foot_forbidden_fn=None,
 ):
-    """Dispatch a graph_from_bbox mock by which of the seven real queries
+    """Dispatch a graph_from_bbox mock by which of the eight real queries
     fetch_streets makes -- WALK_FILTER (main), CYCLEWAY_FILTER (the
     shared-path union), FOOT_OVERRIDES_ACCESS_FILTER (the
     foot-designated-despite-access=no/private union), NAMED_SIDEWALK_FILTER
@@ -123,6 +130,17 @@ def _by_filter(
             if barrier_fn is not None:
                 return barrier_fn(**kwargs)
             raise ValueError("no barrier ways here")
+        # The foot-forbidden clip layer (v23) -- MUST be dispatched before
+        # the main_fn fallthrough: unmatched, the clip layer would come
+        # back as a copy of the WALK graph and silently clip imported test
+        # fixtures against the test's own streets.
+        if kwargs.get("custom_filter") in (
+            getattr(streets, "FOOT_FORBIDDEN_FILTER", object()),
+            getattr(streets, "ACCESS_FORBIDDEN_FILTER", object()),
+        ):
+            if foot_forbidden_fn is not None:
+                return foot_forbidden_fn(**kwargs)
+            raise ValueError("no forbidden paths here")
         return main_fn(**kwargs)
     return dispatch
 
@@ -562,6 +580,8 @@ def test_foot_and_access_clauses_are_anchored_in_every_filter():
         "NAMED_SIDEWALK_FILTER": streets.NAMED_SIDEWALK_FILTER,
         "ANY_SIDEWALK_FILTER": streets.ANY_SIDEWALK_FILTER,
         "PARKING_AISLE_FILTER": streets.PARKING_AISLE_FILTER,
+        "FOOT_FORBIDDEN_FILTER": streets.FOOT_FORBIDDEN_FILTER,
+        "ACCESS_FORBIDDEN_FILTER": streets.ACCESS_FORBIDDEN_FILTER,
     }
     found_any = False
     for name, filt in filters.items():
@@ -1137,6 +1157,159 @@ def test_interior_sidewalks_for_tile_keeps_a_segment_crossing_the_boundary():
     ]}
 
     assert streets._interior_sidewalks_for_tile(geojson, BBOX) != []
+
+
+# ── the foot-forbidden clip (v23, FIXES.md item 1) ──────────────────────────
+# The planimetric survey has no access attributes, so it re-traced NYC's
+# bike-only/private paths as walkable geometry. The real case: the
+# Manhattan Bridge Bike Path (foot=no), imported whole and welded at only
+# its Manhattan end, turned a 100m walk in DUMBO into a 3.6km route over
+# the bridge and back. These test the clip's three behaviors -- remove
+# co-running duplicates, protect crossings, drop slivers -- on synthetic
+# geometry built through the same metric projection the real code uses.
+
+_M_PER_DEG_LON = 85_300.0  # ~meters per degree longitude at 40deg N
+_CLIP_LAT = 40.05
+_CLIP_LON = -73.95
+
+
+def _lon_at(meters_east):
+    return _CLIP_LON + meters_east / _M_PER_DEG_LON
+
+
+def _east_west_line(start_m, end_m, lat=_CLIP_LAT):
+    return LineString([(_lon_at(start_m), lat), (_lon_at(end_m), lat)])
+
+
+def _forbidden_index_for(lines_lonlat):
+    """A clip index of the same (STRtree, buffers) shape
+    streets._foot_forbidden_index() builds from the citywide layer,
+    without any fetch."""
+    buffers = []
+    for line in lines_lonlat:
+        line_m = shapely_transform(streets._TO_METRIC_CRS, line)
+        buffers.append(line_m.buffer(streets.FOOT_FORBIDDEN_BUFFER_M))
+    return STRtree(buffers), buffers
+
+
+def _length_m(line_lonlat):
+    return shapely_transform(streets._TO_METRIC_CRS, line_lonlat).length
+
+
+def test_clip_foot_forbidden_removes_a_co_running_duplicate():
+    # 200m imported segment lying directly on a forbidden path -- the
+    # Manhattan Bridge bikeway shape. Nothing survives.
+    imported = _east_west_line(0, 200)
+    index = _forbidden_index_for([_east_west_line(0, 200)])
+
+    assert streets._clip_foot_forbidden(imported, index) == []
+
+
+def test_clip_foot_forbidden_keeps_a_perpendicular_crossing_whole():
+    # A real path CROSSING a forbidden one is inside the 6m buffer for
+    # ~12m -- far under FOOT_FORBIDDEN_MIN_OVERLAP_M -- and must come back
+    # as ONE continuous line, not two pieces broken at the buffer.
+    imported = _east_west_line(0, 200)
+    crossing_lon = _lon_at(100)
+    forbidden = LineString([(crossing_lon, _CLIP_LAT - 0.001), (crossing_lon, _CLIP_LAT + 0.001)])
+    index = _forbidden_index_for([forbidden])
+
+    result = streets._clip_foot_forbidden(imported, index)
+
+    assert len(result) == 1
+    assert _length_m(result[0]) == pytest.approx(200, abs=1)
+
+
+def test_clip_foot_forbidden_keeps_the_walkable_tail_of_a_partial_duplicate():
+    # First 100m duplicates a forbidden path, the rest is a real walkable
+    # tail -- the tail survives (a whole-feature drop would lose it).
+    imported = _east_west_line(0, 200)
+    index = _forbidden_index_for([_east_west_line(0, 100)])
+
+    result = streets._clip_foot_forbidden(imported, index)
+
+    assert len(result) == 1
+    # The buffer's round cap eats ~6m past the forbidden way's end, so
+    # the tail is ~94m, anchored at the far (200m) end.
+    assert _length_m(result[0]) == pytest.approx(94, abs=2)
+    assert max(lon for lon, lat in result[0].coords) == pytest.approx(_lon_at(200), abs=1e-6)
+
+
+def test_clip_foot_forbidden_drops_a_boundary_sliver():
+    # Forbidden coverage reaches 185m of a 200m segment; with the buffer
+    # cap extending ~6m further, the leftover is ~9m -- under
+    # FOOT_FORBIDDEN_MIN_REMNANT_M, a sliver, not a path.
+    imported = _east_west_line(0, 200)
+    index = _forbidden_index_for([_east_west_line(0, 185)])
+
+    assert streets._clip_foot_forbidden(imported, index) == []
+
+
+def test_clip_foot_forbidden_without_a_layer_is_a_no_op():
+    imported = _east_west_line(0, 200)
+
+    assert streets._clip_foot_forbidden(imported, None) == [imported]
+
+
+def test_clip_foot_forbidden_removes_an_endpoint_stub():
+    # v24 endpoint bar: the feature's first ~21m (15m of forbidden way +
+    # the 6m buffer cap) co-runs a forbidden path and TOUCHES the
+    # feature's start -- under the 25m mid-feature bar, but a stretch
+    # ending at the feature boundary is a chain continuation/terminal
+    # stub, not a crossing. Removed; the walkable tail survives.
+    imported = _east_west_line(0, 200)
+    index = _forbidden_index_for([_east_west_line(0, 15)])
+
+    result = streets._clip_foot_forbidden(imported, index)
+
+    assert len(result) == 1
+    assert _length_m(result[0]) == pytest.approx(179, abs=2)
+
+
+def test_clip_foot_forbidden_removes_a_whole_short_chain_member():
+    # A 20m feature lying entirely on a forbidden path -- the exact shape
+    # that evaded v23's per-feature 25m bar when the survey chopped one
+    # duplicate into short adjacent features. Both endpoints touch, so
+    # the endpoint bar takes it whole.
+    imported = _east_west_line(0, 20)
+    index = _forbidden_index_for([_east_west_line(-50, 70)])
+
+    assert streets._clip_foot_forbidden(imported, index) == []
+
+
+def test_clip_foot_forbidden_keeps_a_t_junction_nub():
+    # A path ending perpendicular AT a forbidden way is inside the buffer
+    # for only ~6m -- under the 12m endpoint bar. The junction nub (and
+    # the whole feature) must survive, or every path T-ending at a
+    # bikeway would lose its connection point.
+    imported = _east_west_line(0, 200)
+    end_lon = _lon_at(200)
+    forbidden = LineString([(end_lon, _CLIP_LAT - 0.001), (end_lon, _CLIP_LAT + 0.001)])
+    index = _forbidden_index_for([forbidden])
+
+    result = streets._clip_foot_forbidden(imported, index)
+
+    assert len(result) == 1
+    assert _length_m(result[0]) == pytest.approx(200, abs=1)
+
+
+def test_interior_sidewalks_for_tile_applies_the_foot_forbidden_clip():
+    # Wiring check: a duplicate feature disappears, a crossing feature
+    # survives untouched, through the real _interior_sidewalks_for_tile.
+    duplicate = [[_lon_at(0), _CLIP_LAT], [_lon_at(200), _CLIP_LAT]]
+    crossing_lon = _lon_at(500)
+    crossing = [[crossing_lon, _CLIP_LAT - 0.001], [crossing_lon, _CLIP_LAT + 0.001]]
+    geojson = {"type": "FeatureCollection", "features": [
+        _segment_feature(duplicate), _segment_feature(crossing),
+    ]}
+    index = _forbidden_index_for([
+        _east_west_line(0, 200),
+        _east_west_line(450, 550),  # crosses the second feature at 90deg
+    ])
+
+    result = streets._interior_sidewalks_for_tile(geojson, BBOX, index, "test-tile")
+
+    assert result == [[(crossing[0][0], crossing[0][1]), (crossing[1][0], crossing[1][1])]]
 
 
 def test_build_interior_sidewalk_graph_returns_none_for_no_segments():
