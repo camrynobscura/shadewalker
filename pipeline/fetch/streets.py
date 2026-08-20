@@ -47,7 +47,7 @@ import requests
 from pyproj import Transformer
 from shapely import prepared
 from shapely.geometry import LineString, Point, Polygon, box, shape
-from shapely.ops import substring, transform, unary_union
+from shapely.ops import linemerge, substring, transform, unary_union
 from shapely.strtree import STRtree
 
 from pipeline import config
@@ -217,7 +217,24 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # Cemetery's lane grid, a Bronx secondary; 130 ways measured). Processed
 # graphs gain those ways, so every cached tile must rebuild -- and the
 # raw WALK_FILTER snapshots re-key on the filter string by themselves.
-GRAPH_CACHE_VERSION = 22
+# v23 (2026-08-19): imported synthetic segments (interior sidewalks, park
+# trails) are now clipped against foot-forbidden OSM paths
+# (_clip_foot_forbidden, FOOT_FORBIDDEN_FILTER) -- the planimetric survey
+# has no access attributes, so it re-traced bike-only/private paths that
+# WALK_FILTER correctly excludes (89 features citywide measured: the
+# Manhattan Bridge Bike Path, the Hudson River Greenway and Ocean Parkway
+# bike lanes, private-complex paths). One of them, welded at only its
+# Manhattan end, made a 100m walk in DUMBO route 3.6km over the bridge
+# and back (the Gowanus->Downtown Brooklyn lead, FIXES item 1). Processing
+# change only -- no existing filter string changes, so raw caches stay
+# valid; the new foot_forbidden layer fetches once citywide.
+# v24 (2026-08-20): the clip gains the endpoint bar
+# (FOOT_FORBIDDEN_ENDPOINT_BAR_M) -- v23's per-feature contiguity let
+# duplicates chained across short adjacent features slip through (61
+# merged edges / ~36 sites measured by the v23 tile census). Simulated
+# citywide before adoption: residual 3,636m -> 236m. Processing change
+# only; raw caches stay valid.
+GRAPH_CACHE_VERSION = 24
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -533,6 +550,86 @@ def _drop_field_check_excluded_ways(graph: nx.MultiDiGraph, tile_id: str) -> nx.
 # not a permanent block).
 BARRIER_FILTER = '["barrier"~"fence|wall|hedge|retaining_wall|chain|city_wall"]'
 
+# Path-like ways pedestrians are explicitly forbidden from (foot=no) or
+# not entitled to (foot=private), used to CLIP the imported synthetic
+# layers (interior sidewalks, park trails) -- never to admit anything.
+# The planimetric survey has no access attributes, so it re-traces
+# bike-only greenway lanes and private-complex paths as if they were
+# walkable; measured citywide 2026-08-19: 89 interior-sidewalk features
+# substantially duplicate a foot-forbidden way (Manhattan Bridge Bike
+# Path, Hudson River Greenway/Ocean Parkway/Battery/Shore Road/Bronx
+# River bike lanes, private residential-complex paths), park trails 0.
+# Restricted to path-like highway values on purpose: a sidewalk running
+# beside a foot=no ROAD is normal (sidewalks parallel roads by
+# construction), so only a path-like foot-forbidden way is evidence the
+# imported line IS the forbidden path. Regexes anchored -- unanchored
+# Overpass regexes are substring matches (the v22 lesson).
+FOOT_FORBIDDEN_FILTER = (
+    '["highway"~"^(bridleway|cycleway|footway|path|pedestrian|steps|track)$"]'
+    '["foot"~"^(no|private)$"]'
+)
+
+# Same class, different tag: path-like ways where general access is
+# forbidden and no foot tag re-opens them to pedestrians (OSM semantics:
+# foot inherits from access unless overridden; a NEGATIVE regex clause
+# also matches ways with no foot tag at all, which is exactly the
+# inherit case). Measured citywide 2026-08-19: 144 imported features
+# (~16km, 43 sites) duplicate these -- the UN campus, Fort Hamilton,
+# Pelham Bay's closed service tracks, Gramercy Park, Police Plaza,
+# gated communities. An 11-site imagery field check (2026-08-20)
+# confirmed OSM's tags at every decisive site; the one conditional case
+# (Police Plaza -- passable at security's discretion) stays clipped on
+# purpose: routing someone into a checkpoint that may be shut is worse
+# than routing them around the block. This mirrors the trust already
+# extended to these same tags by WALK_FILTER's own access exclusion --
+# the OSM copies of these paths were never admitted; this stops the
+# planimetric copies from sneaking the same ground back in.
+ACCESS_FORBIDDEN_FILTER = (
+    '["highway"~"^(bridleway|cycleway|footway|path|pedestrian|steps|track)$"]'
+    '["access"~"^(no|private)$"]'
+    '["foot"!~"^(yes|designated|permissive)$"]'
+)
+
+# How far an imported segment may sit from a foot-forbidden way's
+# centerline and still count as duplicating it (see _clip_foot_forbidden).
+# Planimetrics and OSM digitize the same path 1-3m apart in the flagged
+# cases; at 6m the citywide census flagged the known bike-path duplicates
+# at 95-100% of their length while a genuinely separate parallel
+# pedestrian path (the thing every flagged greenway has) stays outside.
+FOOT_FORBIDDEN_BUFFER_M = 6.0
+
+# A contiguous in-buffer stretch shorter than this is a CROSSING, not a
+# duplicate, and is never clipped -- an imported path crossing a 6m-buffer
+# perpendicular is inside for ~12m, and clipping it would sever a real
+# walkable path at every greenway crossing (or under an elevated bikeway
+# -- the 2D-proximity vertical trap). Real duplicates measured 40m+ in
+# the census; 25m splits the two populations with margin on both sides.
+FOOT_FORBIDDEN_MIN_OVERLAP_M = 25.0
+
+# A leftover piece of an imported segment shorter than this after the
+# clip is a boundary sliver, not a path -- same bar and reasoning as
+# CLOSURE_ZONE_MIN_REMNANT_M, kept separate because the two clips have no
+# reason to stay in lockstep.
+FOOT_FORBIDDEN_MIN_REMNANT_M = 10.0
+
+# The lower removal bar for an in-buffer stretch that TOUCHES one of the
+# imported feature's own endpoints (v24). The 25m contiguity bar above is
+# measured per FEATURE, and the planimetric survey digitizes one physical
+# path as a chain of short features -- so a duplicate split across
+# adjacent features (each co-running <25m) evaded the clip: the v23
+# citywide census measured 61 merged edges / ~36 sites of exactly this.
+# A genuine crossing is mid-feature by nature (the path enters the buffer
+# and exits it); an in-buffer stretch that just ENDS at the feature
+# boundary is a chain continuation or a terminal stub running ALONG the
+# forbidden corridor -- reachable only via that corridor, so removing it
+# is the same trust-the-tag logic as the main rule. 12m keeps real
+# junction nubs: a path T-ending perpendicular at a forbidden way is
+# inside the 6m buffer for only ~6-8m. Simulated citywide before
+# adoption (2026-08-20): residual 3,636m/68 groups -> 236m/8 groups;
+# 83% of the extra removals at the already-field-checked private sites,
+# the rest at same-class forbidden corridors.
+FOOT_FORBIDDEN_ENDPOINT_BAR_M = 12.0
+
 # FIXES item 6b (2026-08-15): the six auxiliary filters above are no
 # longer queried per tile -- each is fetched ONCE citywide (see
 # pipeline/fetch/citywide_layers.py for the measured why) and every tile
@@ -549,6 +646,8 @@ CITYWIDE_LAYERS = {
     "any_sidewalks": (ANY_SIDEWALK_FILTER, "sidewalk-tagged ways near parks"),
     "parking_aisles": (PARKING_AISLE_FILTER, "parking aisles"),
     "barriers": (BARRIER_FILTER, "barrier ways"),
+    "foot_forbidden": (FOOT_FORBIDDEN_FILTER, "foot-forbidden paths (import clip)"),
+    "access_forbidden": (ACCESS_FORBIDDEN_FILTER, "access-forbidden paths (import clip)"),
 }
 
 # How close two interior-sidewalk segments' endpoints need to be to count
@@ -708,6 +807,128 @@ def _clip_closure_zones(line: LineString) -> list[LineString]:
     kept_m = [p for p in parts
               if isinstance(p, LineString) and p.length >= CLOSURE_ZONE_MIN_REMNANT_M]
     return [transform(_FROM_METRIC_CRS, p) for p in kept_m]
+
+
+# One (STRtree, buffers) pair per process, same reasoning as
+# citywide_layers._MEMO: a borough run calls fetch_streets() up to 155
+# times, and re-buffering ~9k way segments per tile would waste minutes
+# for identical output. Keyed on the refresh flag having been honored
+# once, via citywide_layers' own _FRESHENED machinery underneath.
+_FOOT_FORBIDDEN_INDEX: dict[str, tuple | None] = {}
+
+
+def _foot_forbidden_index(refresh: bool = False) -> tuple | None:
+    """An STRtree over the buffered (metric) segments of every path
+    citywide that pedestrians are barred from (FOOT_FORBIDDEN_FILTER +
+    ACCESS_FORBIDDEN_FILTER), for _clip_foot_forbidden. Built from the
+    citywide layer caches -- NOT a
+    per-tile slice like the composed aux layers, because the imported
+    features being clipped are kept WHOLE when they merely intersect a
+    tile's bbox (_interior_sidewalks_for_tile), so a feature can extend
+    far past the tile and must be clipped against forbidden ways far past
+    it too (the Manhattan Bridge bikeway spans three tiles' bboxes and
+    then some). None when the layer is empty citywide."""
+    if "index" in _FOOT_FORBIDDEN_INDEX and not refresh:
+        return _FOOT_FORBIDDEN_INDEX["index"]
+    # Two layers, one index: explicitly foot-forbidden ways and
+    # access-forbidden ways with no foot override are the same problem for
+    # the clip (see each filter's own comment for its measured class).
+    buffers = []
+    for layer_name in ("foot_forbidden", "access_forbidden"):
+        custom_filter, _label = CITYWIDE_LAYERS[layer_name]
+        layer = citywide_layers.citywide_layer(layer_name, custom_filter, refresh=refresh)
+        if layer is None:
+            continue
+        # The layer is unsimplified (every OSM node is a graph node), so
+        # each undirected edge is one short straight segment of a way --
+        # buffering those with round caps unions seamlessly into the same
+        # coverage as buffering the whole way's polyline.
+        seen: set[frozenset] = set()
+        for u, v in layer.edges():
+            pair = frozenset((u, v))
+            if pair in seen:
+                continue
+            seen.add(pair)
+            segment_m = LineString([
+                _TO_METRIC_CRS(layer.nodes[u]["x"], layer.nodes[u]["y"]),
+                _TO_METRIC_CRS(layer.nodes[v]["x"], layer.nodes[v]["y"]),
+            ])
+            buffers.append(segment_m.buffer(FOOT_FORBIDDEN_BUFFER_M))
+    if not buffers:
+        _FOOT_FORBIDDEN_INDEX["index"] = None
+        return None
+    index = (STRtree(buffers), buffers)
+    _FOOT_FORBIDDEN_INDEX["index"] = index
+    return index
+
+
+def _touches_either_end(piece_m: LineString, line_m: LineString) -> bool:
+    """Whether an in-buffer piece of line_m starts or ends at one of
+    line_m's own endpoints (within a float-noise tolerance) -- the
+    endpoint-bar test in _clip_foot_forbidden. Pieces come from
+    intersection with the buffer, so a piece at the feature boundary
+    carries the boundary coordinate exactly; 0.1m is pure float slack,
+    not a geometric tolerance."""
+    ends = (Point(line_m.coords[0]), Point(line_m.coords[-1]))
+    piece_ends = (Point(piece_m.coords[0]), Point(piece_m.coords[-1]))
+    return any(pe.distance(le) <= 0.1 for pe in piece_ends for le in ends)
+
+
+def _clip_foot_forbidden(line: LineString, forbidden_index: tuple | None) -> list[LineString]:
+    """The portion(s) of an imported lon/lat segment that do NOT duplicate
+    a foot-forbidden path (FOOT_FORBIDDEN_FILTER) -- the planimetric
+    survey has no access attributes, so it re-traces bike-only and
+    private paths as walkable (the Manhattan Bridge bikeway trap, FIXES
+    item 1, 2026-08-19).
+
+    Two removal bars on contiguous in-buffer stretches:
+    FOOT_FORBIDDEN_MIN_OVERLAP_M (25m) anywhere in the feature, and
+    FOOT_FORBIDDEN_ENDPOINT_BAR_M (12m) for a stretch touching one of
+    the feature's own endpoints (v24 -- see that constant's comment for
+    the chain-of-short-features evasion it closes). Anything shorter is
+    a real path CROSSING the forbidden one (at grade or under an
+    elevated bikeway -- 2D proximity can't tell), not a duplicate of it,
+    and stays. Returns [line] untouched when nothing qualifies (the
+    common case). Remnants shorter than FOOT_FORBIDDEN_MIN_REMNANT_M are
+    dropped as boundary slivers, same shape as _clip_closure_zones."""
+    if forbidden_index is None:
+        return [line]
+    tree, buffers = forbidden_index
+    line_m = transform(_TO_METRIC_CRS, line)
+    candidates = tree.query(line_m)
+    if len(candidates) == 0:
+        return [line]
+    forbidden_m = unary_union([buffers[i] for i in candidates])
+    inside = line_m.intersection(forbidden_m)
+    inside_parts = [p for p in getattr(inside, "geoms", [inside])
+                    if isinstance(p, LineString) and not p.is_empty]
+
+    def _doomed(piece: LineString) -> bool:
+        if piece.length >= FOOT_FORBIDDEN_MIN_OVERLAP_M:
+            return True
+        if piece.length < FOOT_FORBIDDEN_ENDPOINT_BAR_M:
+            return False
+        return _touches_either_end(piece, line_m)
+
+    if not any(_doomed(p) for p in inside_parts):
+        return [line]
+    outside = line_m.difference(forbidden_m)
+    # A fully-covered line differences to an EMPTY LineString -- still a
+    # LineString instance, and linemerge refuses empty components.
+    outside_parts = [p for p in getattr(outside, "geoms", [outside])
+                     if isinstance(p, LineString) and not p.is_empty]
+    crossings = [p for p in inside_parts if not _doomed(p)]
+    survivors = outside_parts + crossings
+    if not survivors:
+        return []
+    # intersection/difference split the line at the same buffer boundary,
+    # so a crossing and its flanking outside pieces share exact endpoints
+    # -- linemerge re-joins them into continuous paths instead of leaving
+    # an artificial break at every protected crossing.
+    merged = linemerge(survivors)
+    parts = [p for p in getattr(merged, "geoms", [merged])
+             if isinstance(p, LineString) and p.length >= FOOT_FORBIDDEN_MIN_REMNANT_M]
+    return [transform(_FROM_METRIC_CRS, p) for p in parts]
 
 
 # osmnx's own HTTP-response cache is disabled -- it has no expiration and
@@ -1072,7 +1293,10 @@ def _through_path_parking_aisles(
     return aisle_graph.edge_subgraph(keep_edges).copy()
 
 
-def _interior_sidewalks_for_tile(geojson: dict, bbox: Bbox) -> list[list[tuple[float, float]]]:
+def _interior_sidewalks_for_tile(
+    geojson: dict, bbox: Bbox,
+    forbidden_index: tuple | None = None, tile_id: str = "",
+) -> list[list[tuple[float, float]]]:
     """Interior sidewalk centerline segments (as plain coordinate lists)
     from the citywide interior-sidewalk cache whose geometry intersects
     this tile's bbox (FIXES.md item 1a).
@@ -1082,6 +1306,7 @@ def _interior_sidewalks_for_tile(geojson: dict, bbox: Bbox) -> list[list[tuple[f
     lookups."""
     tile_box = box(bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max)
     segments = []
+    clipped_away_m = 0.0
     for feature in geojson["features"]:
         coords = [tuple(point) for point in feature["geometry"]["coordinates"]]
         line = LineString(coords)
@@ -1091,11 +1316,27 @@ def _interior_sidewalks_for_tile(geojson: dict, bbox: Bbox) -> list[list[tuple[f
         # paths inside a known construction closure -- see
         # CLOSURE_ZONES_PATH's comment for why this can't be tag-inferred
         for kept in _clip_closure_zones(line):
-            segments.append([tuple(point) for point in kept.coords])
+            # foot-forbidden clip (FIXES.md item 1, v23): drop the
+            # portions duplicating a bike-only/private path -- see
+            # FOOT_FORBIDDEN_FILTER's comment for the measured why
+            parts = _clip_foot_forbidden(kept, forbidden_index)
+            if not (len(parts) == 1 and parts[0] is kept):
+                kept_m = transform(_TO_METRIC_CRS, kept).length
+                clipped_away_m += kept_m - sum(
+                    transform(_TO_METRIC_CRS, p).length for p in parts
+                )
+            for part in parts:
+                segments.append([tuple(point) for point in part.coords])
+    if clipped_away_m > 0:
+        logger.info(f"  [streets] {tile_id}: interior sidewalks: foot-forbidden clip "
+                    f"removed {clipped_away_m:.0f}m")
     return segments
 
 
-def _park_trails_for_tile(geojson: dict, bbox: Bbox) -> list[LineString]:
+def _park_trails_for_tile(
+    geojson: dict, bbox: Bbox,
+    forbidden_index: tuple | None = None, tile_id: str = "",
+) -> list[LineString]:
     """Class IV/V ("Highly Developed"/"Fully Developed") park trail
     segments (FIXES.md item 1g) from the citywide NYC Parks Trails cache
     whose geometry intersects this tile's bbox -- same division of labor
@@ -1114,6 +1355,7 @@ def _park_trails_for_tile(geojson: dict, bbox: Bbox) -> list[LineString]:
     """
     tile_box = box(bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max)
     lines = []
+    clipped_away_m = 0.0
     for feature in geojson["features"]:
         if feature["properties"].get("class") not in PARK_TRAIL_CLASSES:
             continue
@@ -1124,7 +1366,22 @@ def _park_trails_for_tile(geojson: dict, bbox: Bbox) -> list[LineString]:
                 continue
             # closure zones (FIXES.md item 0b) -- same clip as interior
             # sidewalks; see CLOSURE_ZONES_PATH's comment
-            lines.extend(_clip_closure_zones(part))
+            for kept in _clip_closure_zones(part):
+                # foot-forbidden clip (FIXES.md item 1, v23) -- same clip
+                # as interior sidewalks; the 2026-08-19 census measured 0
+                # park-trail duplicates, so this is expected to no-op, but
+                # both imports share the same blindness to access and
+                # there's no reason a future trails vintage stays clean.
+                survivors = _clip_foot_forbidden(kept, forbidden_index)
+                if not (len(survivors) == 1 and survivors[0] is kept):
+                    kept_m = transform(_TO_METRIC_CRS, kept).length
+                    clipped_away_m += kept_m - sum(
+                        transform(_TO_METRIC_CRS, p).length for p in survivors
+                    )
+                lines.extend(survivors)
+    if clipped_away_m > 0:
+        logger.info(f"  [streets] {tile_id}: park trails: foot-forbidden clip "
+                    f"removed {clipped_away_m:.0f}m")
     return lines
 
 
@@ -1882,7 +2139,13 @@ def fetch_streets(
     # citywide (see that module) and filtered down to this tile here.
     # Same "before the single simplify pass" ordering as above.
     interior_geojson = interior_sidewalks.fetch_interior_sidewalks()
-    interior_segments = _interior_sidewalks_for_tile(interior_geojson, bbox)
+    # Shared by both imported layers below: the clip index against
+    # foot-forbidden paths (see _clip_foot_forbidden / v23). Built from
+    # the citywide layer cache, memoized per process.
+    forbidden_index = _foot_forbidden_index(refresh=refresh_raw)
+    interior_segments = _interior_sidewalks_for_tile(
+        interior_geojson, bbox, forbidden_index, tile_id
+    )
     interior_graph = _build_interior_sidewalk_graph(interior_segments, tile_id)
     if interior_graph is not None:
         barrier_graph = _aux_layer_graph(bbox, tile_id, "barriers", refresh=refresh_raw)
@@ -1899,7 +2162,7 @@ def fetch_streets(
     # Same "before the single simplify pass" ordering as every other
     # source above.
     trail_geojson = park_trails.fetch_park_trails()
-    trail_lines = _park_trails_for_tile(trail_geojson, bbox)
+    trail_lines = _park_trails_for_tile(trail_geojson, bbox, forbidden_index, tile_id)
     trail_graph = _missing_park_trail_graph(graph, trail_lines, tile_id)
     if trail_graph is not None:
         if not barrier_fetched:
