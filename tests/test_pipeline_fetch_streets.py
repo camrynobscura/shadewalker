@@ -2490,3 +2490,133 @@ def test_weld_mid_line_touch_gets_a_single_closest_weld():
     assert nx.number_connected_components(g.to_undirected(as_view=True)) == 1
     weld_edges = [d for _, _, d in g.edges(data=True) if d.get("weld")]
     assert len(weld_edges) == 1
+
+
+# ---- fee-gated attraction grounds (FIXES.md item 1, v25) ------------------
+# Zoos, the aquarium, and ticketed botanical gardens are destinations,
+# not thoroughfares -- but untagged OSM footways pass WALK_FILTER and
+# the imported layers sweep their interiors up via park polygons
+# (measured 2026-08-20: ~137km across 11 sites). Zones are curated
+# polygons in pipeline/fee_gated_zones.json; imported geometry is
+# clipped (_clip_fee_gated_zones), real path-class edges fully inside a
+# zone are removed from the composed graph (_drop_fee_gated_edges) with
+# road-class and verified-public-name exemptions.
+
+
+def _test_fee_zone(lon, lat, half_m, name="test attraction"):
+    """A fee-gated test zone in the loaded tuple shape: (name, lon/lat
+    polygon, METRIC_CRS polygon), a square half_m meters to each side."""
+    from shapely.geometry import Polygon
+
+    x, y = streets._TO_METRIC_CRS(lon, lat)
+    ring_m = [(x - half_m, y - half_m), (x + half_m, y - half_m),
+              (x + half_m, y + half_m), (x - half_m, y + half_m)]
+    ring = [streets._FROM_METRIC_CRS(px, py) for px, py in ring_m]
+    return (name, Polygon(ring), Polygon(ring_m))
+
+
+def test_clip_fee_gated_zones_drops_a_segment_fully_inside():
+    zone = _test_fee_zone(-73.99, 40.7, 200.0)
+    inside = LineString([(-73.9901, 40.7), (-73.9899, 40.7)])  # ~17m, centered
+    assert streets._clip_fee_gated_zones(inside, zones=[zone]) == []
+
+
+def test_clip_fee_gated_zones_keeps_the_outside_remnants():
+    zone = _test_fee_zone(-73.99, 40.7, 100.0)
+    # ~640m west-to-east straight through the 200m-wide zone
+    crossing = LineString([(-73.9938, 40.7), (-73.9862, 40.7)])
+    kept = streets._clip_fee_gated_zones(crossing, zones=[zone])
+    assert len(kept) == 2
+    zx, _ = streets._TO_METRIC_CRS(-73.99, 40.7)
+    for piece in kept:
+        for lon, lat in piece.coords:
+            x, _ = streets._TO_METRIC_CRS(lon, lat)
+            assert abs(x - zx) >= 99.0  # every kept point is outside the zone
+
+
+def test_clip_fee_gated_zones_leaves_far_segments_untouched():
+    zone = _test_fee_zone(-73.99, 40.7, 100.0)
+    far = LineString([(-73.95, 40.72), (-73.949, 40.72)])
+    assert streets._clip_fee_gated_zones(far, zones=[zone]) == [far]
+
+
+def _fee_zone_graph():
+    """Nodes 1,2 inside the test zone, node 3 well outside; every edge
+    carries x/y-real attrs the drop pass reads."""
+    g = nx.MultiDiGraph()
+    g.graph["crs"] = "epsg:4326"
+    g.add_node(1, x=-73.9901, y=40.7)
+    g.add_node(2, x=-73.9899, y=40.7)
+    g.add_node(3, x=-73.9938, y=40.7)
+    return g
+
+
+def test_drop_fee_gated_edges_removes_interior_paths_only():
+    zone = _test_fee_zone(-73.99, 40.7, 200.0)
+    g = _fee_zone_graph()
+    g.add_edge(1, 2, highway="footway", length=17.0)          # inside: doomed
+    g.add_edge(1, 3, highway="footway", length=310.0)         # crossing: stays
+    g = streets._drop_fee_gated_edges(g, "test", zones=[zone])
+    assert not g.has_edge(1, 2)
+    assert g.has_edge(1, 3)
+    assert 2 not in g.nodes  # stranded by the removal
+    assert 1 in g.nodes and 3 in g.nodes
+
+
+def test_drop_fee_gated_edges_exempts_road_classes_and_public_names():
+    # The Bronx Zoo polygon covers a public primary road; the Central
+    # Park Zoo polygon covers Wien Walk -- both verified 2026-08-20,
+    # neither may be removed.
+    zone = _test_fee_zone(-73.99, 40.7, 200.0)
+    g = _fee_zone_graph()
+    g.add_edge(1, 2, highway="primary", length=17.0)
+    g.add_edge(1, 2, highway="footway", name="Wien Walk", length=17.0)
+    g = streets._drop_fee_gated_edges(g, "test", zones=[zone])
+    assert g.number_of_edges() == 2
+
+
+def test_drop_fee_gated_edges_requires_both_ends_in_the_same_zone():
+    # An edge threading BETWEEN two nearby zones (the public path between
+    # the Queens Zoo's two rings) must survive: one endpoint in each zone
+    # is not "inside" either.
+    zone_a = _test_fee_zone(-73.99, 40.7, 100.0, name="zone a")
+    zone_b = _test_fee_zone(-73.9938, 40.7, 100.0, name="zone b")
+    g = _fee_zone_graph()
+    g.add_edge(1, 3, highway="footway", length=310.0)  # node 1 in a, 3 in b
+    g = streets._drop_fee_gated_edges(g, "test", zones=[zone_a, zone_b])
+    assert g.has_edge(1, 3)
+
+
+def test_real_fee_gated_zones_file_covers_the_verified_sites():
+    # The shipped file must contain the 13 reviewed polygons (12 sites;
+    # Queens Zoo is two rings). The probe point is the Norwood lead's
+    # endpoint -- a synthetic node that sat INSIDE the Bronx Zoo, the
+    # finding that exposed the whole class (2026-08-20).
+    from shapely.geometry import Point as _Point
+
+    zones = streets._FEE_GATED_ZONES
+    assert len(zones) == 13
+    names = {name for name, _poly, _poly_m in zones}
+    for expected in ("Bronx Zoo", "New York Botanical Garden",
+                     "Brooklyn Botanic Garden", "Central Park Zoo",
+                     "New York Aquarium", "Wave Hill"):
+        assert expected in names
+    norwood_endpoint = _Point(-73.874487, 40.85237)
+    assert any(poly.contains(norwood_endpoint) for _n, poly, _pm in zones)
+    for _name, poly, poly_m in zones:
+        assert poly.is_valid and poly_m.is_valid
+
+
+def test_interior_sidewalks_for_tile_clips_fee_gated_zones(monkeypatch):
+    monkeypatch.setattr(streets, "_FEE_GATED_ZONES",
+                        [_test_fee_zone(-73.99, 40.7, 100.0)])
+    monkeypatch.setattr(streets, "_CLOSURE_ZONES_M", [])
+    geojson = {"features": [
+        {"geometry": {"type": "LineString",
+                      "coordinates": [[-73.9901, 40.7], [-73.9899, 40.7]]}},  # inside
+        {"geometry": {"type": "LineString",
+                      "coordinates": [[-73.95, 40.72], [-73.949, 40.72]]}},   # far
+    ]}
+    tile = Bbox(lat_min=40.6, lat_max=40.8, lon_min=-74.05, lon_max=-73.9)
+    segments = streets._interior_sidewalks_for_tile(geojson, tile, None, "test")
+    assert segments == [[(-73.95, 40.72), (-73.949, 40.72)]]
