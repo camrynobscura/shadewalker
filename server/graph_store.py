@@ -307,8 +307,14 @@ _CURATED_KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
     ("9191842218", "9191842217", "Manhattan Bridge Pedestrian Path"),
     # Re-derived 2026-08-15: was 11638917883, v19 node 1.7m away.
     ("3564754694", "8279851182", "Manhattan Bridge Pedestrian Path"),
-    ("12644027075", "12152905164", "Hudson River Park Esplanade"),
-    ("8729985306", "12198069447", "Bronx River Greenway"),
+    # "Hudson River Park Esplanade" (12644027075 <-> 12152905164) was
+    # RETIRED 2026-08-21: dead since the v23 rebuild -- unnoticed because
+    # the ritual audit read only known_node_gaps.json until then -- and
+    # its gap self-healed meanwhile (66m walk on v26).
+    # Re-derived 2026-08-21: was 8729985306, absorbed as an edge-interior
+    # bead by the v26 connector composition (the gap walked 513m again);
+    # v26 node 3.7m from the old coords. The other end survived v26.
+    ("12583761786", "12198069447", "Bronx River Greenway"),
     ("1024175662", "3616599502", "Mosholu-Pelham Greenway"),
     ("387181476", "387181479", "East River Esplanade"),
     ("7782217038", "6304586882", "East River Esplanade"),
