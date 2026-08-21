@@ -14,6 +14,7 @@ simplified once after composing, not simplified independently before
 composing -- see fetch_streets()'s own docstring for the real bug, High
 Bridge, this fixes)."""
 
+import json
 import re
 
 import networkx as nx
@@ -2620,3 +2621,93 @@ def test_interior_sidewalks_for_tile_clips_fee_gated_zones(monkeypatch):
     tile = Bbox(lat_min=40.6, lat_max=40.8, lon_min=-74.05, lon_max=-73.9)
     segments = streets._interior_sidewalks_for_tile(geojson, tile, None, "test")
     assert segments == [[(-73.95, 40.72), (-73.949, 40.72)]]
+
+
+# ---------------------------------------------------------------------------
+# T1 sidewalk connectors (v26): curated chains from
+# pipeline/sidewalk_connectors.json are sliced out of the any_sidewalks
+# layer by _connector_sidewalks() and composed before the single
+# simplify pass. Rule + derivation: pipeline/derive_sidewalk_connectors.py
+# and data/audits/2026-08-20/sidewalk_admit_survey_report.md.
+
+
+def _connector_layer_graph():
+    """A fake any_sidewalks tile slice: chain 101-102-103 plus an
+    unrelated sidewalk edge 201-202."""
+    g = nx.MultiDiGraph()
+    g.graph["crs"] = "epsg:4326"
+    for n, lon in ((101, -73.990), (102, -73.9899), (103, -73.9898),
+                   (201, -73.95), (202, -73.9499)):
+        g.add_node(n, x=lon, y=40.7)
+    g.add_edge(101, 102, length=9.0)
+    g.add_edge(102, 103, length=9.0)
+    g.add_edge(201, 202, length=9.0)
+    return g
+
+
+def _pairs_for_chain(*chain):
+    return {(a, b) if a <= b else (b, a)
+            for a, b in zip(chain, chain[1:])}
+
+
+def test_connector_sidewalks_keeps_only_listed_chain_edges():
+    pairs = _pairs_for_chain("101", "102", "103")
+    kept = streets._connector_sidewalks(_connector_layer_graph(), "test",
+                                        pairs=pairs)
+    assert kept is not None
+    assert kept.has_edge(101, 102) and kept.has_edge(102, 103)
+    assert not kept.has_edge(201, 202)
+    assert 201 not in kept.nodes
+
+
+def test_connector_sidewalks_partial_chain_survives_a_tile_boundary():
+    # A tile slice holding only the middle of a chain contributes what it
+    # has; the halves rejoin at shared OSM node ids when exports merge.
+    pairs = _pairs_for_chain("100", "101", "102", "103", "104")
+    g = _connector_layer_graph()  # only has 101-102-103 of the chain
+    kept = streets._connector_sidewalks(g, "test", pairs=pairs)
+    assert kept is not None
+    assert kept.number_of_edges() == 2
+
+
+def test_connector_sidewalks_none_for_empty_inputs():
+    assert streets._connector_sidewalks(None, "test", pairs={("1", "2")}) is None
+    assert streets._connector_sidewalks(_connector_layer_graph(), "test",
+                                        pairs=set()) is None
+    assert streets._connector_sidewalks(
+        _connector_layer_graph(), "test",
+        pairs=_pairs_for_chain("7", "8", "9")) is None
+
+
+def test_load_sidewalk_connectors_normalizes_pair_order(tmp_path, monkeypatch):
+    path = tmp_path / "sidewalk_connectors.json"
+    path.write_text(json.dumps({
+        "rule": {"chain_max_m": 100.0, "saving_min_m": 150.0},
+        "connectors": [
+            {"att_a": "9", "att_b": "5",
+             "chain_nodes": ["9", "7", "5"], "chain_m": 20.0,
+             "saving_m": 300, "lat": 40.7, "lon": -73.99},
+        ],
+    }))
+    monkeypatch.setattr(streets, "SIDEWALK_CONNECTORS_PATH", path)
+    pairs = streets._load_sidewalk_connectors()
+    assert pairs == {("7", "9"), ("5", "7")}
+
+
+def test_real_sidewalk_connectors_file_is_present_and_sane():
+    # The derived file must ship with the v26 pipeline: the loader only
+    # WARNS when it's missing (so bare checkouts still build), which
+    # makes this guard the actual gate against silently building a
+    # connector-less citywide graph. Bounds are deliberately loose --
+    # the exact count moves with each re-derivation (REFETCH ritual).
+    assert streets.SIDEWALK_CONNECTORS_PATH.exists(), (
+        "pipeline/sidewalk_connectors.json missing -- run "
+        "pipeline/derive_sidewalk_connectors.py --write")
+    data = json.loads(streets.SIDEWALK_CONNECTORS_PATH.read_text())
+    assert data["rule"] == {"chain_max_m": 100.0, "saving_min_m": 150.0}
+    assert 1000 <= len(data["connectors"]) <= 3000
+    for entry in data["connectors"][:50]:
+        assert len(entry["chain_nodes"]) >= 2
+        assert entry["chain_m"] <= 100.0 + 1e-6
+        assert entry["saving_m"] >= 150
+    assert len(streets._SIDEWALK_CONNECTOR_PAIRS) >= 1000
