@@ -246,7 +246,23 @@ _FROM_METRIC_CRS = Transformer.from_crs(METRIC_CRS, "EPSG:4326", always_xy=True)
 # FEE_GATED_EXEMPT_NAMES -- the Bronx River Parkway frontage road and
 # Wien Walk). Processing change only -- no filter strings change, raw
 # caches stay valid.
-GRAPH_CACHE_VERSION = 25
+# v26 (2026-08-20): T1 sidewalk connectors admitted -- the measured
+# repair for the centerline model's one systematic blind spot: real
+# pedestrian connectivity carried ONLY by the excluded footway=sidewalk
+# network (Washington Bridge approach, the Flushing/Jackson Hts/Boerum
+# Hill/... junction-gap class; survey:
+# data/audits/2026-08-20/sidewalk_admit_survey_report.md). The chains
+# live in pipeline/sidewalk_connectors.json (curated, derived OFFLINE
+# citywide by pipeline/derive_sidewalk_connectors.py -- per-tile
+# derivation would mis-measure detours near tile boundaries); rule:
+# both attachments on the served graph's main component, chain <= 100m,
+# exact detour saving >= 150m, no fee-zone overlap. ~1.4k chains /
+# ~57km / +0.28% length. _connector_sidewalks() slices them from the
+# any_sidewalks citywide layer per tile and composes them BEFORE the
+# single simplify pass, joining the walk graph at shared OSM node ids
+# (no snapping involved). Processing change only -- no filter strings
+# change, raw caches stay valid.
+GRAPH_CACHE_VERSION = 26
 
 # Overpass's public instance drops connections intermittently under sustained
 # borough-scale querying -- observed three real ConnectionRefusedErrors during
@@ -1440,6 +1456,64 @@ def _park_reach_sidewalks(
     return graph.edge_subgraph(keep_edges).copy()
 
 
+SIDEWALK_CONNECTORS_PATH = Path(__file__).parent.parent / "sidewalk_connectors.json"
+
+
+def _load_sidewalk_connectors() -> set[tuple[str, str]]:
+    """The admitted T1 connector chains as a set of undirected consecutive
+    node-id pairs -- the exact any_sidewalks edges the curated list names
+    (see the v26 GRAPH_CACHE_VERSION note; derivation:
+    pipeline/derive_sidewalk_connectors.py). Missing file = empty set with
+    a warning, so a checkout without the derived file still builds (it
+    just builds without connectors, which the tests for the shipped file
+    will catch)."""
+    if not SIDEWALK_CONNECTORS_PATH.exists():
+        logger.warning("  [streets] no sidewalk_connectors.json -- building "
+                       "WITHOUT T1 connectors")
+        return set()
+    data = json.loads(SIDEWALK_CONNECTORS_PATH.read_text())
+    pairs: set[tuple[str, str]] = set()
+    for entry in data["connectors"]:
+        chain = entry["chain_nodes"]
+        for a, b in zip(chain, chain[1:]):
+            pairs.add((a, b) if a <= b else (b, a))
+    return pairs
+
+
+_SIDEWALK_CONNECTOR_PAIRS = _load_sidewalk_connectors()
+
+
+def _connector_sidewalks(
+    graph: nx.MultiDiGraph | None, tile_id: str,
+    pairs: set[tuple[str, str]] | None = None,
+) -> nx.MultiDiGraph | None:
+    """Keep only the ANY_SIDEWALK_FILTER edges that belong to a curated T1
+    connector chain (both-ends-attached, chain <= 100m, saving >= 150m --
+    see the v26 note). None in/out follows _park_reach_sidewalks()'s
+    convention. A chain crossing a tile boundary contributes whatever
+    consecutive pairs this tile's layer slice contains; the halves rejoin
+    at their shared OSM node ids when the exports merge, the same way
+    every cross-tile OSM way already does."""
+    if graph is None:
+        return None
+    if pairs is None:
+        pairs = _SIDEWALK_CONNECTOR_PAIRS
+    if not pairs:
+        return None
+
+    keep_edges = []
+    for u, v, key in graph.edges(keys=True):
+        us, vs = str(u), str(v)
+        pair = (us, vs) if us <= vs else (vs, us)
+        if pair in pairs:
+            keep_edges.append((u, v, key))
+    if not keep_edges:
+        return None
+    logger.info(f"  [streets] {tile_id}: sidewalk connectors: kept "
+                f"{len(keep_edges)} chain edge(s)")
+    return graph.edge_subgraph(keep_edges).copy()
+
+
 def _through_path_parking_aisles(
     graph: nx.MultiDiGraph, aisle_graph: nx.MultiDiGraph | None, tile_id: str
 ) -> nx.MultiDiGraph | None:
@@ -2331,6 +2405,13 @@ def fetch_streets(
         park_sidewalk_graph = _park_reach_sidewalks(any_sidewalk_graph, park_reach, tile_id)
         if park_sidewalk_graph is not None:
             graph = nx.compose(graph, park_sidewalk_graph)
+        # T1 sidewalk connectors (v26) ride the same layer slice and the
+        # same park_reach gate -- not because they need parks, but because
+        # the gate is what keeps pilot/CI runs from fetching the citywide
+        # sidewalk layer; a citywide build always has park_reach.
+        connector_graph = _connector_sidewalks(any_sidewalk_graph, tile_id)
+        if connector_graph is not None:
+            graph = nx.compose(graph, connector_graph)
 
     # Checked against `graph` as composed so far (every other filter
     # already unioned in), same "filter before the single simplify pass"
