@@ -98,6 +98,30 @@ def osrm_route_m(a_latlon, b_latlon, timeout=10):
     return d["routes"][0]["distance"], None
 
 
+def osrm_route_has_ferry(a_latlon, b_latlon, timeout=10):
+    """Does local OSRM's foot route between the points ride a ferry leg?
+
+    True / False, or None when OSRM is down or can't route the pair.
+    The item-5c class (2026-08-21): every East River corridor TOO_LONG
+    flag was OSRM riding a NYC Ferry crossing -- by design for a
+    walking app, so triage auto-explains them instead of re-reporting
+    ~170 ferry flags as OPEN leads at every census."""
+    url = (f"{OSRM_LOCAL}/route/v1/foot/"
+           f"{a_latlon[1]},{a_latlon[0]};{b_latlon[1]},{b_latlon[0]}"
+           f"?overview=false&steps=true")
+    try:
+        d = requests.get(url, timeout=timeout).json()
+    except Exception:  # noqa: BLE001 -- oracle, absent is an answer
+        return None
+    if d.get("code") != "Ok":
+        return None
+    for leg in d["routes"][0]["legs"]:
+        for step in leg["steps"]:
+            if step.get("mode") == "ferry":
+                return True
+    return False
+
+
 def osrm_table_m(origin_latlon, dest_latlons, timeout=30):
     """One-to-many distances via /table. Returns (list of m|None, snaps)."""
     coords = ";".join(
