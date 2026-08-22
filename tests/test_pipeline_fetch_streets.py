@@ -2499,9 +2499,10 @@ def test_weld_mid_line_touch_gets_a_single_closest_weld():
 # the imported layers sweep their interiors up via park polygons
 # (measured 2026-08-20: ~137km across 11 sites). Zones are curated
 # polygons in pipeline/fee_gated_zones.json; imported geometry is
-# clipped (_clip_fee_gated_zones), real path-class edges fully inside a
-# zone are removed from the composed graph (_drop_fee_gated_edges) with
-# road-class and verified-public-name exemptions.
+# clipped (_clip_zone_polygons), edges fully inside a zone are removed
+# from the composed graph (_drop_zone_interior_edges) with road-class
+# and verified-public-name exemptions. Since v27 the same two passes
+# also serve the restricted zones (exemption-free; tests further down).
 
 
 def _test_fee_zone(lon, lat, half_m, name="test attraction"):
@@ -2519,14 +2520,14 @@ def _test_fee_zone(lon, lat, half_m, name="test attraction"):
 def test_clip_fee_gated_zones_drops_a_segment_fully_inside():
     zone = _test_fee_zone(-73.99, 40.7, 200.0)
     inside = LineString([(-73.9901, 40.7), (-73.9899, 40.7)])  # ~17m, centered
-    assert streets._clip_fee_gated_zones(inside, zones=[zone]) == []
+    assert streets._clip_zone_polygons(inside, zones=[zone]) == []
 
 
 def test_clip_fee_gated_zones_keeps_the_outside_remnants():
     zone = _test_fee_zone(-73.99, 40.7, 100.0)
     # ~640m west-to-east straight through the 200m-wide zone
     crossing = LineString([(-73.9938, 40.7), (-73.9862, 40.7)])
-    kept = streets._clip_fee_gated_zones(crossing, zones=[zone])
+    kept = streets._clip_zone_polygons(crossing, zones=[zone])
     assert len(kept) == 2
     zx, _ = streets._TO_METRIC_CRS(-73.99, 40.7)
     for piece in kept:
@@ -2538,7 +2539,7 @@ def test_clip_fee_gated_zones_keeps_the_outside_remnants():
 def test_clip_fee_gated_zones_leaves_far_segments_untouched():
     zone = _test_fee_zone(-73.99, 40.7, 100.0)
     far = LineString([(-73.95, 40.72), (-73.949, 40.72)])
-    assert streets._clip_fee_gated_zones(far, zones=[zone]) == [far]
+    assert streets._clip_zone_polygons(far, zones=[zone]) == [far]
 
 
 def _fee_zone_graph():
@@ -2557,7 +2558,9 @@ def test_drop_fee_gated_edges_removes_interior_paths_only():
     g = _fee_zone_graph()
     g.add_edge(1, 2, highway="footway", length=17.0)          # inside: doomed
     g.add_edge(1, 3, highway="footway", length=310.0)         # crossing: stays
-    g = streets._drop_fee_gated_edges(g, "test", zones=[zone])
+    g = streets._drop_zone_interior_edges(
+        g, "test", [zone], streets.FEE_GATED_EXEMPT_HIGHWAYS,
+        streets.FEE_GATED_EXEMPT_NAMES, "fee-gated exclusion")
     assert not g.has_edge(1, 2)
     assert g.has_edge(1, 3)
     assert 2 not in g.nodes  # stranded by the removal
@@ -2572,7 +2575,9 @@ def test_drop_fee_gated_edges_exempts_road_classes_and_public_names():
     g = _fee_zone_graph()
     g.add_edge(1, 2, highway="primary", length=17.0)
     g.add_edge(1, 2, highway="footway", name="Wien Walk", length=17.0)
-    g = streets._drop_fee_gated_edges(g, "test", zones=[zone])
+    g = streets._drop_zone_interior_edges(
+        g, "test", [zone], streets.FEE_GATED_EXEMPT_HIGHWAYS,
+        streets.FEE_GATED_EXEMPT_NAMES, "fee-gated exclusion")
     assert g.number_of_edges() == 2
 
 
@@ -2584,7 +2589,9 @@ def test_drop_fee_gated_edges_requires_both_ends_in_the_same_zone():
     zone_b = _test_fee_zone(-73.9938, 40.7, 100.0, name="zone b")
     g = _fee_zone_graph()
     g.add_edge(1, 3, highway="footway", length=310.0)  # node 1 in a, 3 in b
-    g = streets._drop_fee_gated_edges(g, "test", zones=[zone_a, zone_b])
+    g = streets._drop_zone_interior_edges(
+        g, "test", [zone_a, zone_b], streets.FEE_GATED_EXEMPT_HIGHWAYS,
+        streets.FEE_GATED_EXEMPT_NAMES, "fee-gated exclusion")
     assert g.has_edge(1, 3)
 
 
@@ -2610,6 +2617,79 @@ def test_real_fee_gated_zones_file_covers_the_verified_sites():
 
 def test_interior_sidewalks_for_tile_clips_fee_gated_zones(monkeypatch):
     monkeypatch.setattr(streets, "_FEE_GATED_ZONES",
+                        [_test_fee_zone(-73.99, 40.7, 100.0)])
+    monkeypatch.setattr(streets, "_CLOSURE_ZONES_M", [])
+    geojson = {"features": [
+        {"geometry": {"type": "LineString",
+                      "coordinates": [[-73.9901, 40.7], [-73.9899, 40.7]]}},  # inside
+        {"geometry": {"type": "LineString",
+                      "coordinates": [[-73.95, 40.72], [-73.949, 40.72]]}},   # far
+    ]}
+    tile = Bbox(lat_min=40.6, lat_max=40.8, lon_min=-74.05, lon_max=-73.9)
+    segments = streets._interior_sidewalks_for_tile(geojson, tile, None, "test")
+    assert segments == [[(-73.95, 40.72), (-73.949, 40.72)]]
+
+
+# ---- restricted operational grounds (FIXES.md item 1f, v27) ---------------
+# Gated service areas -- JFK's fence line is the first entry. Same
+# clip/drop machinery as fee zones but with NO exemption sets: the
+# interior roads are untagged tertiary/unclassified and access=private
+# parking aisles, exactly what the fee-zone exemptions would keep.
+
+
+def test_drop_zone_interior_edges_without_exemptions_removes_roads_too():
+    # Restricted semantics: inside the fence nothing is public. An
+    # untagged tertiary -- which FEE_GATED_EXEMPT_HIGHWAYS keeps for fee
+    # zones -- must go when the exemption sets are empty.
+    zone = _test_fee_zone(-73.99, 40.7, 200.0, name="restricted test")
+    g = _fee_zone_graph()
+    g.add_edge(1, 2, highway="tertiary", length=17.0)
+    g = streets._drop_zone_interior_edges(
+        g, "test", [zone], frozenset(), frozenset(),
+        "restricted-grounds exclusion")
+    assert not g.has_edge(1, 2)
+
+
+def test_real_restricted_zones_file_covers_the_airports():
+    # JFK: interior probes are the 2026-08-21 dry-run's verified sites
+    # (the cargo-complex hub every shortcut cluster shared, and the
+    # Federal Circle rental area); exterior probes are the Brookville
+    # and Howard Beach census fringe clusters -- ordinary city streets
+    # that must stay routable. LGA (same day, user-requested sweep):
+    # Terminal B and the Marine Air Terminal inside; the Flushing Bay
+    # Promenade and the Ditmars/Planeview corner outside -- the public
+    # walks along the fence must survive.
+    from shapely.geometry import Point as _Point
+
+    zones = {name: (poly, poly_m)
+             for name, poly, poly_m in streets._RESTRICTED_ZONES}
+    assert len(zones) == 2
+    for poly, poly_m in zones.values():
+        assert poly.is_valid and poly_m.is_valid
+
+    jfk, _ = zones["John F. Kennedy International Airport"]
+    assert jfk.contains(_Point(-73.795408, 40.652809))
+    assert jfk.contains(_Point(-73.8025, 40.6608))
+    assert not jfk.contains(_Point(-73.7445, 40.6765))
+    assert not jfk.contains(_Point(-73.828, 40.637))
+
+    lga, _ = zones["LaGuardia Airport"]
+    assert lga.contains(_Point(-73.87453, 40.77281))
+    assert lga.contains(_Point(-73.8857, 40.77307))
+    assert not lga.contains(_Point(-73.85661, 40.76473))
+    assert not lga.contains(_Point(-73.8874, 40.7657))
+
+
+def test_clip_zone_polygons_default_includes_restricted_zones():
+    # The DEFAULT zone list (no zones argument) must cover both files:
+    # a segment inside JFK's cargo complex dies without any monkeypatch.
+    inside_jfk = LineString([(-73.7955, 40.6527), (-73.7953, 40.6529)])
+    assert streets._clip_zone_polygons(inside_jfk) == []
+
+
+def test_interior_sidewalks_for_tile_clips_restricted_zones(monkeypatch):
+    monkeypatch.setattr(streets, "_FEE_GATED_ZONES", [])
+    monkeypatch.setattr(streets, "_RESTRICTED_ZONES",
                         [_test_fee_zone(-73.99, 40.7, 100.0)])
     monkeypatch.setattr(streets, "_CLOSURE_ZONES_M", [])
     geojson = {"features": [

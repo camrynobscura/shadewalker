@@ -14,7 +14,7 @@ THE RULE (T1, user-approved 2026-08-20):
     not passing through another attachment) is <= CHAIN_MAX_M,
   - the current graph detour between the attachments exceeds the chain
     by >= SAVING_MIN_M,
-  - no part of the chain lies inside a fee-gated zone.
+  - no part of the chain lies inside a fee-gated or restricted zone.
 
 Derivation measures value against the CURRENT graph, which already
 contains previously-admitted connectors — so a re-derivation would see
@@ -26,7 +26,7 @@ qualifying chains. Run it at every refetch (REFETCH.md).
 
 Inputs (all local): the citywide any_sidewalks layer cache, the
 exported tiles (SHADEWALKER_TILES_DIR or data/tiles), and
-pipeline/fee_gated_zones.json.
+pipeline/fee_gated_zones.json + pipeline/restricted_zones.json.
 
 Usage:
   uv run python -m pipeline.derive_sidewalk_connectors           # dry run
@@ -52,7 +52,14 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 CONNECTORS_PATH = os.path.join(REPO, "pipeline", "sidewalk_connectors.json")
-ZONES_PATH = os.path.join(REPO, "pipeline", "fee_gated_zones.json")
+# Both zone files feed the no-overlap rule: a chain through a ticketed
+# attraction OR gated operational grounds (restricted_zones.json, v27)
+# must never qualify -- the zones' interiors are excluded from the
+# graph, so a connector into one would be a bridge to nowhere.
+ZONES_PATHS = (
+    os.path.join(REPO, "pipeline", "fee_gated_zones.json"),
+    os.path.join(REPO, "pipeline", "restricted_zones.json"),
+)
 LAYER_GLOB = os.path.join(REPO, "data", "raw", "citywide_layers",
                           "any_sidewalks_*.graphml")
 
@@ -255,8 +262,10 @@ def main():
             if x in anchor_set:
                 comp_rims[root].add(x)
 
-    zones = json.load(open(ZONES_PATH))["zones"]
-    zpolys = [Polygon(z["polygon"]) for z in zones]
+    zpolys = []
+    for zones_path in ZONES_PATHS:
+        for z in json.load(open(zones_path))["zones"]:
+            zpolys.append(Polygon(z["polygon"]))
     ztree = STRtree(zpolys)
 
     def chain_in_zone(path_nodes):
@@ -343,17 +352,29 @@ def main():
     if os.path.exists(CONNECTORS_PATH):
         existing = json.load(open(CONNECTORS_PATH))["connectors"]
     known = {(e["att_a"], e["att_b"]) for e in existing}
-    kept, retired = [], []
+    kept, retired, zone_retired = [], [], []
     for e in existing:
-        if all(x in nodes for x in e["chain_nodes"]):
-            kept.append(e)
-        else:
+        if not all(x in nodes for x in e["chain_nodes"]):
             retired.append(e)
+        elif chain_in_zone(e["chain_nodes"]):
+            # a zone (fee-gated or restricted) grew over an existing
+            # chain -- the zone's interior edges are excluded from the
+            # graph, so the connector would attach to nothing (first
+            # case: a chain inside LaGuardia's fence, retired when the
+            # restricted zones landed, v27)
+            zone_retired.append(e)
+        else:
+            kept.append(e)
     new = [q for q in qualified if (q["att_a"], q["att_b"]) not in known]
     for e in retired:
         print(f"  RETIRED (chain nodes gone from layer): "
               f"{e['att_a']}<->{e['att_b']} at {e['lat']},{e['lon']}",
               flush=True)
+    for e in zone_retired:
+        print(f"  RETIRED (chain now inside an excluded zone): "
+              f"{e['att_a']}<->{e['att_b']} at {e['lat']},{e['lon']}",
+              flush=True)
+    retired = retired + zone_retired
     print(f"existing kept {len(kept)}, retired {len(retired)}, "
           f"new {len(new)} -> total {len(kept) + len(new)}", flush=True)
 
