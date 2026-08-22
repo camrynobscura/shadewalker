@@ -546,6 +546,13 @@ FIELD_CHECK_EXCLUDED_WAY_IDS = {
     1333099359: "Fort Washington Park informal trail: smoothness=impassable, "
                 "trail_visibility=intermediate, and Google routes 2.6mi AROUND "
                 "its two ends rather than along it (user field check 2026-08-19)",
+    5713413: "Westminster Court (Todt Hill, SI): behind a private-community "
+             "gate -- user field check via Street View 2026-08-21 (end of the census "
+             "over-permissiveness case 43001576<->13135649549: we walked "
+             "1,006m to a point Google refuses at 7.9km and OSRM's network "
+             "omits entirely). OSM tags it plain residential; the gate is "
+             "unmapped. Adjacent Whitwell Pl/High Point Rd verified NOT "
+             "gated by the same check and stay in.",
 }
 
 
