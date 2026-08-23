@@ -9,10 +9,14 @@ advertise coverage routing can't honor. Guarantees pinned here:
   - the LARGEST component is always visible, however small (toy datasets,
     sliver tiles);
   - a big isolated place (the Governors Island class) stays visible;
-  - KEEP_VISIBLE_ISOLATED_PLACES overrides hiding by coordinate
-    (Liberty Island class -- user-reviewed 2026-08-16/17);
   - the rule's parameters are part of the coverage-cache fingerprint, so
     editing them can never serve rings computed under the old rule.
+
+The curated keep-visible exception list (Liberty Island, College of Mount
+Saint Vincent) was deleted 2026-08-22 with the rest of the manual fixes,
+along with the two tests that pinned it. The rule is now purely size-based
+and self-healing: any fragment OSM later connects becomes visible again
+with no action from us.
 
 Synthetic two-tile fixtures, same pattern as test_graph_store_pruning.py.
 """
@@ -123,31 +127,6 @@ def test_largest_component_is_always_visible_however_small(tmp_path, monkeypatch
     assert store.in_coverage(m1_lat, m1_lon) is True
 
 
-def test_keep_visible_list_overrides_hiding(tmp_path, monkeypatch):
-    f1_lon, f1_lat = FRAGMENT_NODES["f1"]
-    monkeypatch.setattr(
-        graph_store, "KEEP_VISIBLE_ISOLATED_PLACES",
-        [(f1_lat, f1_lon, "Test Island")],
-    )
-    store = _store(tmp_path, monkeypatch)
-    f2_lon, f2_lat = FRAGMENT_NODES["f2"]
-    assert store.snap_pair(f1_lat, f1_lon, f2_lat, f2_lon) is not None
-    assert store.in_coverage(f1_lat, f1_lon) is True
-    assert len(store.coverage_rings()) == 2
-
-
-def test_keep_visible_entry_missing_from_dataset_is_ignored(tmp_path, monkeypatch):
-    # partial datasets (the pilot fixture, single-tile loads) don't contain
-    # every keep-listed place -- the entry must be skipped, not crash or
-    # accidentally unhide something else
-    monkeypatch.setattr(
-        graph_store, "KEEP_VISIBLE_ISOLATED_PLACES",
-        [(40.690830, -74.045350, "Liberty Island")],  # nowhere near this fixture
-    )
-    store = _store(tmp_path, monkeypatch)
-    f1_lon, f1_lat = FRAGMENT_NODES["f1"]
-    assert store.in_coverage(f1_lat, f1_lon) is False
-
 
 def test_rule_parameters_are_part_of_the_coverage_fingerprint(tmp_path, monkeypatch):
     # the stale-cache trap FIXES item 1 warned about: editing the rule
@@ -155,11 +134,5 @@ def test_rule_parameters_are_part_of_the_coverage_fingerprint(tmp_path, monkeypa
     _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
     paths = sorted(tmp_path.glob("*.json.gz"))
     before = graph_store._tiles_fingerprint(paths)
-    monkeypatch.setattr(
-        graph_store, "KEEP_VISIBLE_ISOLATED_PLACES",
-        [(1.0, 2.0, "Somewhere New")],
-    )
-    assert graph_store._tiles_fingerprint(paths) != before
     monkeypatch.setattr(graph_store, "HIDDEN_COMPONENT_MAX_LEN_M", 123.0)
-    changed_again = graph_store._tiles_fingerprint(paths)
-    assert changed_again != before
+    assert graph_store._tiles_fingerprint(paths) != before
