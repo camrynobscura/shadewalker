@@ -18,6 +18,20 @@ from typing import NamedTuple
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"          # pathlib overloads "/" to join paths
 RAW_DIR = DATA_DIR / "raw"             # cached API downloads (never re-fetched)
+ORACLE_DIR = DATA_DIR / "oracle"       # the pinned OSM extract, source of truth
+
+# The one OSM extract everything reads -- the pipeline and every
+# tools/audit/ script. A single constant on purpose: this path used to be
+# copy-pasted into eight audit tools, so nothing stopped a new one from
+# pointing at a different (or stale) file and reporting confidently
+# against it.
+#
+# Geofabrik's NEW YORK STATE daily, pinned 2026-08-20 (495,222,845 bytes;
+# data/oracle/new-york-latest.timestamp.txt records the exact pin). It
+# covers far more than NYC -- its pedestrian ways alone span
+# -79.738,40.496 .. -71.856,45.035 -- so every read of it must be clipped
+# to the real borough boundaries. See pipeline/graph/pedestrian.py.
+OSM_EXTRACT_PATH = ORACLE_DIR / "new-york-latest.osm.pbf"
 
 # Overridable via SHADEWALKER_TILES_DIR -- e2e tests (web/playwright.config.ts)
 # boot a real server against a real filesystem path, with no equivalent of
