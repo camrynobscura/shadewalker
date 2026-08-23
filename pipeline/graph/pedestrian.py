@@ -72,6 +72,16 @@ logger = logging.getLogger(__name__)
 # other, so a "sidewalks only" graph is disconnected by construction.
 PED_HIGHWAY = frozenset({"footway", "path", "steps", "pedestrian"})
 
+# Street centerlines. NOT part of the routing graph -- they are read only
+# so a nameless sidewalk can borrow the name of the street it runs along
+# (pipeline/graph/naming.py). Same set the coverage audit uses to decide
+# "is this somewhere a person would plausibly walk".
+STREET_HIGHWAY = frozenset({
+    "primary", "primary_link", "secondary", "secondary_link", "tertiary",
+    "tertiary_link", "unclassified", "residential", "living_street",
+    "service", "track",
+})
+
 # WGS84 ellipsoid, for geodesic segment lengths.
 _GEOD = Geod(ellps="WGS84")
 
@@ -114,14 +124,38 @@ def is_pedestrian(tags: dict) -> bool:
     return hw in PED_HIGHWAY
 
 
-def read_pedestrian_ways(pbf_path, nyc_shape: BaseGeometry) -> list[Way]:
-    """Every pedestrian way in the extract that touches NYC.
+def is_named_street(tags: dict) -> bool:
+    """A street centerline carrying a name, for the naming derivation only.
+
+    Nameless streets are useless as a parent (they can't lend a name), so
+    they're filtered here rather than downstream. Service roads that are
+    private or a driveway are excluded for the same reason the coverage
+    audit excludes them: a sidewalk's parent is the street it runs along,
+    not the parking aisle behind it.
+    """
+    if not tags.get("name"):
+        return False
+    if tags.get("highway") not in STREET_HIGHWAY or tags.get("area") == "yes":
+        return False
+    if tags.get("service") in ("private", "driveway", "parking_aisle"):
+        return False
+    return True
+
+
+def read_ways(pbf_path, nyc_shape: BaseGeometry) -> tuple[list[Way], list[Way]]:
+    """One pass over the extract, returning (pedestrian ways, named streets).
+
+    Both come out of a single read on purpose. The graph needs the first
+    and the naming derivation needs the second, and a second pass over the
+    472MB extract costs ~110s for data the first pass already streamed
+    past. A way can appear in both lists only if it is somehow tagged as
+    both, which OSM does not do.
 
     `.with_locations()` makes pyosmium attach each node's coordinates to
-    the way as it streams, so no separate node pass or id→coord table is
-    needed. Nodes whose location is missing (a way referencing a node
-    the extract itself cut off) are dropped; a way left with fewer than
-    two points carries no length and is skipped entirely.
+    the way as it streams, so no separate node pass or id->coord table is
+    needed. Nodes whose location is missing (a way referencing a node the
+    extract itself cut off) are dropped; a way left with fewer than two
+    points carries no length and is skipped entirely.
 
     A way is KEPT WHOLE if ANY of its points is inside NYC, rather than
     having its outside-NYC points removed. Bridges are the reason: the
@@ -136,17 +170,22 @@ def read_pedestrian_ways(pbf_path, nyc_shape: BaseGeometry) -> list[Way]:
     nowhere near the city without any geometry work, and the per-point
     loop stops at the first point found inside.
     """
+    pedestrian_ways: list[Way] = []
+    street_ways: list[Way] = []
     prepared = prep(nyc_shape)
-    min_lon, min_lat, max_lon, max_lat = nyc_shape.bounds
+    bounds = nyc_shape.bounds
 
-    ways: list[Way] = []
     processor = (osmium.FileProcessor(pbf_path,
                                       osmium.osm.NODE | osmium.osm.WAY)
                  .with_locations()
                  .with_filter(EntityFilter(osmium.osm.WAY)))
     for way in processor:
         tags = dict(way.tags)
-        if not tags or not is_pedestrian(tags):
+        if not tags:
+            continue
+        walkable = is_pedestrian(tags)
+        street = is_named_street(tags)
+        if not (walkable or street):
             continue
         node_ids, lons, lats = [], [], []
         for node in way.nodes:
@@ -157,12 +196,15 @@ def read_pedestrian_ways(pbf_path, nyc_shape: BaseGeometry) -> list[Way]:
             lats.append(node.lat)
         if len(node_ids) < 2:
             continue
-        if not _touches_nyc(prepared, lons, lats,
-                            min_lon, min_lat, max_lon, max_lat):
+        if not _touches_nyc(prepared, lons, lats, *bounds):
             continue
-        ways.append(Way(osm_id=way.id, name=_normalize_name(tags.get("name")),
-                        node_ids=node_ids, lons=lons, lats=lats))
-    return ways
+        parsed = Way(osm_id=way.id, name=_normalize_name(tags.get("name")),
+                     node_ids=node_ids, lons=lons, lats=lats)
+        if walkable:
+            pedestrian_ways.append(parsed)
+        if street:
+            street_ways.append(parsed)
+    return pedestrian_ways, street_ways
 
 
 def _touches_nyc(prepared, lons, lats,
@@ -268,18 +310,18 @@ def _normalize_name(raw) -> str:
     return ""
 
 
-def build(pbf_path, nyc_shape: BaseGeometry) -> tuple[dict, list[dict]]:
-    """Read the extract and return (nodes, edges) for the export.
+def build_graph(ways: list[Way]) -> tuple[dict, list[dict]]:
+    """Turn pedestrian ways into (nodes, edges) for the export.
 
-    `nyc_shape` is required, with no default, because the extract is
-    statewide -- see the module docstring. Build it from the real borough
-    polygons, which is two existing calls:
+    Takes ways rather than a path so the caller can read pedestrian ways
+    and named streets in ONE pass (`read_ways`) and hand the naming step
+    the second list. Get the ways with:
 
         from pipeline.fetch.boundaries import fetch_borough_boundaries
         from pipeline.graph.boundary import nyc_boundary
-        nyc_shape = nyc_boundary(fetch_borough_boundaries())
+        ped, streets = read_ways(path, nyc_boundary(fetch_borough_boundaries()))
 
-    Deliberately NOT the water-excluded boundary dataset: a bridge's
+    That boundary is deliberately the water-INCLUDED dataset: a bridge's
     midspan sits over water, and excluding it once severed every
     inter-borough crossing (pipeline/fetch/boundaries.py's docstring
     carries that history).
@@ -289,11 +331,10 @@ def build(pbf_path, nyc_shape: BaseGeometry) -> tuple[dict, list[dict]]:
            edge's own `coords` and are not routable, exactly as the
            centerline model treated them.
     edges: one dict per edge, in the export's own vocabulary. Tree fields
-           are absent -- scoring is a later step and owns them.
+           are absent -- scoring is a later step and owns them. `name` is
+           the way's OWN name where OSM gave it one and "" otherwise;
+           pipeline/graph/naming.py fills the blanks in afterwards.
     """
-    ways = read_pedestrian_ways(pbf_path, nyc_shape)
-    logger.info(f"  [pedestrian] {len(ways):,} pedestrian ways in NYC")
-
     junctions = find_junctions(ways)
     logger.info(f"  [pedestrian] {len(junctions):,} junction nodes")
 

@@ -34,7 +34,7 @@ import time
 
 from pipeline import config, export
 from pipeline.fetch.boundaries import fetch_borough_boundaries
-from pipeline.graph import pedestrian
+from pipeline.graph import naming, pedestrian
 from pipeline.graph.boundary import nyc_boundary
 
 logger = logging.getLogger(__name__)
@@ -67,12 +67,24 @@ def main() -> int:
     logger.info("[build] boundary")
     nyc_shape = nyc_boundary(fetch_borough_boundaries())
 
+    # One pass yields both: pedestrian ways for the graph, named streets
+    # for the naming step. Reading twice would cost another ~110s.
     logger.info(f"[build] reading {config.OSM_EXTRACT_PATH.name}")
-    nodes, edges = pedestrian.build(config.OSM_EXTRACT_PATH, nyc_shape)
+    ped_ways, street_ways = pedestrian.read_ways(
+        config.OSM_EXTRACT_PATH, nyc_shape)
+    logger.info(f"[build] {len(ped_ways):,} pedestrian ways, "
+                f"{len(street_ways):,} named streets")
+
+    nodes, edges = pedestrian.build_graph(ped_ways)
     if not edges:
         logger.error("[build] no edges built -- refusing to write an empty "
                      "export over a good one")
         return 1
+
+    # Labels only -- this adds no way, removes none, and connects nothing.
+    # See pipeline/graph/naming.py on why that is not an OSM override.
+    logger.info("[build] naming")
+    naming.assign_parent_names(edges, street_ways)
 
     logger.info(f"[build] exporting to {config.TILES_DIR}")
     out_path = export.write_citywide(nodes, edges)
