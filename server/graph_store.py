@@ -146,12 +146,11 @@ COVERAGE_SIMPLIFY_DEG = 0.0002
 COVERAGE_CACHE_FILENAME = ".coverage_cache.json"
 
 # A version tag for load()'s MERGE SEMANTICS, folded into the coverage
-# fingerprint (see _tiles_fingerprint). The drawn coverage depends on which
-# components exist, and bead-identity splitting (FIXES item 13) changes
-# connectivity without changing any tile's bytes -- so a cached coverage
-# from before this fix must be invalidated even when every tile file is
-# unchanged. Bump when load()'s edge topology can change for identical tiles.
-LOAD_PARAMS = "load-v21|bead-split"
+# fingerprint (see _tiles_fingerprint). load() can change which components
+# exist without any tile's bytes changing, so a cached coverage from before
+# such a change must be invalidated even when every tile file is unchanged.
+# Bump when load()'s edge topology can change for identical tiles.
+LOAD_PARAMS = "load-v22|no-overrides"
 
 # The hide rule (FIXES item 1, the scraps arc's final step, 2026-08-17):
 # a disconnected component whose total edge length is under this bar is
@@ -171,20 +170,6 @@ LOAD_PARAMS = "load-v21|bead-split"
 # genuinely connects becomes visible again automatically.
 HIDDEN_COMPONENT_MAX_LEN_M = 5000.0
 
-# Curated exceptions: isolated-but-real public places that stay clickable
-# despite being under the bar, because routing WITHIN them is genuinely
-# useful. Coordinate-keyed, not node-keyed -- node ids renumber every
-# refetch, coordinates don't move. Each point sits ON the component it
-# vouches for; load() keeps that point's whole component visible. Both
-# entries come from the user's 21-case review of every >=2km fragment
-# (2026-08-16/17, data/audits/2026-08-16/hide_rule_over2km_review.md):
-# 19 of 21 were confirmed hide (golf meshes, airport enclosures, a gated
-# cemetery, ghost slivers), these two were confirmed real.
-KEEP_VISIBLE_ISOLATED_PLACES: list[tuple[float, float, str]] = [
-    (40.690830, -74.045350, "Liberty Island"),
-    (40.912055, -73.907690, "College of Mount Saint Vincent"),
-]
-
 
 def _tiles_fingerprint(tile_paths: list) -> str:
     """A cheap fingerprint of every loaded tile's identity (name, size,
@@ -192,14 +177,13 @@ def _tiles_fingerprint(tile_paths: list) -> str:
     which is exactly when the coverage cache (above) needs recomputing
     rather than reused.
 
-    The hide rule's parameters are part of the fingerprint too: the
-    drawn coverage now depends on WHICH components are visible, so a
-    threshold change or a keep-list edit must invalidate the cache the
-    same way a re-exported tile does — without this, editing the rule
-    silently serves rings computed under the old rule (the exact trap
-    FIXES item 1 warned about)."""
+    The hide rule's threshold is part of the fingerprint too: the drawn
+    coverage depends on WHICH components are visible, so a threshold
+    change must invalidate the cache the same way a re-exported tile
+    does — without this, editing the rule silently serves rings computed
+    under the old rule (the exact trap FIXES item 1 warned about)."""
     parts = sorted(f"{p.name}:{p.stat().st_size}:{p.stat().st_mtime_ns}" for p in tile_paths)
-    rule = f"hide<{HIDDEN_COMPONENT_MAX_LEN_M}|keep:{sorted(KEEP_VISIBLE_ISOLATED_PLACES)}"
+    rule = f"hide<{HIDDEN_COMPONENT_MAX_LEN_M}"
     # The offshore frame (server/coverage_frame.py) is cached alongside
     # the rings, so its recipe parameters invalidate the cache the same
     # way the hide rule's do.
@@ -231,432 +215,15 @@ def _save_cached_coverage(cache_path, fingerprint: str, rings, frame: dict) -> N
     cache_path.write_text(json.dumps({"fingerprint": fingerprint, "rings": rings, "frame": frame}))
 
 
-# Manually verified real-world OSM node-id pairs that are the same
-# physical corner but got recorded as two different nodes -- a genuine
-# digitization gap in the source data, not a filter/tagging issue (see
-# PLAN.md's Rockaway/Cross Bay Bridge finding, 2026-07-18). Each entry is
-# a specific, individually-reviewed correction, never a general "connect
-# anything within N meters" rule: a citywide check for other close-but-
-# disconnected node pairs turned up 419 more within 30m, and every one
-# checked was an unnamed cemetery/park-style interior path network --
-# exactly the kind of deliberately-separate fragment snap_pair() already
-# protects from being reconnected to the street grid. Bridging those the
-# same way this pair is bridged would undo that protection, so this
-# stays a short, explicit list rather than an algorithm.
-#
-# The 2026-07-19 batch below has a different root cause: not a
-# digitization gap, but pipeline/fetch/streets.py's per-tile Overpass
-# fetch truncating a long way (a greenway, esplanade, or pedestrian
-# bridge) at a different real OSM vertex in each of two adjacent tiles,
-# when that way's vertices happen to be spaced further apart than
-# FETCH_BUFFER_M's overlap -- see HISTORY.md's compose-before-simplify
-# sweep entry for the full mechanism. Tried a bigger FETCH_BUFFER_M and
-# osmnx's truncate_by_edge=True as general, root-cause fixes first;
-# tested against real data via the actual fetch/clip/simplify/export
-# pipeline, neither reliably closed the gap even on the one case fully
-# verified, so per-case bridging is the deployed fix, not a stopgap
-# ahead of a "real" one. Every entry below is confirmed via a direct
-# Overpass query on the underlying way's tags, not picked by distance
-# alone -- the same sweep flagged Roosevelt Island Bridge too, and that
-# one was checked and rejected this way: its "gap" is real distance
-# between two different real things (a foot=no roadway and a
-# separately-mapped sidewalk that doesn't touch these nodes), not a
-# path split in two.
-_CURATED_KNOWN_NODE_GAPS: list[tuple[str, str, str]] = [
-    # Cross Bay Bridge's shared foot+bike path (its Rockaway-side
-    # landing) <-> East 21st Road, Broad Channel/Rockaway -- ~12m apart
-    # in OSM's own data, confirmed via a direct Overpass query: the same
-    # real corner, recorded as two different node ids.
-    ("608478726", "42938246", "Cross Bay Bridge"),
-
-    # Pulaski Bridge's own footway <-> nearby footway=crossing/sidewalk
-    # infrastructure at its landing -- 1-12m apart, the same small-scale
-    # digitization-gap pattern as the entry above, not a filter
-    # exclusion: PLAN.md's original 2026-07-18 finding ("only connects
-    # via excluded footway=sidewalk, not easily fixable") pre-dates
-    # footway=crossing being un-excluded from WALK_FILTER and didn't
-    # have this data to check against. Confirmed via direct Overpass
-    # query: every way touching this area is genuinely walkable
-    # (footway=sidewalk/crossing with marked/signaled crossings, a
-    # highway=path, Pulaski Bridge's own footway) -- nothing tagged
-    # foot=no or vehicle-only, unlike Roosevelt Island Bridge above.
-    ("4384787164", "9785884677", "Pulaski Bridge"),
-    ("739651503", "11622964702", "Pulaski Bridge"),
-    ("9690694933", "11211160285", "Pulaski Bridge"),
-
-    # Ed Koch Queensboro Bridge Outer Roadway -- found 2026-08-15 by the
-    # 100-route external batch (5/5 flagged routes were this one gap; the
-    # path was a 3-node + 2-node island pair, forcing every midtown<->LIC
-    # walk 4km north over the RFK). Three joints, each verified by
-    # way-membership (no deck-to-ground pair; the one deck-vs-ground
-    # candidate 24.7m mid-span was correctly REJECTED) + OSRM advisory
-    # (4m/28m/9m walks) before shipping, per FIXES item 1's rule:
-    ("7792410664", "13892069996", "Queensboro Bridge Outer Roadway"),   # Manhattan entrance, 4.8m
-    ("3785648023", "2089938144", "Queensboro Bridge Outer Roadway"),    # anchorage ramp joint, 28.8m
-    ("8315072991", "11520108686", "Queensboro Bridge Outer Roadway"),   # Crescent St touchdown, 17.4m
-
-    # Tile-boundary truncation gaps -- see the comment above.
-    #
-    # The 2026-08-15 post-v19 dead-entry audit
-    # (data/audits/2026-08-15/curated_gap_verdicts.py) retired ten
-    # entries here whose gaps the v19 data now walks directly (walk within
-    # ~1.1x of straight-line at the same coords -- the cycleway widening
-    # made the greenways themselves routable), and re-derived two whose
-    # gap is still real but whose node id fell out of the v19 export
-    # (both ids verified alive in OSM; simplification absorbed them):
-    ("9191842218", "9191842217", "Manhattan Bridge Pedestrian Path"),
-    # Re-derived 2026-08-15: was 11638917883, v19 node 1.7m away.
-    ("3564754694", "8279851182", "Manhattan Bridge Pedestrian Path"),
-    # "Hudson River Park Esplanade" (12644027075 <-> 12152905164) was
-    # RETIRED 2026-08-21: dead since the v23 rebuild -- unnoticed because
-    # the ritual audit read only known_node_gaps.json until then -- and
-    # its gap self-healed meanwhile (66m walk on v26).
-    # Re-derived 2026-08-21: was 8729985306, absorbed as an edge-interior
-    # bead by the v26 connector composition (the gap walked 513m again);
-    # v26 node 3.7m from the old coords. The other end survived v26.
-    ("12583761786", "12198069447", "Bronx River Greenway"),
-    ("1024175662", "3616599502", "Mosholu-Pelham Greenway"),
-    ("387181476", "387181479", "East River Esplanade"),
-    ("7782217038", "6304586882", "East River Esplanade"),
-    ("348444405", "2350521367", "Harlem River Pathway"),
-    ("466530316", "2356694584", "Flatbush Avenue Greenway"),
-    ("401828152", "401828132", "Harlem River Drive Greenway"),
-    ("1100356499", "8151268693", "Putnam Greenway"),
-    ("2346900217", "2346900228", "Pugsley Creek Greenway"),
-    # Re-derived 2026-08-15: was 608491459, v19 node 1.3m away; the gap
-    # still forces a 7.8km detour on the Jamaica Bay Greenway without it.
-    ("12472019883", "6382627345", "Jamaica Bay Greenway"),
-    ("42830977", "608478724", "Cross Bay Bridge"),
-
-    # Marine Parkway (Gil Hodges) Bridge -- found 2026-08-16 by the
-    # post-v20 250-pair external batch (lead 2: Breezy Point <-> Coney
-    # Island read 34.6km vs OSRM 12.6km, a 21km detour around Jamaica
-    # Bay). The bridge walkway exists in our data as two overlapping
-    # greenway strands that never share a node: "Flatbush Avenue
-    # Greenway" (bridge deck, dead-ending at 40.578765,-73.888378) and
-    # "Beach Channel Drive Greenway" (Riis-side approach, dead-ending
-    # 320m up the deck at 40.580979,-73.890817) -- OSRM transitions
-    # between the same two ways at exactly our terminus point, so OSM
-    # connects them and our fetch lost the junction. Bridged at the
-    # closest cross-strand node pair, 99m apart ALONG the shared bridge
-    # approach (both nodes on the same structure -- no deck-to-ground
-    # risk). Verified: the entry cuts the probe route to 14.5km, ratio
-    # 1.15 vs OSRM, under the batch flag bar.
-    ("466530483", "466530490", "Marine Parkway Bridge"),
-
-    # Sheridan Boulevard <-> Starlight Park east path, Bronx -- from the
-    # 2026-08-18 same-name facing-dead-end sweep's OSM-genuine residue
-    # (OSRM detours too, so no processing fix applies). The boulevard's
-    # walkable foot=yes stub and the parallel foot=designated cycleway
-    # run adjacent with no fence between (user Street View check
-    # 2026-08-20). Google's walking graph U-routes this hop 133m only
-    # because, like OSM, it links at mapped junctions -- mid-block
-    # adjacency can't appear in either graph, which is exactly why the
-    # bridge is needed. The facing pair's OTHER end (9902766679, 39m from
-    # the same path) was checked the same day and REJECTED: Google Routes
-    # needs 352m including stairs at E 174th St (grade separation),
-    # matching the user's no-crossing imagery verdict -- that dead-end is
-    # real, and the pair's remaining ~1,475m detour is legitimate.
-    ("9201570293", "9588222087", "Sheridan Boulevard"),
-
-    # Bruckner Boulevard at the Bruckner Interchange, west side -- same
-    # sweep. OSM maps a walkable 68m sidewalk chunk mid-interchange
-    # (way 46673605) but tags the ~74m of boulevard between it and the
-    # walkable western section foot=no; the chunk survives export as an
-    # isolated, hidden 2-node component. Google Routes walks the gap dead
-    # straight ("Head east on Bruckner Blvd", 72m vs 73.9m chord) and
-    # user imagery shows the sidewalk continuous (2026-08-20).
-    # Reconnecting also un-hides the island. The island's EAST hop
-    # (596455450 <-> 12121657367, 36m) was checked and REJECTED: Google
-    # detours 273m around it via Cross Bronx Service Rd N, agreeing with
-    # OSM's foot=no -- that side's gap is real.
-    ("596455464", "596455452", "Bruckner Boulevard"),
-]
-
-
-def _load_known_node_gaps(path: Path) -> list[tuple[str, str, str, float | None]]:
-    """Load the bulk-verified batch from its own committed JSON file.
-    Two entry shapes coexist:
-
-    [node_a, node_b, name]            -- the 2026-08-01 four-signal batch;
-                                         all gaps <= 25m, so the bridge's
-                                         length is the chord (close enough
-                                         at that scale).
-    [node_a, node_b, name, length_m]  -- the 2026-08-13 OSRM-verified
-                                         dead-end-seam batch; gaps run up
-                                         to 100m, where a straight chord
-                                         understates the real walk, so the
-                                         length OSRM actually measured is
-                                         stored explicitly.
-
-    Kept separate from _CURATED_KNOWN_NODE_GAPS above: at ~14k entries
-    this can't stay a Python list literal the way the curated batch does,
-    and unlike the curated batch it has no individual per-entry story
-    worth a comment."""
-    out: list[tuple[str, str, str, float | None]] = []
-    for entry in json.loads(path.read_text()):
-        if len(entry) == 3:
-            node_a, node_b, name = entry
-            out.append((node_a, node_b, name, None))
-        else:
-            node_a, node_b, name, length_m = entry
-            out.append((node_a, node_b, name, float(length_m)))
-    return out
-
-
-KNOWN_NODE_GAPS: list[tuple[str, str, str, float | None]] = [
-    (node_a, node_b, name, None) for node_a, node_b, name in _CURATED_KNOWN_NODE_GAPS
-] + _load_known_node_gaps(Path(__file__).parent / "known_node_gaps.json")
-
-
-def _load_phantom_connectors(path: Path) -> list[tuple[list[float], list[float], str]]:
-    """The inverse of KNOWN_NODE_GAPS: edges the imported-path layers
-    created that provably do NOT exist as walks in the real world --
-    connectors that jump a vertical boundary (a street node snapped onto
-    a bridge-deck path 30m overhead, with no stairs anywhere near). Each
-    entry was confirmed by the 2026-08-13 reverse-OSRM audit: OSRM either
-    can't walk between the edge's endpoints at all or needs hundreds of
-    meters where our edge claims a few. See FIXES.md item 0.
-
-    Entries are [[lon_a, lat_a], [lon_b, lat_b], note] -- endpoint
-    COORDINATES, not node ids, deliberately: the phantom edges' synthetic
-    node ids renumber on any re-export, and an id-keyed blocklist would
-    go silently stale (the vacuous-fixture failure mode all over again).
-    Coordinates come from the same source data, so they survive
-    re-exports; matching is by proximity (~2m) at load time."""
-    return [(a, b, note) for a, b, note in json.loads(path.read_text())]
-
-
-PHANTOM_CONNECTORS: list[tuple[list[float], list[float], str]] = _load_phantom_connectors(
-    Path(__file__).parent / "phantom_connectors.json"
-)
-
-
-def _is_phantom_connector(lon_u: float, lat_u: float, lon_v: float, lat_v: float) -> bool:
-    """Does this edge's endpoint pair match a PHANTOM_CONNECTORS entry
-    (either orientation, ~2m tolerance per endpoint)?"""
-    for (lon_a, lat_a), (lon_b, lat_b), _note in PHANTOM_CONNECTORS:
-        # cheap prefilter before the real distance math
-        if abs(lat_u - lat_a) > 0.0001 and abs(lat_u - lat_b) > 0.0001:
-            continue
-        if (_local_distance_m(lat_u, lon_u, lat_a, lon_a) <= 2.0
-                and _local_distance_m(lat_v, lon_v, lat_b, lon_b) <= 2.0):
-            return True
-        if (_local_distance_m(lat_u, lon_u, lat_b, lon_b) <= 2.0
-                and _local_distance_m(lat_v, lon_v, lat_a, lon_a) <= 2.0):
-            return True
-    return False
-
-
 def _local_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Flat-earth distance between two nearby points -- fine at the
-    few-meters-to-tens-of-meters scale KNOWN_NODE_GAPS entries are at
-    (same approximation pipeline/config.py's buffered_bbox() already
-    uses for short local distances, just inverted)."""
+    few-meters-to-tens-of-meters scale it is used at (same approximation
+    pipeline/config.py's buffered_bbox() already uses for short local
+    distances, just inverted)."""
     mean_lat = (lat1 + lat2) / 2
     dlat_m = (lat2 - lat1) * METERS_PER_DEGREE_LAT
     dlon_m = (lon2 - lon1) * METERS_PER_DEGREE_LAT * math.cos(math.radians(mean_lat))
     return math.hypot(dlat_m, dlon_m)
-
-
-def _polyline_length_m(coords: list[list[float]]) -> float:
-    """Metric length of a [lon, lat] polyline, summing _local_distance_m
-    over each segment. Used only to split a severed-overlap edge's length
-    and tree credit PROPORTIONALLY between its pieces (FIXES item 13), so
-    the flat-earth approximation is fine -- only the ratio matters, and the
-    edge already carries its own authoritative total length_m."""
-    total = 0.0
-    for (lon1, lat1), (lon2, lat2) in zip(coords, coords[1:]):
-        total += _local_distance_m(lat1, lon1, lat2, lon2)
-    return total
-
-
-def _bead_split_points(node_ids, coords, id_to_idx) -> list[int]:
-    """Interior geometry indices where an edge passes through a node that
-    some tile exported as an endpoint (so it is in id_to_idx).
-
-    These are the exact points a neighbouring tile simplified THROUGH,
-    leaving the two tiles' overlapping spans sharing no joinable node --
-    the severed-overlap mechanism (FIXES item 13). Splitting here, then
-    letting the existing border-dedupe collapse the now-identical copies,
-    rejoins the street on node identity alone. No distance or name
-    heuristic: a bead is a real shared OSM node or it is nothing.
-
-    Empty (edge left whole) for the common case of no such interior bead,
-    for pre-v21 tiles with no node_ids at all (backward-compatible no-op),
-    for a mis-aligned chain, and when either endpoint is an unresolved
-    coordinate (None) -- splitting there would have no node to attach to,
-    so we leave the edge exactly as today rather than guess.
-    """
-    if not node_ids or len(node_ids) != len(coords) or len(coords) < 3:
-        return []
-    if node_ids[0] is None or node_ids[-1] is None:
-        return []
-    if node_ids[0] not in id_to_idx or node_ids[-1] not in id_to_idx:
-        return []
-    points = []
-    for i in range(1, len(node_ids) - 1):
-        nid = node_ids[i]
-        if nid is not None and nid in id_to_idx:
-            points.append(i)
-    return points
-
-
-def _split_edge_at_beads(u_id, v_id, key, coords, node_ids, length_m,
-                         decid, everg, cnt, canopy, id_to_idx):
-    """Split one edge at every interior bead that is a loaded node, returning
-    the pieces (FIXES item 13). One piece (the whole edge, unchanged) when
-    there is no such bead -- the common case and the pre-v21 no-op.
-
-    Each piece is a tuple:
-      (u, v, key, length_m, decid, everg, cnt, canopy, coords)
-    Piece endpoints come from node_ids (aligned to geometry), never from the
-    edge's own u/v, whose order relative to the geometry is unreliable. Length
-    and tree credit are apportioned by each piece's share of the metric arc
-    length -- so the float quantities are conserved exactly (the fracs sum to
-    1); tree_count is a reported integer, rounded per piece, so its pieces sum
-    to within len(pieces) of the original. The piece key is a direction-
-    insensitive geometry hash so the identical piece from a neighbouring tile
-    lands on the same dedupe key and the keep-better-score rule applies across
-    the border.
-    """
-    split_points = _bead_split_points(node_ids, coords, id_to_idx)
-    if not split_points:
-        return [(u_id, v_id, key, length_m, decid, everg, cnt, canopy, coords)]
-
-    boundaries = [0] + split_points + [len(coords) - 1]
-    seg_arcs = [_polyline_length_m(coords[a:b + 1])
-                for a, b in zip(boundaries, boundaries[1:])]
-    total_arc = sum(seg_arcs) or 1.0
-    pieces = []
-    for (a, b), arc in zip(zip(boundaries, boundaries[1:]), seg_arcs):
-        frac = arc / total_arc
-        seg_coords = coords[a:b + 1]
-        seg_forward = tuple(tuple(point) for point in seg_coords)
-        seg_key = min(hash(seg_forward), hash(seg_forward[::-1]))
-        pieces.append((
-            node_ids[a], node_ids[b], seg_key,
-            length_m * frac, decid * frac, everg * frac,
-            int(round(cnt * frac)), canopy * frac, seg_coords,
-        ))
-    return pieces
-
-
-# How close a synthetic node must sit to ANOTHER tile's synthetic-path line
-# to count as provably the same physical path (see
-# _cross_tile_synthetic_stitches). Deliberately tight: duplicate copies come
-# from the same citywide source dataset, so where they overlap they coincide
-# essentially exactly (6dp export rounding = ~0.11m) -- measured citywide,
-# flagged near-coincident pairs split cleanly into <=1.5m (all duplicates)
-# and >5m (genuinely separate paths, possibly fenced apart); nothing
-# ambiguous survives this cutoff, and paths 2m+ apart are never joined.
-STITCH_ON_LINE_TOLERANCE_M = 1.5
-
-# Longest bridge a stitch may add, node to nearest endpoint of the twin
-# path. Measured over every real stitchable pair citywide: median 1.1m,
-# p90 11.3m, max 24.3m -- so 25m loses nothing real, while capping how far
-# a straight bridge segment can deviate from a curvy path it shortcuts.
-STITCH_MAX_HOP_M = 25.0
-
-
-def _cross_tile_synthetic_stitches(
-    id_to_idx: dict[str, int],
-    node_lonlat: list[list[float]],
-    edge_pairs: list[tuple[int, int]],
-    coords_per_edge: list[list[list[float]]],
-) -> list[tuple[int, int]]:
-    """Node-index pairs to bridge so cross-tile duplicate copies of the same
-    synthetic path become walkable as one.
-
-    Why duplicates exist at all: every tile fetches FETCH_BUFFER_M past its
-    own edges (so neighbors overlap and real OSM border edges merge via
-    their shared, globally-unique node ids), and both neighbors build their
-    own copy of any synthetic path (interior sidewalks, park trails) in the
-    overlap band. Synthetic ids are minted per tile (namespaced
-    "r16c12:-1", see pipeline/export.py), so the copies CAN'T share ids the
-    way real border edges do -- they load as two coincident, disconnected
-    paths, and a walker standing on one "needs" a multi-hundred-meter
-    detour to reach the other, i.e. to reach where they already are.
-
-    The stitch rule: a synthetic node that lies ON a different tile's
-    synthetic-path line (within STITCH_ON_LINE_TOLERANCE_M) is provably a
-    point on the same physical path, so it gets a short bridge edge to that
-    line's nearest endpoint node (capped at STITCH_MAX_HOP_M). Same bridge
-    mechanics as KNOWN_NODE_GAPS above.
-
-    What this deliberately does NOT do:
-    - Same-tile pairs are never stitched -- within one tile the pipeline
-      already decided what connects (with barrier checks this load-time
-      pass can't replicate); its output isn't second-guessed here.
-    - Nearby-but-off-the-line pairs (>1.5m) are never stitched -- two
-      separate paths a few meters apart can have a real fence between
-      them; only exact coincidence is treated as identity.
-    - Copies aren't merged or deduplicated, just connected -- both stay
-      drawn, routing simply stops paying a phantom detour between them.
-    """
-    synth_tile = {
-        idx: node_id.split(":", 1)[0] for node_id, idx in id_to_idx.items() if ":" in node_id
-    }
-    if not synth_tile:
-        return []
-
-    candidate_edges = [
-        i for i, (u, v) in enumerate(edge_pairs) if u in synth_tile or v in synth_tile
-    ]
-    if not candidate_edges:
-        return []
-
-    lonlat = np.asarray(node_lonlat)
-    mean_lat = float(np.mean(lonlat[:, 1]))
-    lat_scale = math.cos(math.radians(mean_lat))
-    scale = np.array([lat_scale, 1.0])
-
-    # Batched LineStrings in the same cos-scaled space _build_edge_index
-    # uses, for the same reason (see its docstring).
-    points_per_edge = [len(coords_per_edge[i]) for i in candidate_edges]
-    stacked = np.concatenate(
-        [np.asarray(coords_per_edge[i], dtype=np.float64) for i in candidate_edges]
-    )
-    lines = shapely.linestrings(
-        stacked * scale, indices=np.repeat(np.arange(len(candidate_edges)), points_per_edge)
-    )
-    tree = STRtree(lines)
-
-    synth_idxs = list(synth_tile)
-    points = shapely.points(lonlat[synth_idxs] * scale)
-    radius_deg = STITCH_ON_LINE_TOLERANCE_M / METERS_PER_DEGREE_LAT
-    hits = tree.query(points, predicate="dwithin", distance=radius_deg)
-
-    # Nearest qualifying twin line per node -- a node's own tile's lines
-    # (including its own incident edges, at distance 0) never qualify.
-    best_for_node: dict[int, tuple[float, int]] = {}
-    for point_i, line_j in zip(hits[0], hits[1]):
-        node_idx = synth_idxs[point_i]
-        u, v = edge_pairs[candidate_edges[line_j]]
-        edge_tile = synth_tile.get(u) or synth_tile.get(v)
-        if edge_tile == synth_tile[node_idx]:
-            continue
-        dist_deg = float(lines[line_j].distance(points[point_i]))
-        current = best_for_node.get(node_idx)
-        if current is None or dist_deg < current[0]:
-            best_for_node[node_idx] = (dist_deg, candidate_edges[line_j])
-
-    already_connected = {(min(u, v), max(u, v)) for u, v in edge_pairs}
-    stitches: list[tuple[int, int]] = []
-    for node_idx, (_, edge_i) in best_for_node.items():
-        u, v = edge_pairs[edge_i]
-        lon_n, lat_n = lonlat[node_idx]
-        hop_u = _local_distance_m(lat_n, lon_n, lonlat[u][1], lonlat[u][0])
-        hop_v = _local_distance_m(lat_n, lon_n, lonlat[v][1], lonlat[v][0])
-        endpoint, hop_m = (u, hop_u) if hop_u <= hop_v else (v, hop_v)
-        if endpoint == node_idx or hop_m > STITCH_MAX_HOP_M:
-            continue
-        pair = (min(node_idx, endpoint), max(node_idx, endpoint))
-        if pair in already_connected:
-            continue
-        already_connected.add(pair)
-        stitches.append(pair)
-    return stitches
 
 
 @dataclass(frozen=True)
@@ -726,17 +293,6 @@ class GraphStore:
         self._coord_offsets = np.zeros(1, dtype=np.int64)
 
         self._graph: igraph.Graph | None = None
-        # How many cross-tile duplicate-path stitches load() added. Kept so
-        # the merge-fixture precondition test can assert the stitch pass
-        # actually exercised (a fixture without cross-tile synthetic data
-        # would make the merge-integrity tests pass vacuously -- exactly how
-        # the id-collision bug stayed invisible).
-        self._stitch_count = 0
-        # How many cross-tile edges load() split at shared beads (FIXES 13).
-        # Kept for the same precondition reason as _stitch_count: a severed-
-        # overlap fixture that produced zero splits would test the fix
-        # vacuously.
-        self._edges_split = 0
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -762,17 +318,8 @@ class GraphStore:
         coords_per_edge: list[list[list[float]]] = []  # packed into _coord_buf after the loop
         seen_edges: dict[tuple, int] = {}  # (u, v, key, side) -> position in the lists above
         seen_geometries: set[tuple] = set()  # (u, v, side, geometry hash) -- see below
-        phantom_skipped = 0
-        edges_split = 0
-        segments_emitted = 0
-
-        # Pass 1: every node from every tile, so the COMPLETE node universe
-        # is known before any edge is split. An interior bead of one tile's
-        # edge is a real, splittable node only because some OTHER tile
-        # exported it as an endpoint (FIXES item 13 -- severed overlap); we
-        # can't know that until every tile's nodes are in _id_to_idx. Nodes
-        # and edges used to be ingested interleaved in one pass; splitting
-        # needs the two passes separated. (Tiles are re-read in pass 2
+        # Pass 1: every node from every tile, so the complete node universe
+        # is known before any edge is ingested. (Tiles are re-read in pass 2
         # rather than held in memory -- one tile at a time keeps peak RAM
         # flat across a citywide load.)
         for path in tile_paths:
@@ -841,126 +388,15 @@ class GraphStore:
             names.append(name)
             coords_per_edge.append(coords)
 
-        # Pass 2: edges. Each edge is split at any interior bead that is a
-        # real loaded node (see _bead_split_points), then each piece is
-        # emitted through the dedupe above.
+        # Pass 2: edges, each emitted through the dedupe above.
         for path in tile_paths:
             tile = json.loads(gzip.open(path, "rt").read())
             for edge in tile["edges"]:
-                # Confirmed-phantom connectors (see PHANTOM_CONNECTORS)
-                # never enter the graph. Only short edges can match --
-                # every confirmed phantom is a <120m snap connector.
-                if edge["length_m"] <= 150.0 and PHANTOM_CONNECTORS:
-                    lon_u, lat_u = tile["nodes"][edge["u"]]
-                    lon_v, lat_v = tile["nodes"][edge["v"]]
-                    if _is_phantom_connector(lon_u, lat_u, lon_v, lat_v):
-                        phantom_skipped += 1
-                        continue
-
-                pieces = _split_edge_at_beads(
-                    edge["u"], edge["v"], edge["key"], edge["coords"],
-                    edge.get("node_ids"), edge["length_m"],
-                    edge["tree_deciduous"], edge["tree_evergreen"],
-                    edge["tree_count"], edge.get("tree_park_canopy", 0.0),
-                    self._id_to_idx,
-                )
-                if len(pieces) > 1:
-                    edges_split += 1
-                    segments_emitted += len(pieces)
-                for u_id, v_id, key, seg_len, decid, everg, cnt, canopy, seg_coords in pieces:
-                    _emit(u_id, v_id, key, edge["side"], seg_len, decid,
-                          everg, cnt, canopy, edge["name"], seg_coords)
-
-        self._edges_split = edges_split
-        if edges_split:
-            logger.info(f"[graph_store] split {edges_split} cross-tile edge(s) at "
-                        f"shared beads into {segments_emitted} segment(s) "
-                        f"(FIXES 13 severed-overlap reconciliation)")
-
-        if phantom_skipped:
-            logger.info(f"[graph_store] skipped {phantom_skipped} confirmed phantom connector(s)")
-
-        bridged_count = 0
-        dangling: list[tuple[str, str, str]] = []
-        for node_a, node_b, gap_name, gap_length_m in KNOWN_NODE_GAPS:
-            if node_a not in self._id_to_idx or node_b not in self._id_to_idx:
-                # Not in this dataset. Two very different situations share
-                # this branch, told apart by proportion below: a PARTIAL
-                # dataset (the pilot-only test tile misses ~14k entries --
-                # normal, quiet) vs. a citywide load where a refetch's OSM
-                # drift orphaned entries (a silently-dead fix; the v18
-                # refetch killed 11 hand-curated bridges including
-                # "Manhattan Bridge Pedestrian Path" and nothing noticed
-                # for a day -- found 2026-08-14).
-                dangling.append((node_a, node_b, gap_name))
-                continue
-            idx_a, idx_b = self._id_to_idx[node_a], self._id_to_idx[node_b]
-            lon_a, lat_a = node_lonlat[idx_a]
-            lon_b, lat_b = node_lonlat[idx_b]
-            edge_pairs.append((idx_a, idx_b))
-            # Entries with a measured length (OSRM's actual walk) use it;
-            # the rest fall back to the chord, honest at their <=25m scale.
-            if gap_length_m is not None:
-                length.append(gap_length_m)
-            else:
-                length.append(_local_distance_m(lat_a, lon_a, lat_b, lon_b))
-            deciduous.append(0.0)
-            evergreen.append(0.0)
-            counts.append(0)
-            canopy_credit.append(0.0)
-            names.append(gap_name)
-            coords_per_edge.append([[lon_a, lat_a], [lon_b, lat_b]])
-            bridged_count += 1
-        # One line per entry was fine at 28 hand-curated entries; the bulk
-        # batch (server/known_node_gaps.json) makes that ~14k lines on every
-        # startup instead -- a single count is all a normal boot needs.
-        if bridged_count:
-            logger.info(f"[graph_store] bridged {bridged_count} known node gap(s)")
-        # Mostly-bridged with a few dangling = a citywide dataset where
-        # entries went dead (refetch drift) -- say so LOUDLY, per entry.
-        # Mostly-dangling = a partial dataset (pilot/CI) -- one quiet line.
-        if dangling and bridged_count > len(dangling):
-            # logger.warning, and no literal "WARNING" in the text -- the
-            # level carries it now (FIXES item 9), and the caplog-based
-            # tests assert the LEVEL, which a filtered production handler
-            # also acts on.
-            logger.warning(f"[graph_store] {len(dangling)} known-gap entr"
-                  f"{'y' if len(dangling) == 1 else 'ies'} reference nodes "
-                  f"missing from this dataset -- each was a shipped fix that "
-                  f"is now silently inactive (OSM drift after a refetch?); "
-                  f"re-derive or retire them:")
-            for node_a, node_b, gap_name in dangling[:20]:
-                logger.warning(f"[graph_store]   dead entry: {node_a} <-> {node_b} ({gap_name!r})")
-            if len(dangling) > 20:
-                logger.warning(f"[graph_store]   ...and {len(dangling) - 20} more")
-        elif dangling:
-            logger.info(f"[graph_store] {len(dangling)} known-gap entries not in "
-                  f"this dataset (partial dataset, e.g. the pilot tile)")
-
-        # Cross-tile duplicate synthetic paths (see
-        # _cross_tile_synthetic_stitches): connect each copy's nodes onto
-        # its twin where they provably coincide, with the same bridge shape
-        # KNOWN_NODE_GAPS uses. length gets a small floor -- two coincident
-        # trim points can sit at the exact same rounded coordinate, and a
-        # true zero-length edge would divide by zero in route()'s partial-
-        # edge cost math.
-        stitches = _cross_tile_synthetic_stitches(
-            self._id_to_idx, node_lonlat, edge_pairs, coords_per_edge
-        )
-        for idx_a, idx_b in stitches:
-            lon_a, lat_a = node_lonlat[idx_a]
-            lon_b, lat_b = node_lonlat[idx_b]
-            edge_pairs.append((idx_a, idx_b))
-            length.append(_local_distance_m(lat_a, lon_a, lat_b, lon_b))
-            deciduous.append(0.0)
-            evergreen.append(0.0)
-            counts.append(0)
-            canopy_credit.append(0.0)
-            names.append("")
-            coords_per_edge.append([[lon_a, lat_a], [lon_b, lat_b]])
-        self._stitch_count = len(stitches)
-        if stitches:
-            logger.info(f"[graph_store] stitched {len(stitches)} cross-tile synthetic duplicate(s)")
+                _emit(edge["u"], edge["v"], edge["key"], edge["side"],
+                      edge["length_m"], edge["tree_deciduous"],
+                      edge["tree_evergreen"], edge["tree_count"],
+                      edge.get("tree_park_canopy", 0.0), edge["name"],
+                      edge["coords"])
 
         self._names = names
         self._node_lonlat = np.array(node_lonlat)
@@ -970,15 +406,12 @@ class GraphStore:
         lon_min, lat_min = self._node_lonlat.min(axis=0)
         lon_max, lat_max = self._node_lonlat.max(axis=0)
         self._bounds = (float(lon_min), float(lat_min), float(lon_max), float(lat_max))
-        # Floored at 0.01m, in ONE place for every edge source (tile files,
-        # KNOWN_NODE_GAPS bridges, synthetic stitches): 960 real exported
-        # edges have length_m 0.0 -- a sub-5cm connector rounds to 0.0 at
-        # export (pipeline/export.py rounds to 0.1m) -- and a snap landing
-        # on a zero-length edge turns route()'s partial-edge division into
-        # 0/0 -> NaN -> a crash at int(round(tree_count)). Found live: a
-        # Central Park test route did exactly this once the stitch pass
-        # changed which component snaps resolve onto. 1cm on a <5cm
-        # connector distorts nothing.
+        # Floored at 0.01m, in ONE place for every edge: 960 real exported
+        # edges have length_m 0.0 -- a sub-5cm edge rounds to 0.0 at export
+        # (pipeline/export.py rounds to 0.1m) -- and a snap landing on a
+        # zero-length edge turns route()'s partial-edge division into
+        # 0/0 -> NaN -> a crash at int(round(tree_count)). Found live on a
+        # Central Park test route. 1cm on a <5cm edge distorts nothing.
         self._length = np.maximum(np.array(length, dtype=np.float32), 0.01)
         self._tree_deciduous = np.array(deciduous, dtype=np.float32)
         self._tree_evergreen = np.array(evergreen, dtype=np.float32)
@@ -1146,20 +579,6 @@ class GraphStore:
         # absolute length — a toy test dataset or a sliver tile must keep
         # its main network clickable.
         hidden[int(np.argmax(comp_len))] = False
-
-        for lat, lon, name in KEEP_VISIBLE_ISOLATED_PLACES:
-            point = Point(lon * self._lat_scale, lat)
-            idx, dist_deg = self._strtree.query_nearest(point, return_distance=True)
-            dist_m = float(dist_deg[0]) * METERS_PER_DEGREE_LAT
-            if dist_m > config.MAX_SNAP_DISTANCE_M:
-                # partial dataset (tests, a single-tile load) — the place
-                # just isn't in this data; nothing to keep visible
-                continue
-            component = int(self._edge_component[int(idx[0])])
-            if hidden[component]:
-                hidden[component] = False
-                logger.info(f"[graph_store] keep-visible: {name} "
-                      f"({comp_len[component] / 1000:.1f}km, curated exception)")
 
         self._visible_edge_mask = ~hidden[self._edge_component]
         hidden_edges = int((~self._visible_edge_mask).sum())
