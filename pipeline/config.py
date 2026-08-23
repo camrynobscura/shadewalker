@@ -282,11 +282,26 @@ EVERGREEN_GENERA = {
 MAX_TREE_WEIGHT = 40.0
 
 # How many tree_weights one /route request may ask for (FIXES item 7,
-# audit §2.1). Each weight costs a synchronous ~13ms two-Dijkstra pass
-# that blocks a worker thread, so an uncapped list is a denial-of-service
-# hole once the API is public: one curl with hundreds of weights ties up
-# a worker for seconds. 8 = double the frontend's four presets -- room to
-# experiment from a script without ever being a meaningful load.
+# audit §2.1). Each weight costs a synchronous two-Dijkstra pass that
+# blocks a worker thread, so an uncapped list is a denial-of-service hole
+# once the API is public. 8 = double the frontend's four presets -- room
+# to experiment from a script without ever being a meaningful load.
+#
+# Cost re-measured on the sidewalk graph 2026-08-23 (386,576 nodes,
+# 488,538 loaded edges), median of 7 runs per pair, route() in-process
+# with no HTTP or serialization:
+#
+#     ~1km route     57ms per weight
+#     ~2km route     60ms
+#     ~10km route   140ms
+#     ~20km route   276ms
+#
+# The old comment here said ~13ms, measured on the deleted centerline
+# model. It is 4.6x that now at the median, and the cost scales with how
+# much graph Dijkstra explores -- so a long route is far worse than the
+# median suggests. At the cap of 8, a cross-borough request blocks a
+# worker for ~2.2 SECONDS. That strengthens the case for the cap rather
+# than weakening it; don't raise it without re-measuring the tail.
 MAX_TREE_WEIGHTS_PER_REQUEST = 8
 
 # When computing tree density (score ÷ length), treat very short edges as at
