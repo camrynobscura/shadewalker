@@ -18,6 +18,20 @@ from typing import NamedTuple
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"          # pathlib overloads "/" to join paths
 RAW_DIR = DATA_DIR / "raw"             # cached API downloads (never re-fetched)
+ORACLE_DIR = DATA_DIR / "oracle"       # the pinned OSM extract, source of truth
+
+# The one OSM extract everything reads -- the pipeline and every
+# tools/audit/ script. A single constant on purpose: this path used to be
+# copy-pasted into eight audit tools, so nothing stopped a new one from
+# pointing at a different (or stale) file and reporting confidently
+# against it.
+#
+# Geofabrik's NEW YORK STATE daily, pinned 2026-08-20 (495,222,845 bytes;
+# data/oracle/new-york-latest.timestamp.txt records the exact pin). It
+# covers far more than NYC -- its pedestrian ways alone span
+# -79.738,40.496 .. -71.856,45.035 -- so every read of it must be clipped
+# to the real borough boundaries. See pipeline/graph/pedestrian.py.
+OSM_EXTRACT_PATH = ORACLE_DIR / "new-york-latest.osm.pbf"
 
 # Overridable via SHADEWALKER_TILES_DIR -- e2e tests (web/playwright.config.ts)
 # boot a real server against a real filesystem path, with no equivalent of
@@ -268,11 +282,26 @@ EVERGREEN_GENERA = {
 MAX_TREE_WEIGHT = 40.0
 
 # How many tree_weights one /route request may ask for (FIXES item 7,
-# audit §2.1). Each weight costs a synchronous ~13ms two-Dijkstra pass
-# that blocks a worker thread, so an uncapped list is a denial-of-service
-# hole once the API is public: one curl with hundreds of weights ties up
-# a worker for seconds. 8 = double the frontend's four presets -- room to
-# experiment from a script without ever being a meaningful load.
+# audit §2.1). Each weight costs a synchronous two-Dijkstra pass that
+# blocks a worker thread, so an uncapped list is a denial-of-service hole
+# once the API is public. 8 = double the frontend's four presets -- room
+# to experiment from a script without ever being a meaningful load.
+#
+# Cost re-measured on the sidewalk graph 2026-08-23 (386,576 nodes,
+# 488,538 loaded edges), median of 7 runs per pair, route() in-process
+# with no HTTP or serialization:
+#
+#     ~1km route     57ms per weight
+#     ~2km route     60ms
+#     ~10km route   140ms
+#     ~20km route   276ms
+#
+# The old comment here said ~13ms, measured on the deleted centerline
+# model. It is 4.6x that now at the median, and the cost scales with how
+# much graph Dijkstra explores -- so a long route is far worse than the
+# median suggests. At the cap of 8, a cross-borough request blocks a
+# worker for ~2.2 SECONDS. That strengthens the case for the cap rather
+# than weakening it; don't raise it without re-measuring the tail.
 MAX_TREE_WEIGHTS_PER_REQUEST = 8
 
 # When computing tree density (score ÷ length), treat very short edges as at

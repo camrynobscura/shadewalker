@@ -49,7 +49,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, REPO)
 
-EXTRACT = os.path.join(REPO, "data", "oracle", "new-york-latest.osm.pbf")
+from pipeline import config  # noqa: E402
+
+# The pinned extract, from the one place that defines it -- this line
+# used to be a copy in each of these scripts.
+EXTRACT = config.OSM_EXTRACT_PATH
 BOROUGHS = os.path.join(REPO, "data", "raw", "socrata",
                         "borough_boundaries_wh2p-dxnf.geojson")
 KEEP_BOROUGHS = {"manhattan", "brooklyn", "queens", "bronx"}
