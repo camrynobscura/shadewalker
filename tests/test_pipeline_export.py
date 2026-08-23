@@ -1,11 +1,20 @@
-"""Tests for pipeline/export.py's write_tile() -- the contract between the
-pipeline and the routing server.
+"""Tests for pipeline/export.py -- the contract between the pipeline and
+the routing server.
+
+Two writers, tested separately below:
+
+  write_tile()      the retired centerline model's per-tile writer
+  write_citywide()  the sidewalk model's single-file writer
 
 The module's own docstring flags a hard-won rule: everything written must be
 lat/lon degrees (EPSG:4326), never the meter-based geometry_m -- that exact
 bug shipped once in the v1 prototype. The main test below pins it directly by
 giving write_tile() an edge with *both* geometry columns present (as real
 edges have) and asserting the export used the degrees one.
+
+Both writers share _write_atomically(), so its crash/temp-file behaviour is
+covered on each -- the shared helper is exactly the kind of thing that gets
+refactored later by someone testing only one caller.
 """
 
 import gzip
@@ -216,3 +225,181 @@ def test_write_tile_crash_mid_write_leaves_no_partial_final_file(tmp_path, monke
 
     assert not (tmp_path / "tiles" / "test_tile.json.gz").exists()
     assert list((tmp_path / "tiles").glob("*")) == []
+
+
+# ── write_citywide(): the sidewalk model's single-file export ────────────
+#
+# This is the file server/graph_store.py:301 globs and loads. Nothing else
+# stands between pipeline output and the routing server, so its shape IS
+# the contract.
+
+
+def _minimal_citywide():
+    """The smallest nodes/edges pair write_citywide() accepts, in the
+    vocabulary pipeline/graph/pedestrian.py's build() emits -- note it
+    carries NO tree fields, because scoring is a later step."""
+    nodes = {
+        "10135442390": (-74.0027881, 40.6805974),
+        "10135442393": (-74.0013902, 40.6802051),
+    }
+    edges = [{
+        "u": "10135442390",
+        "v": "10135442393",
+        "key": 0,
+        "side": "C",
+        "length_m": 84.2,
+        "name": "Court Street",
+        "coords": [[-74.002788, 40.680597], [-74.001390, 40.680205]],
+    }]
+    return nodes, edges
+
+
+def _read_back(tmp_path):
+    out = tmp_path / "tiles" / f"{export.CITYWIDE_NAME}.json.gz"
+    assert out.exists(), f"nothing written to {out}"
+    with gzip.open(out, "rt") as fh:
+        return json.load(fh)
+
+
+@pytest.fixture
+def citywide_dir(tmp_path, monkeypatch):
+    # REPO_ROOT alongside TILES_DIR for the same reason write_tile's tests
+    # patch it: the log line does relative_to(REPO_ROOT), which raises for a
+    # tmp_path outside the repo.
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(config, "TILES_DIR", tmp_path / "tiles")
+    return tmp_path
+
+
+def test_write_citywide_round_trips_nodes_and_edges(citywide_dir):
+    nodes, edges = _minimal_citywide()
+    export.write_citywide(nodes, edges)
+    payload = _read_back(citywide_dir)
+
+    assert set(payload["nodes"]) == {"10135442390", "10135442393"}
+    edge = payload["edges"][0]
+    assert edge["u"] == "10135442390"
+    assert edge["v"] == "10135442393"
+    assert edge["name"] == "Court Street"
+    assert edge["length_m"] == 84.2
+    assert edge["side"] == "C"
+    assert edge["coords"] == [[-74.002788, 40.680597], [-74.001390, 40.680205]]
+
+
+def test_write_citywide_lands_where_graph_store_globs_for_it(citywide_dir):
+    """server/graph_store.py:301 does TILES_DIR.glob("*.json.gz"). A file
+    written anywhere else, or under any other suffix, is invisible to the
+    server no matter how correct its contents are."""
+    nodes, edges = _minimal_citywide()
+    export.write_citywide(nodes, edges)
+    assert sorted(p.name for p in (citywide_dir / "tiles").glob("*.json.gz")) \
+        == ["citywide.json.gz"]
+
+
+def test_write_citywide_defaults_every_tree_field_to_zero(citywide_dir):
+    """The spine exports an UNSCORED graph. graph_store.py:399-401 reads
+    tree_deciduous/tree_evergreen/tree_count with bracket access, so a
+    missing key is a KeyError at server startup, not a soft failure."""
+    nodes, edges = _minimal_citywide()
+    export.write_citywide(nodes, edges)
+    edge = _read_back(citywide_dir)["edges"][0]
+
+    assert edge["tree_deciduous"] == 0.0
+    assert edge["tree_evergreen"] == 0.0
+    assert edge["tree_count"] == 0
+    assert edge["tree_park_canopy"] == 0.0
+
+
+def test_write_citywide_keeps_real_tree_scores_when_they_exist(citywide_dir):
+    """The defaults above must not clobber a scored graph -- this is the
+    same writer once the scoring step lands."""
+    nodes, edges = _minimal_citywide()
+    edges[0].update(tree_deciduous=3.5, tree_evergreen=1.25,
+                    tree_count=7, tree_park_canopy=0.5)
+    export.write_citywide(nodes, edges)
+    edge = _read_back(citywide_dir)["edges"][0]
+
+    assert edge["tree_deciduous"] == 3.5
+    assert edge["tree_evergreen"] == 1.25
+    assert edge["tree_count"] == 7
+    assert edge["tree_park_canopy"] == 0.5
+
+
+def test_write_citywide_rounds_node_coordinates_to_six_places(citywide_dir):
+    """Six decimal places is ~11cm -- finer than any of this data is
+    accurate to, and it keeps the file from carrying float noise for
+    386,576 nodes."""
+    nodes, edges = _minimal_citywide()
+    export.write_citywide(nodes, edges)
+    assert _read_back(citywide_dir)["nodes"]["10135442390"] == [-74.002788, 40.680597]
+
+
+def test_write_citywide_meta_counts_match_the_real_contents(citywide_dir):
+    """A meta block that disagrees with the payload sends anyone debugging
+    a load problem after the wrong thing."""
+    nodes, edges = _minimal_citywide()
+    nodes["999"] = (-73.99, 40.70)
+    export.write_citywide(nodes, edges)
+    payload = _read_back(citywide_dir)
+
+    assert payload["meta"]["node_count"] == len(payload["nodes"]) == 3
+    assert payload["meta"]["edge_count"] == len(payload["edges"]) == 1
+    assert payload["meta"]["crs"] == "EPSG:4326"
+    assert payload["meta"]["coord_order"] == "lon,lat"
+
+
+def test_write_citywide_coerces_numpy_integers(citywide_dir):
+    """build() computes `key` in Python but lengths come back from numpy,
+    and a numpy int64 is not JSON-serialisable -- json.dump raises
+    TypeError on it. write_tile hit exactly this via iterrows(); the int()
+    calls here are what keep it from recurring."""
+    np = pytest.importorskip("numpy")
+    nodes, edges = _minimal_citywide()
+    edges[0]["key"] = np.int64(3)
+    edges[0]["tree_count"] = np.int64(11)
+
+    export.write_citywide(nodes, edges)
+    edge = _read_back(citywide_dir)["edges"][0]
+    assert edge["key"] == 3
+    assert edge["tree_count"] == 11
+
+
+def test_write_citywide_leaves_no_temp_file_after_a_clean_write(citywide_dir):
+    nodes, edges = _minimal_citywide()
+    export.write_citywide(nodes, edges)
+    assert list((citywide_dir / "tiles").glob("*.tmp")) == []
+
+
+def test_write_citywide_crash_mid_write_leaves_no_partial_file(citywide_dir):
+    """The atomic-write guarantee (FIXES item 8) applied to the citywide
+    writer: a crash must leave either the complete previous version or
+    nothing -- never a truncated file that GraphStore.load()'s glob would
+    happily pick up."""
+    nodes, edges = _minimal_citywide()
+
+    def explode(*args, **kwargs):
+        raise OSError("disk full halfway through")
+
+    monkeypatch_target = export.json
+    original_dump = monkeypatch_target.dump
+    monkeypatch_target.dump = explode
+    try:
+        with pytest.raises(OSError):
+            export.write_citywide(nodes, edges)
+    finally:
+        monkeypatch_target.dump = original_dump
+
+    assert not (citywide_dir / "tiles" / "citywide.json.gz").exists()
+    assert list((citywide_dir / "tiles").glob("*")) == []
+
+
+def test_write_citywide_overwrites_a_previous_export_in_place(citywide_dir):
+    """Rebuilds are routine. The second run must replace the first, not
+    accumulate a second file the server would also load."""
+    nodes, edges = _minimal_citywide()
+    export.write_citywide(nodes, edges)
+    edges[0]["name"] = "Union Street"
+    export.write_citywide(nodes, edges)
+
+    assert len(list((citywide_dir / "tiles").glob("*.json.gz"))) == 1
+    assert _read_back(citywide_dir)["edges"][0]["name"] == "Union Street"

@@ -23,6 +23,7 @@ import gzip
 import json
 import os
 from datetime import date
+from pathlib import Path
 
 import geopandas as gpd
 
@@ -157,8 +158,14 @@ def _display_path(path):
         return path
 
 
-def write_citywide(nodes: dict, edges: list[dict]) -> None:
-    """Write the whole city's pedestrian graph as ONE file.
+def write_citywide(nodes: dict, edges: list[dict]) -> Path:
+    """Write the whole city's pedestrian graph as ONE file. Returns its path.
+
+    The path is returned rather than left for the caller to reconstruct so
+    that only this module knows the filename -- a caller that rebuilt it
+    from CITYWIDE_NAME could drift out of step with where the file
+    actually goes, and would then "verify" a file that isn't the one just
+    written.
 
     Not tiles and not per-borough: borough lines cut streets, which
     reintroduces the border-dedupe bug class the centerline model was
@@ -213,3 +220,4 @@ def write_citywide(nodes: dict, edges: list[dict]) -> None:
     logger.info(f"  [export] {_display_path(out_path)}: "
                 f"{len(node_records):,} nodes, {len(edge_records):,} edges, "
                 f"{size_kb / 1024:.1f} MB gzipped")
+    return out_path
