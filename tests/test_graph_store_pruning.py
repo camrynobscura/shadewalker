@@ -40,21 +40,16 @@ ISLAND_NODES = {
 
 # (u, v, name, length_m, tree_count) -- distinct values per edge on purpose,
 # so the alignment tests can prove each attribute stayed with its own edge.
-# Total length clears HIDDEN_COMPONENT_MAX_LEN_M, mirroring production
-# (the real main network is both the largest component AND far over the
-# hide bar) -- a sub-5km main beside a 6km island would be hidden as
-# "not largest, under the bar", which is the hide rule's own subject
-# (test_graph_store_hide_rule.py), not this file's.
+# The lengths no longer have to clear any bar: they were sized to stay over
+# the hide rule's 5km threshold, which was deleted 2026-08-23 (see
+# test_graph_store_components.py). Left as they are because nothing here
+# depends on them, and rewriting them would churn the alignment fixtures.
 MAIN_EDGES = [
     ("m1", "m2", "Alpha Street", 1700.0, 3),
     ("m2", "m3", "Beta Avenue", 2200.0, 5),
     ("m3", "m4", "Gamma Road", 1300.0, 0),
 ]
-# Length chosen to clear HIDDEN_COMPONENT_MAX_LEN_M (5km): this island
-# stands in for a REAL disconnected place (Governors Island, 49km), which
-# the hide rule must keep visible -- a sub-5km island would instead be
-# hidden from snapping/coverage by design, which is its own test
-# (test_graph_store_hide_rule.py), not this file's subject.
+# Stands in for a REAL disconnected place (Governors Island, 49km).
 ISLAND_EDGES = [("i1", "i2", "Island Path", 6000.0, 9)]
 
 # A tiny, unnamed, disconnected fragment sitting ~7m from m1 -- stands in
