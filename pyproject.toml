@@ -6,6 +6,10 @@ dependencies = [
     "fastapi>=0.139.0",
     "geopandas>=1.1.4",
     "numpy>=2.5.1",
+    # Reads the pinned .pbf in pipeline/graph/pedestrian.py -- a runtime
+    # dependency of the pipeline, not just of the tools/audit/ scripts it
+    # started out serving.
+    "osmium>=4.3.1",
     "osmnx>=2.1.0",
     "python-igraph>=1.0.0",
     "rasterio>=1.5.0",
@@ -19,7 +23,6 @@ dependencies = [
 dev = [
     "folium>=0.20.0",
     "httpx2>=2.5.0",
-    "osmium>=4.3.1",
     "pytest>=9.1.1",
 ]
 
