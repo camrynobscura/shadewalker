@@ -124,12 +124,16 @@ def clip_to_nyc(street_graph: nx.MultiDiGraph, nyc_shape: BaseGeometry) -> nx.Mu
     out of the pipeline's data, rather than leaving
     server/graph_store.py's load-time pruning to catch it after the fact
     (see PLAN.md's borough-boundary polygon plan). Does not mutate
-    street_graph -- works on a copy, matching centerline.py's own
-    non-mutating convention.
+    street_graph -- works on a copy.
 
     Pure containment check in raw lon/lat degrees (osmnx's raw node
-    attributes, `x` = lon / `y` = lat) -- no measuring involved, so no
-    need for the meters-based CRS centerline.py uses for buffering."""
+    attributes, `x` = lon / `y` = lat) -- no measuring involved, so no need
+    for the meters-based CRS (config.METRIC_CRS) that buffering requires.
+
+    ORPHANED as of 2026-08-23. Takes an nx.MultiDiGraph, which is the
+    centerline pipeline's structure; the sidewalk pipeline clips inside
+    pedestrian.read_ways() via _touches_nyc() against a prepared boundary,
+    way by way, before a graph exists at all. Nothing calls this."""
     outside_nyc = [
         node for node, data in street_graph.nodes(data=True)
         if not nyc_shape.contains(Point(data["x"], data["y"]))

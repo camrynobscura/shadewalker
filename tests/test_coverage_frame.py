@@ -13,7 +13,7 @@ from pyproj import Transformer
 from shapely.geometry import Polygon
 from shapely.ops import transform, unary_union
 
-from pipeline.graph.centerline import METRIC_CRS
+from pipeline.config import METRIC_CRS
 from server import coverage_frame, graph_store
 
 _TO_M = Transformer.from_crs("EPSG:4326", METRIC_CRS, always_xy=True).transform

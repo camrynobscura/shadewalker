@@ -17,14 +17,22 @@ TREE_COLUMNS = "globalid, dbh, tpcondition, genusspecies, location"
 
 # Bump whenever the query (bbox logic, columns, filters) changes -- baked
 # into the cache filename so old cached rows are ignored rather than
-# silently reused. v2: run_tile.py started passing a FETCH_BUFFER_M-padded
-# bbox instead of the tile's exact one. v3: the bbox is now derived from
-# the built edge table's real extent (padded by TREE_FETCH_MARGIN_M), not
-# the tile's nominal padded bbox -- simplified street graphs can carry
-# edges well past the nominal bbox, and scoring those against a
-# nominal-bbox tree fetch produced provably-wrong zero-tree copies (a
+# silently reused.
+#
+# v2 and v3 were both centerline-era, and the constants they named
+# (FETCH_BUFFER_M, TREE_FETCH_MARGIN_M) and the caller they described
+# (run_tile.py) have all since been deleted. What the versions were FOR
+# still matters, so, without the dead identifiers: v2 padded the fetch bbox
+# beyond the tile's exact bounds; v3 derived the bbox from the built edge
+# table's real extent rather than the tile's nominal one, because simplified
+# graphs carried edges well past the nominal bbox and scoring those against
+# a nominal-bbox tree fetch produced provably-wrong zero-tree copies (a
 # 1.7km Harlem River Drive Greenway edge scored 0 in one tile, 95 in its
-# neighbor; see PLAN.md's 2026-07-23 audit).
+# neighbor).
+#
+# Note this function was never really tile-bound: tile_id only names the
+# cache file, and the real parameter is the bbox. A citywide fetch is a
+# bbox and a cache name, not a rewrite.
 TREE_CACHE_VERSION = 3
 
 
