@@ -150,25 +150,7 @@ COVERAGE_CACHE_FILENAME = ".coverage_cache.json"
 # exist without any tile's bytes changing, so a cached coverage from before
 # such a change must be invalidated even when every tile file is unchanged.
 # Bump when load()'s edge topology can change for identical tiles.
-LOAD_PARAMS = "load-v22|no-overrides"
-
-# The hide rule (FIXES item 1, the scraps arc's final step, 2026-08-17):
-# a disconnected component whose total edge length is under this bar is
-# excluded from click-snapping AND the drawn coverage boundary. The 2026-
-# 08-15/16 citywide cause audit classified every such component (7,645
-# post-weld): sidewalk orphans, policy-excluded connectors, cross-tile
-# ghost slivers, imported orphans, fence-blocked and golf/island meshes --
-# none reachable from the street network, so the only thing snapping onto
-# one can produce is a route trapped inside a sub-5km fragment, or a 422
-# in seemingly-covered area. Hiding is the industry treatment (OSRM
-# deletes small components outright; we keep the data, just stop
-# advertising it). The bar is the audit's own "real network" threshold:
-# Staten Island (3,015km) and Governors Island (49km) clear it easily.
-# Two safety properties: the LARGEST component is always kept whatever
-# its length (so toy datasets and sliver tiles keep working), and the
-# rule is size-based, not a blacklist -- any fragment a future batch
-# genuinely connects becomes visible again automatically.
-HIDDEN_COMPONENT_MAX_LEN_M = 5000.0
+LOAD_PARAMS = "load-v23|no-hide-rule"
 
 
 def _tiles_fingerprint(tile_paths: list) -> str:
@@ -177,18 +159,14 @@ def _tiles_fingerprint(tile_paths: list) -> str:
     which is exactly when the coverage cache (above) needs recomputing
     rather than reused.
 
-    The hide rule's threshold is part of the fingerprint too: the drawn
-    coverage depends on WHICH components are visible, so a threshold
-    change must invalidate the cache the same way a re-exported tile
-    does — without this, editing the rule silently serves rings computed
-    under the old rule (the exact trap FIXES item 1 warned about)."""
+    Two recipe tags ride along, because the drawn coverage depends on more
+    than the tiles' bytes: the offshore frame's parameters
+    (server/coverage_frame.py) and LOAD_PARAMS, which covers any change to
+    WHICH components end up visible. Deleting the hide rule was exactly
+    that kind of change -- without a LOAD_PARAMS bump it would have served
+    rings computed under the old rule from every existing cache."""
     parts = sorted(f"{p.name}:{p.stat().st_size}:{p.stat().st_mtime_ns}" for p in tile_paths)
-    rule = f"hide<{HIDDEN_COMPONENT_MAX_LEN_M}"
-    # The offshore frame (server/coverage_frame.py) is cached alongside
-    # the rings, so its recipe parameters invalidate the cache the same
-    # way the hide rule's do.
-    rule += "|" + coverage_frame.FRAME_PARAMS
-    rule += "|" + LOAD_PARAMS
+    rule = coverage_frame.FRAME_PARAMS + "|" + LOAD_PARAMS
     return hashlib.sha256(("\n".join(parts) + "\n" + rule).encode()).hexdigest()
 
 
@@ -266,16 +244,10 @@ class GraphStore:
         self._length = np.empty(0, dtype=np.float32)
         # Which connected component each edge belongs to -- see
         # snap_pair() for why this is tracked at all: every component is
-        # kept (below), including small disconnected fragments that
-        # shouldn't ever capture a click meant for the real street grid.
+        # kept and every one is snappable, so requiring a component
+        # REACHABLE FROM BOTH endpoints is the only thing standing between
+        # a click and a disconnected fragment near it.
         self._edge_component = np.empty(0, dtype=np.int32)
-        # The hide rule's outputs (see HIDDEN_COMPONENT_MAX_LEN_M): which
-        # edges are visible to snapping/coverage, and the mapping from the
-        # snap STRtree's positions (built over visible edges only) back to
-        # real edge indices. Routing arrays stay indexed by real edge ids;
-        # hidden edges simply can never be snapped onto.
-        self._visible_edge_mask = np.empty(0, dtype=bool)
-        self._strtree_edge_ids = np.empty(0, dtype=np.int64)
         self._tree_deciduous = np.empty(0, dtype=np.float32)
         self._tree_evergreen = np.empty(0, dtype=np.float32)
         self._tree_count = np.empty(0, dtype=np.int32)
@@ -460,7 +432,6 @@ class GraphStore:
                   f"(sizes, largest 5: {sizes[:5]})")
 
         self._build_edge_index()
-        self._apply_hide_rule(len(components))
 
         cached = _load_cached_coverage(coverage_cache_path, coverage_fingerprint)
         if cached is not None:
@@ -504,11 +475,11 @@ class GraphStore:
         dropped — each piece is drawn as a single ring, and a click in
         such a pocket still gets the honest out-of-coverage rejection."""
         radius_deg = config.MAX_SNAP_DISTANCE_M / METERS_PER_DEGREE_LAT
-        # Visible edges only (hide rule): the drawn boundary IS the
-        # acceptance region, and hidden components no longer accept
-        # clicks, so they must not be advertised either.
+        # Every edge, because every edge is snappable: the drawn boundary
+        # IS the acceptance region, so advertising less than we accept
+        # would tell someone their own street is outside our coverage.
         footprint = shapely.union_all(
-            shapely.buffer(self._edge_lines_scaled[self._visible_edge_mask], radius_deg, quad_segs=2)
+            shapely.buffer(self._edge_lines_scaled, radius_deg, quad_segs=2)
         )
         footprint = footprint.simplify(COVERAGE_SIMPLIFY_DEG)
         pieces = list(footprint.geoms) if footprint.geom_type == "MultiPolygon" else [footprint]
@@ -564,47 +535,17 @@ class GraphStore:
         self._edge_lines_scaled = shapely.linestrings(scaled, indices=edge_of_each_point)
         self._strtree = STRtree(self._edge_lines_scaled)
 
-    def _apply_hide_rule(self, component_count: int) -> None:
-        """Exclude small disconnected components from snapping and
-        coverage (see HIDDEN_COMPONENT_MAX_LEN_M's comment for the why),
-        then rebuild the snap STRtree over visible edges only — one
-        change at the index level makes _nearest_edge, _nearby_components,
-        snap_pair and in_coverage all hidden-aware at once, while routing
-        arrays stay indexed by real edge ids and untouched (a hidden edge
-        can never be routed over because it can never be snapped onto).
-        """
-        comp_len = np.bincount(
-            self._edge_component, weights=self._length.astype(np.float64),
-            minlength=component_count,
-        )
-        hidden = comp_len < HIDDEN_COMPONENT_MAX_LEN_M
-        # The largest component is the network itself, whatever its
-        # absolute length — a toy test dataset or a sliver tile must keep
-        # its main network clickable.
-        hidden[int(np.argmax(comp_len))] = False
-
-        self._visible_edge_mask = ~hidden[self._edge_component]
-        hidden_edges = int((~self._visible_edge_mask).sum())
-        if hidden_edges:
-            hidden_comps = int(hidden.sum())
-            hidden_km = float(comp_len[hidden].sum()) / 1000
-            logger.info(f"[graph_store] hide rule: {hidden_comps} small component(s) "
-                  f"({hidden_edges} edges, {hidden_km:.0f}km) excluded from "
-                  f"snapping + coverage")
-            self._strtree_edge_ids = np.where(self._visible_edge_mask)[0]
-            self._strtree = STRtree(self._edge_lines_scaled[self._visible_edge_mask])
-        else:
-            self._strtree_edge_ids = np.arange(len(self._edge_lines_scaled))
-
     # ── Routing ───────────────────────────────────────────────────────────────
 
     def _nearest_edge(self, lat: float, lon: float) -> tuple[int, float]:
-        """Nearest visible edge to a point, and the real-meters distance
-        to it — the snap tree holds visible edges only (hide rule), so
-        positions map back to real edge ids via _strtree_edge_ids."""
+        """Nearest edge to a point, and the real-meters distance to it.
+
+        The snap tree holds every edge, so a tree position IS an edge id.
+        It briefly held only "visible" ones under the hide rule, which
+        needed a position -> edge id mapping alongside it."""
         point = Point(lon * self._lat_scale, lat)
         idx, dist_deg = self._strtree.query_nearest(point, return_distance=True)
-        return int(self._strtree_edge_ids[int(idx[0])]), float(dist_deg[0]) * METERS_PER_DEGREE_LAT
+        return int(idx[0]), float(dist_deg[0]) * METERS_PER_DEGREE_LAT
 
     def _nearby_components(self, lat: float, lon: float) -> dict[int, tuple[int, float]]:
         """Every distinct connected component with an edge within
@@ -624,8 +565,8 @@ class GraphStore:
         radius_deg = config.MAX_SNAP_DISTANCE_M / METERS_PER_DEGREE_LAT
         candidates = self._strtree.query(point, predicate="dwithin", distance=radius_deg)
         nearest_per_component: dict[int, tuple[int, float]] = {}
-        for tree_pos in candidates:
-            edge = int(self._strtree_edge_ids[int(tree_pos)])
+        for edge in candidates:
+            edge = int(edge)
             component = int(self._edge_component[edge])
             dist_m = self._edge_lines_scaled[edge].distance(point) * METERS_PER_DEGREE_LAT
             if component not in nearest_per_component or dist_m < nearest_per_component[component][1]:
