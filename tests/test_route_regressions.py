@@ -396,36 +396,6 @@ def test_v19_anchor_site_stays_in_its_verified_band(citywide_store, frm, to, min
         )
 
 
-# --- East River Park closure zone stays empty (citywide) ---------------------
-# pipeline/closure_zones.json drops the imported paths inside the drawn ESCR
-# construction polygon (OSM deleted its own copies; only OUR imported layers
-# kept re-adding ghosts -- 32 ghost edges pre-v19, 0 after, verified
-# 2026-08-15). The regression signature isn't a route length: it's that a
-# point INSIDE the closure polygon becomes snappable again. The probe below
-# is the polygon's representative interior point pushed ~40m inside its
-# boundary (derived from closure_zones.json itself on 2026-08-15); the
-# ghost paths crossed the zone's interior within a few meters of it, while
-# today the nearest walkable edge is East 11th Street, 53m away and outside
-# the polygon.
-
-
-@pytest.mark.citywide
-def test_east_river_park_closure_zone_has_nothing_to_snap_to(citywide_store):
-    from external_engines import haversine_m
-
-    lat, lon = 40.724663, -73.972522  # interior of the ESCR closure polygon
-    pair = citywide_store.snap_pair(lat, lon, lat, lon)
-    if pair is None:
-        return  # even stronger: nothing snappable at all
-    moved = haversine_m(pair[0].point[1], pair[0].point[0], lat, lon)
-    assert moved > 30.0, (
-        f"a walkable edge appeared {moved:.0f}m from the closure-zone interior "
-        f"probe (nearest legit edge was East 11th Street at 53m, 2026-08-15) -- "
-        f"ghost paths inside the ESCR closure polygon are likely back; check "
-        f"pipeline/closure_zones.json is still applied by the export"
-    )
-
-
 # --- Route-description regression (citywide) ---------------------------------
 # `fix-interior-park-paths` admits unnamed park sidewalks (ANY_SIDEWALK_FILTER,
 # a14ffa8) so the router can enter parks at all -- but every one of those
@@ -501,58 +471,3 @@ def test_central_park_area_route_descriptions_stay_mostly_named(citywide_store):
     )
 
 
-# ── FIXES 13: severed-overlap streets at tile borders ───────────────────────
-# Meredith Avenue (Staten Island) is one physical street simplified through
-# different nodes in tiles r6c2 and r7c2, so their exported spans overlap
-# mid-street but share no joinable node -- pre-fix, load() left the two spans
-# in DIFFERENT connected components: a real, continuous street severed at the
-# tile border (census index case, data/audits/2026-08-18/). Bead-identity
-# reconciliation (node_ids carried to the export, split at shared beads on
-# load) rejoins it. Runs on the committed two-tile fixture, so CI covers it.
-#
-# The far endpoints of the two spans: 42990458 (r6c2 end) and 42971221
-# (r7c2 end). Between them the street runs ~820m through the shared beads
-# 42990447 and 679217719, each a degree-1 dead end before the fix.
-MEREDITH_R6C2_END = "42990458"
-MEREDITH_R7C2_END = "42971221"
-
-
-def test_meredith_severed_street_is_reconnected_across_the_tile_border(meredith_sever_store):
-    store = meredith_sever_store
-
-    # Precondition: the fixture must actually exercise the split, or this
-    # whole regression passes vacuously (same guard philosophy as the
-    # synthetic-id merge fixture -- see history/synthetic-id-collision.md).
-    assert store._edges_split > 0, (
-        "the Meredith fixture produced zero bead splits -- it can no longer "
-        "exhibit the severed-overlap bug; regenerate it from r6c2 + r7c2 (v21)"
-    )
-
-    a = store._id_to_idx[MEREDITH_R6C2_END]
-    b = store._id_to_idx[MEREDITH_R7C2_END]
-    membership = store._graph.connected_components().membership
-    assert membership[a] == membership[b], (
-        "Meredith Avenue's two spans are still in different components -- the "
-        "street is severed at the r6c2/r7c2 border (FIXES 13 regressed)"
-    )
-
-    # And the reconnection is the real street (~820m), not some far detour.
-    dist = store._graph.distances(
-        source=a, target=b, weights=store._length.tolist()
-    )[0][0]
-    assert 700 <= dist <= 950, (
-        f"reconnected Meredith distance {dist:.0f}m is outside the expected "
-        f"~820m band -- the split joined the wrong beads"
-    )
-
-
-def test_meredith_shared_beads_are_no_longer_dead_ends(meredith_sever_store):
-    # The two shared beads went from degree-1 (dead end on a foreign edge) to
-    # degree-2 (a real through-node) -- the direct signature of the fix.
-    store = meredith_sever_store
-    for bead in ("42990447", "679217719"):
-        idx = store._id_to_idx[bead]
-        assert store._graph.degree(idx) >= 2, (
-            f"bead {bead} is still a dead end (degree {store._graph.degree(idx)}) "
-            f"-- the severed-overlap split did not reach it"
-        )

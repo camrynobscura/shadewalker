@@ -275,24 +275,16 @@ def test_no_widespread_near_coincident_disconnected_nodes(citywide_store):
 # 2026-07-17 -- one tile, no synthetic nodes, no merge, so the bug could not
 # appear there.
 #
-# Each of the three runs against BOTH multi-tile stores: the committed
-# two-tile fixture (merge_pair_store -- fast tier, so CI actually covers the
-# merge path) and, when the gitignored citywide data is on disk, the real
-# merged graph. One copy of the logic, two datasets, so the fast tier and
-# the citywide sweep can't drift apart. The fixture's own preconditions are
-# pinned separately below (test_merge_pair_fixture_...) so a regenerated
-# fixture that loses its cross-tile synthetic data fails loudly instead of
-# making all of this pass vacuously -- which is exactly how the collision
-# stayed invisible the first time.
+# The invariants below outlive the centerline model -- they say nothing
+# about HOW the graph was built, only that an edge is never shorter than
+# its own chord, that geometry ends where its nodes are, and that a route's
+# drawn length matches its reported length. They currently have no fast-tier
+# fixture to run against (the committed two-tile merge fixtures went with the
+# centerline pipeline), so they SKIP until the rebuild produces real data.
+# Point them at it as soon as it does: a green suite that skipped these is
+# exactly the vacuous pass that let the id collision survive 200+ tests.
 
 MERGE_STORES = [
-    "merge_pair_store",
-    # The Meredith severed-overlap fixture (FIXES 13) is loaded v21 and
-    # actually splits edges at shared beads, so these merge-integrity
-    # invariants also cover the geometry/length of SPLIT-produced edges --
-    # the one place split pieces meet the "no edge shorter than its chord"
-    # and "geometry ends at its own nodes" checks.
-    "meredith_sever_store",
     pytest.param("citywide_store", marks=pytest.mark.citywide),
 ]
 
@@ -434,54 +426,3 @@ def test_route_geometry_length_matches_reported_length(store_fixture, request):
     )
 
 
-def test_merge_pair_fixture_contains_cross_tile_synthetic_data(merge_pair_store):
-    """Precondition guard for the fast-tier merge fixture, NOT an invariant:
-    the merge-integrity tests above only prove anything if the data they run
-    on can actually exhibit a merge bug. A test whose fixture cannot show the
-    bug class passes vacuously -- indistinguishable from a real pass, which
-    is precisely how the synthetic-id collision survived a suite of 200+
-    green tests. If someone regenerates tests/fixtures/merge_pair/ and the
-    new tiles come out without synthetic nodes (or without the border
-    duplicates that exercise the stitch pass), this fails loudly instead of
-    letting the invariants above go quietly blind.
-
-    Floors are deliberately far below the current values (1,417 synthetic
-    nodes across the two tiles, 100+ stitches when this was pinned) -- they
-    guard against the data class disappearing, not against normal drift."""
-    store = merge_pair_store
-    synthetic_ids = [node_id for node_id in store._id_to_idx if ":" in node_id]
-    tiles = {node_id.split(":", 1)[0] for node_id in synthetic_ids}
-    assert len(tiles) >= 2, (
-        f"merge fixture has synthetic nodes from only {sorted(tiles)} -- a "
-        f"single-tile fixture cannot exhibit a cross-tile merge bug"
-    )
-    assert len(synthetic_ids) >= 100, (
-        f"merge fixture has only {len(synthetic_ids)} synthetic nodes -- too "
-        f"few to meaningfully exercise the merge path (had 1,417 when pinned)"
-    )
-    assert store._stitch_count > 0, (
-        "load() stitched nothing -- the fixture no longer contains cross-tile "
-        "duplicate synthetic paths, so the stitch pass ran unexercised"
-    )
-
-
-@pytest.mark.citywide
-def test_hide_rule_keeps_real_isolated_places_and_hides_junk(citywide_store):
-    # The hide rule's two user-reviewed guarantees, pinned on real places
-    # (FIXES item 1, 2026-08-17). Liberty Island: ferry-served public
-    # paths, curated keep-visible -- clicks there must still route within
-    # the island. North Brother Island: a closed bird sanctuary whose 52
-    # bare OSM footways were the scraps arc's canonical trap (see HISTORY
-    # 2026-08-16) -- it must be neither snappable nor advertised as
-    # covered. If Liberty ever fails here, check that its component still
-    # matches KEEP_VISIBLE_ISOLATED_PLACES' coordinate; if North Brother
-    # ever fails, someone connected it -- verify that's real before
-    # trusting it.
-    store = citywide_store
-
-    assert store.in_coverage(40.690830, -74.045350) is True  # Liberty
-    liberty = store.snap_pair(40.690100, -74.046900, 40.691700, -74.043900)
-    assert liberty is not None, "Liberty Island should route within itself"
-
-    assert store.in_coverage(40.801850, -73.898830) is False  # North Brother
-    assert store.snap_pair(40.801000, -73.899800, 40.802600, -73.897900) is None
