@@ -301,8 +301,11 @@ class GraphStore:
         tile_paths = sorted(config.TILES_DIR.glob("*.json.gz"))
         if not tile_paths:
             raise FileNotFoundError(
-                f"No tiles in {config.TILES_DIR} — run the pipeline first "
-                "(uv run python -m pipeline.run_tile pilot)"
+                f"No graph data in {config.TILES_DIR}. The centerline "
+                "pipeline that produced it was deleted 2026-08-22 and its "
+                "sidewalk replacement is not built yet — point "
+                "SHADEWALKER_TILES_DIR at a directory holding "
+                "tests/fixtures/pilot.json.gz to run against the fixture."
             )
         coverage_fingerprint = _tiles_fingerprint(tile_paths)
         coverage_cache_path = config.TILES_DIR / COVERAGE_CACHE_FILENAME
