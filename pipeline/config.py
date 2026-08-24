@@ -249,6 +249,32 @@ def get_tile_ids_for_bbox(bbox: Bbox) -> list[str]:
 # capped so one giant (or mistyped) trunk can't dominate a block's score.
 DBH_CAP_IN = 30
 
+# How far a sidewalk or a tree may sit from NYC's nearest kerb line and still
+# be attributed to that kerb's block face. Measured 2026-08-23/24 rather than
+# chosen:
+#   sidewalks sit a median 2.20m from their kerb (p90 3.35m), and 5m captures
+#   98.35% of sidewalk length -- 97.89% with a resolvable block face. 2m
+#   captures only 40.59% and 3m only 81.24%, so 5m is the knee, not a
+#   round number.
+# TREES ARE NOT COVERED AS WELL AS SIDEWALKS AND THIS CAP MAY NOT SUIT BOTH.
+# Over a random 60,000 of all 898,643 trees, the share attaching to a
+# resolvable face is 73.4% at 2m, 80.8% at 5m, 84.2% at 8m, 86.7% at 12m,
+# 90.0% at 20m and 94.4% at 40m. Distance is median 1.09m and p75 1.78m but
+# p90 9.05m and p99 34.04m -- two populations, not one tail.
+#   So at 5m about 19% of trees (~172,000) attach to nothing. An earlier note
+#   here claimed "median 0.89m, so 5m is generous for trees"; that was
+#   measured only on trees carrying a planting-space link, which are street
+#   trees BY CONSTRUCTION, and it does not generalise. Corrected 2026-08-24.
+# Whether those far trees are legitimately not street trees (park interiors,
+# private setbacks, kerbs whose blockf_id never conflated) or street trees we
+# are failing to attach is UNMEASURED. Do not raise this cap to chase the
+# number until that is known.
+# This replaces the centerline era's TREE_BUFFER_M, which measured from a
+# street's MIDDLE and so varied with road width (5.93m on a side street to
+# 13.38m on a boulevard). A kerb is scale-invariant: +0.0036 m/ft of street
+# width, versus the centerline's +0.0618.
+BLOCK_FACE_MAX_M = 5.0
+
 # tpcondition → score. Healthier canopy = denser shade. Dead is excluded
 # entirely in scoring; Unknown (~0.5% of living trees) gets the midpoint.
 CONDITION_SCORES = {
