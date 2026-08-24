@@ -250,7 +250,12 @@ class GraphStore:
         self._edge_component = np.empty(0, dtype=np.int32)
         self._tree_deciduous = np.empty(0, dtype=np.float32)
         self._tree_evergreen = np.empty(0, dtype=np.float32)
-        self._tree_count = np.empty(0, dtype=np.int32)
+        # float32, not int32: block-face scoring gives an edge a fractional
+        # SHARE of its block's trees (a face with 3 trees over 10 edges =
+        # 0.3 each), and an integer dtype would round every one of those to
+        # zero on load. route() still reports a whole number -- it sums the
+        # shares along the path and rounds once at the end.
+        self._tree_count = np.empty(0, dtype=np.float32)
         # The slice of _tree_deciduous that is park-canopy credit rather
         # than countable trees (FIXES item 4) -- already inside
         # _tree_deciduous, so it's a share of the score, never an addition.
@@ -389,7 +394,7 @@ class GraphStore:
         self._length = np.maximum(np.array(length, dtype=np.float32), 0.01)
         self._tree_deciduous = np.array(deciduous, dtype=np.float32)
         self._tree_evergreen = np.array(evergreen, dtype=np.float32)
-        self._tree_count = np.array(counts, dtype=np.int32)
+        self._tree_count = np.array(counts, dtype=np.float32)
         self._tree_park_canopy = np.array(canopy_credit, dtype=np.float32)
 
         # Pack the edge shapes: one flat buffer + an offsets array (see

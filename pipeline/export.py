@@ -119,7 +119,16 @@ def write_citywide(nodes: dict, edges: list[dict]) -> Path:
             "name": edge["name"],
             "tree_deciduous": edge.get("tree_deciduous", 0.0),
             "tree_evergreen": edge.get("tree_evergreen", 0.0),
-            "tree_count": int(edge.get("tree_count", 0)),
+            # FLOAT, not int. Block-face scoring gives each edge a SHARE of
+            # its block's trees in proportion to its own length, so a face
+            # with 3 trees spread over 10 edges hands each one 0.3 --
+            # int() truncated that to 0 and all three trees vanished from
+            # the export. The cast is still here for the reason it was
+            # added (a numpy int64 is not JSON-serialisable and json.dump
+            # raises TypeError on it), just widened. The user-facing count
+            # stays a whole number: graph_store.py sums the shares along a
+            # route and rounds once at the end.
+            "tree_count": float(edge.get("tree_count", 0)),
             "tree_park_canopy": round(float(edge.get("tree_park_canopy", 0.0)), 3),
             # lat/lon degrees, [lon, lat] order — see the module docstring.
             "coords": edge["coords"],

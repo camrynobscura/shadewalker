@@ -159,6 +159,27 @@ def test_write_citywide_coerces_numpy_integers(citywide_dir):
     assert edge["tree_count"] == 11
 
 
+def test_write_citywide_keeps_a_fractional_tree_count(citywide_dir):
+    """Block-face scoring hands an edge a SHARE of its block's trees, in
+    proportion to its own length, so fractional counts are the normal case
+    rather than an oddity. This field used to be cast with int(), which
+    truncated: a face with 3 trees spread over 10 edges gave each 0.3, and
+    all three trees vanished from the export.
+
+    The whole-number count the walker sees is produced later --
+    graph_store.py sums these shares along a route and rounds once at the
+    end -- so rounding here would lose the trees a second way.
+    """
+    nodes, edges = _minimal_citywide()
+    edges[0]["tree_count"] = 0.3
+    edges[0]["tree_deciduous"] = 0.084
+    edges[0]["tree_evergreen"] = 0.0
+
+    export.write_citywide(nodes, edges)
+    edge = _read_back(citywide_dir)["edges"][0]
+    assert edge["tree_count"] == pytest.approx(0.3)
+
+
 def test_write_citywide_leaves_no_temp_file_after_a_clean_write(citywide_dir):
     nodes, edges = _minimal_citywide()
     export.write_citywide(nodes, edges)
