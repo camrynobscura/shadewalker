@@ -256,24 +256,71 @@ DBH_CAP_IN = 30
 #   98.35% of sidewalk length -- 97.89% with a resolvable block face. 2m
 #   captures only 40.59% and 3m only 81.24%, so 5m is the knee, not a
 #   round number.
-# TREES ARE NOT COVERED AS WELL AS SIDEWALKS AND THIS CAP MAY NOT SUIT BOTH.
-# Over a random 60,000 of all 898,643 trees, the share attaching to a
-# resolvable face is 73.4% at 2m, 80.8% at 5m, 84.2% at 8m, 86.7% at 12m,
-# 90.0% at 20m and 94.4% at 40m. Distance is median 1.09m and p75 1.78m but
-# p90 9.05m and p99 34.04m -- two populations, not one tail.
-#   So at 5m about 19% of trees (~172,000) attach to nothing. An earlier note
-#   here claimed "median 0.89m, so 5m is generous for trees"; that was
-#   measured only on trees carrying a planting-space link, which are street
-#   trees BY CONSTRUCTION, and it does not generalise. Corrected 2026-08-24.
-# Whether those far trees are legitimately not street trees (park interiors,
-# private setbacks, kerbs whose blockf_id never conflated) or street trees we
-# are failing to attach is UNMEASURED. Do not raise this cap to chase the
-# number until that is known.
+#   trees attach at 80.9% at this cap, and DO NOT RAISE IT TO CHASE THAT.
+# Over a random 40,000 of all 898,643 trees the 19.1% that attach to nothing
+# break down as:
+#     80.8% inside an NYC park polygon
+#     17.3% no kerb within 5m and not in a park (private setbacks, housing
+#           grounds, plazas, campuses -- the "non-park street-less pavement"
+#           question that is still open elsewhere)
+#      1.1% a kerb is near but NYC's own `conflated` flag says its block-face
+#           link failed
+#      0.8% a kerb is near but its blockf_id does not resolve to a CSCL face
+# So four fifths of the "missing" trees are park trees, correctly excluded:
+# a tree inside Central Park is not shading a street sidewalk, and park
+# pavement is scored from the land-cover raster instead. Raising the cap to
+# 8m (84.2%) or 12m (86.7%) would mostly drag PARK canopy onto street block
+# faces, crediting sidewalks with shade that is not over them.
+# The genuine failure -- a street tree beside a kerb we cannot attach -- is
+# 1.9% of the unattached group and 0.36% of all trees.
+#   An earlier note here claimed "median 0.89m, so 5m is generous for trees".
+#   That was measured only on trees carrying a planting-space link, which are
+#   street trees BY CONSTRUCTION, and it did not generalise. Corrected with
+#   the breakdown above, 2026-08-24.
 # This replaces the centerline era's TREE_BUFFER_M, which measured from a
 # street's MIDDLE and so varied with road width (5.93m on a side street to
 # 13.38m on a boulevard). A kerb is scale-invariant: +0.0036 m/ft of street
 # width, versus the centerline's +0.0618.
 BLOCK_FACE_MAX_M = 5.0
+
+# How far apart to sample along a sidewalk edge when deciding which block
+# face each part of it is beside. Settled by measurement, not chosen.
+#
+# WHY SAMPLING AT ALL: one answer per whole edge fails for edges longer than
+# a block. OSM often draws a sidewalk as a single unbroken way, and beside
+# any ONE block that line is ~2m from the kerb -- but averaged over its whole
+# length most of it is far from that block, so a median-distance rule exceeds
+# BLOCK_FACE_MAX_M and the edge matches NOTHING. 28.3% of the city's sidewalk
+# length sits in pieces over 200m, so this was not a rare case. Sampling asks
+# the question separately for each step instead.
+#
+# WHY 2m: distance from the 1m answer, length-weighted, citywide --
+#     15m step   median 1.05%  p90 4.32%  p99 18.37%   >10% off: 2.22% of km
+#      5m step   median 0.88%  p90 3.13%  p99  8.48%   >10% off: 0.78%
+#      2m step   median 0.54%  p90 2.04%  p99  5.45%   >10% off: 0.36%
+# 2m lands within 0.5% of the 1m reference and is uniform across all five
+# boroughs (0.39-0.60% median). 1m costs roughly double for no useful gain.
+#
+# NOT 15m, which was inherited from the diagnostic tool: a 15m stride steps
+# clean OVER short blocks, finding 121,542 block faces against 1m's 130,815.
+# About 9,300 blocks would receive NO pavement at all and so manufacture the
+# starved-denominator pathology this sampling exists to remove. 2m finds
+# 130,159 of 130,815 (misses 0.5%).
+#
+# Cost is measured, not estimated: 14,482 point lookups/sec, so 2m over the
+# citywide sidewalk network is ~7.1M lookups, about 9.5 minutes.
+BLOCK_FACE_SAMPLE_STEP_M = 2.0
+
+# Pavement Edge `feat_code` for a ROAD EDGE -- the kerb along a street, which
+# is the only class that has sidewalks beside it. The layer also carries
+# 2270 ALLEY (7,613 lines, 581 km) and 2230 AIRPORT RUNWAY (349 lines, 15 km),
+# both of which were silently in the index until audited on 2026-08-24.
+# Leaving them in put 1,649 alley faces (5.5%) into the "block faces with no
+# sidewalk" pile -- which is why ALLEY topped that list, and it was never a
+# finding: alleys do not have sidewalks. It also mis-assigned 27 km of real
+# OSM sidewalk to alley faces. Excluding them lifts measured citywide
+# coverage 65.1% -> 66.9% and Brooklyn 80.9% -> 83.8%.
+ROAD_EDGE_FEAT_CODE = "2260"
 
 # tpcondition → score. Healthier canopy = denser shade. Dead is excluded
 # entirely in scoring; Unknown (~0.5% of living trees) gets the midpoint.
