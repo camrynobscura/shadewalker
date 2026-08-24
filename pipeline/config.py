@@ -389,23 +389,25 @@ MAX_TREE_WEIGHT = 40.0
 # than weakening it; don't raise it without re-measuring the tail.
 MAX_TREE_WEIGHTS_PER_REQUEST = 8
 
-# When computing tree density (score ÷ length), treat very short edges as at
-# least this long. Tiny intersection stubs (2 m edges) inherit the cross
-# street's trees in their buffer corridor and would otherwise post absurd
-# densities (0.8+ vs a leafy block's 0.05).
-# DELIBERATELY None as of 2026-08-23. The value was 20.0, calibrated against
-# the centerline model, and the comment above is that model's reasoning. It
-# cannot carry over: it was a patch for short edges inheriting a cross
-# street's trees through a buffer CORRIDOR, and there is no corridor now.
-# The sidewalk model has the short-edge problem far worse (64.2% of edges are
-# under 20m; 92.5% of those under 5m sit at a degree-2 node, i.e. a
-# mid-pavement split rather than a junction), so re-deriving this is part of
-# designing the new scoring rather than a number to port across.
+# DENSITY_LENGTH_FLOOR_M IS DELETED, NOT UNSET. Do not reintroduce it.
 #
-# None, not a stale value, so the shade path fails closed instead of quietly
-# reporting a centerline-calibrated number. server/graph_store.py guards on
-# it. Restore a real value when sidewalk scoring lands, and delete the guard.
-DENSITY_LENGTH_FLOOR_M = None
+# It was 20.0 in the centerline model, where it stopped 2m intersection stubs
+# posting absurd densities after inheriting a cross street's trees through a
+# buffer corridor. There is no corridor now, and block-face scoring removes
+# the cause rather than the symptom: an edge takes a share of its block's
+# trees proportional to its own length, so it cannot out-read its block.
+#
+# Measured on the citywide export, 2026-08-24, length-weighted median density
+# by edge length:
+#     0-5m 0.0093 | 5-20m 0.0060 | 20-50m 0.0059 | 50-100m 0.0084 | 100m+ 0.0110
+# Short edges are LESS dense than long ones, not more. A floor exists solely
+# to suppress inflated short-edge densities, and there are none to suppress.
+#
+# Restoring it would actively harm: under block scoring a short edge
+# legitimately holds a small share, so dividing by a 20m floor deflates a
+# correct value (a 2.6m edge holding 0.11 of its face reads 0.0055 instead of
+# 0.042, 7.6x too low), and half of all sidewalk edges are under 5m.
+
 
 # The per-meter tree density at which an edge counts as FULLY shaded for
 # the /route response's shade_fraction stat: each edge contributes
@@ -437,20 +439,39 @@ DENSITY_LENGTH_FLOOR_M = None
 # Deliberately dropped with the redesign, as decided in FIXES item 2:
 # its boolean both-neighbors-shaded gate has no continuous equivalent,
 # and it was a plain physical estimate, never calibrated.
-# DELIBERATELY None as of 2026-08-23, same reasoning as
-# DENSITY_LENGTH_FLOOR_M above. The value was 0.05, and every calibration
-# described above -- the 24-route sweep, the retired 0.025 bar it doubles,
-# the citywide p90 of 0.107 -- was measured on centerline densities. A
-# sidewalk edge's density is a different quantity (one pavement's trees over
-# one pavement's length, not two pavements' trees over a shared centerline),
-# so the saturation point has to be re-measured, not inherited.
+# RE-DERIVED 2026-08-24 for the sidewalk model. Everything above this line
+# describes the CENTERLINE model's 0.05 and is kept as provenance only -- a
+# centerline edge carried two pavements' trees over one shared length, so its
+# densities run ~4x ours and none of its calibration transfers.
 #
-# The readings it produced are recorded in
-# history/centerline-scoring-constants.md as HISTORY, not as targets: Central
-# Park loop 93-99%, ordinary midtown streets ~20%. If the sidewalk model
-# lands somewhere wildly different that is a prompt to investigate, not a
-# number to reproduce.
-SHADE_SATURATION_DENSITY = None
+# Measured citywide on routable pavement only (side L/R -- about a third of
+# block faces carry no OSM sidewalk at all, and including them drags every
+# figure toward zero, calibrating the app to places nobody can walk).
+# Length-weighted, peak canopy:
+#     p10 0.0001 | p25 0.0042 | p50 0.0100 | p75 0.0170 | p90 0.0246 | p99 0.0460
+# The old 0.05 sits ABOVE our p99, which would make 0.7% of the city read as
+# fully shaded -- it is miscalibrated for this model, not merely stale.
+#
+# Chosen against real places rather than percentiles. What a walk reports:
+#                            0.02   0.03   0.05
+#     Park Slope (leafy)      76%    57%    34%
+#     Central Park perimeter  67%    50%    31%
+#     Bushwick                49%    34%    20%
+#     Midtown / Garment        9%     7%     4%
+# 0.02 keeps the widest spread between leafy and bare (67 points vs 30 at
+# 0.05) and puts the absolute numbers where they survive a plausibility
+# check: a tree-lined Brooklyn street in July reading 76% matches walking it,
+# where 34% would not, and a number people disbelieve is worse than none.
+#
+# NOTHING READS 100%. A route always includes crossings (zero by design),
+# corner stubs and gaps between trees, so the length-weighted mean never
+# approaches the cap even where individual blocks reach it. User's
+# requirement, 2026-08-24: full shade should be effectively unreachable.
+#
+# The cap costs only display detail, never routing: edge_costs() uses the
+# UNSATURATED density, so the router still separates two blocks that both
+# read 100% here. At 0.02, 17.5% of pavement pins at the cap.
+SHADE_SATURATION_DENSITY = 0.02
 
 # How far a requested point may sit from the nearest graph node and still be
 # considered "in coverage". Intersections along a real block are already

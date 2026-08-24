@@ -716,24 +716,23 @@ class GraphStore:
         shade_fraction (the same number, saturated at
         SHADE_SATURATION_DENSITY for reporting).
 
-        Returns all-zero while DENSITY_LENGTH_FLOOR_M is None. The floor was
-        calibrated on the centerline model and deleted with it on 2026-08-23;
-        rather than leave a stale number in place, the shade path fails
-        closed, making it structurally impossible to report a shade number
-        computed with a centerline constant.
+        NO LENGTH FLOOR. There was one (DENSITY_LENGTH_FLOOR_M = 20.0) and it
+        is deleted, not unset -- see its epitaph in pipeline/config.py. It
+        patched a centerline-era symptom, short edges inheriting a cross
+        street's trees through a buffer corridor. Block-face scoring removes
+        the cause: an edge holds a share of its block's trees proportional to
+        its own length, so it cannot out-read its own block. Measured on the
+        citywide export 2026-08-24, short edges are LESS dense than long ones
+        (0-5m median 0.0093 against 100m+ 0.0110), so a floor would only
+        deflate correct values -- 7.6x on a 2.6m edge, and half of all
+        sidewalk edges are under 5m.
 
-        What this actually changes, measured 2026-08-23 rather than assumed:
-        NOTHING. The citywide export's tree fields are all 0, so density was
-        0 everywhere regardless. (It did change the old committed pilot
-        fixture, which carried real centerline-scored trees -- shade_fraction
-        0.318 -> 0 there -- but that fixture was deleted the same day along
-        with every test pinned to it.) Delete this branch when sidewalk
-        scoring lands and the constant gets a real, re-derived value."""
-        if config.DENSITY_LENGTH_FLOOR_M is None:
-            return np.zeros(len(self._length), dtype=float)
+        The fail-closed guard that lived here (all-zero while the floor was
+        None) is gone with it: both constants now have measured, sidewalk-era
+        values, which is the condition its own comment set for removal."""
         canopy = config.CANOPY_BY_MONTH[month - 1]  # month is 1-12; lists index from 0
         tree_score = self._tree_evergreen + self._tree_deciduous * canopy
-        return tree_score / np.maximum(self._length, config.DENSITY_LENGTH_FLOOR_M)
+        return tree_score / self._length
 
     def edge_costs(self, tree_weight: float, month: int) -> np.ndarray:
         """The plan's trees-only cost formula, vectorized over every edge."""
@@ -777,16 +776,14 @@ class GraphStore:
         # threshold whose cliff-edge let near-identical routes read 0%
         # vs 100% -- see the constant's comment for the calibration.
         #
-        # Zero while SHADE_SATURATION_DENSITY is None: the saturation point
-        # was calibrated on centerline densities and was deleted with them
-        # (see _edge_density above for the full reasoning). Delete this
-        # branch when sidewalk scoring lands.
-        if config.SHADE_SATURATION_DENSITY is None:
-            shade_credit = np.zeros(len(self._length), dtype=float)
-        else:
-            shade_credit = np.minimum(
-                self._edge_density(month) / config.SHADE_SATURATION_DENSITY, 1.0
-            )
+        # The fail-closed branch here (all-zero while the constant was None)
+        # was removed on 2026-08-24 when the constant got a measured
+        # sidewalk-era value of 0.02. Saturation caps only what is REPORTED:
+        # edge_costs() above uses the unsaturated density, so the router
+        # still separates two blocks that both display as fully shaded.
+        shade_credit = np.minimum(
+            self._edge_density(month) / config.SHADE_SATURATION_DENSITY, 1.0
+        )
 
         start_options = [(start.node_u, start.dist_to_u_m), (start.node_v, start.dist_to_v_m)]
         end_options = [(end.node_u, end.dist_to_u_m), (end.node_v, end.dist_to_v_m)]

@@ -21,11 +21,16 @@ atomic still means the new file replaces the old one.
 
 WHAT IT DOES NOT DO
 -------------------
-No tree scoring: every tree field in the export is zero, so routes over
-this graph are the SHORTEST walk, never the shadiest. No parent-street
-names beyond the 2.5% of ways that carry one in OSM. Both are later
-steps; this is the spine, and its job is to prove the network routes at
-all.
+No park canopy: park paths have no kerb and so no block face, and the
+land-cover raster that covers them is not wired in yet, so
+`tree_park_canopy` is still zero everywhere. Crossings score zero shade by
+design (they run ACROSS a roadway) while staying fully routable.
+
+The export carries real tree scores, and as of 2026-08-24 the server acts
+on them: SHADE_SATURATION_DENSITY was re-derived for this model (0.02) and
+the per-edge length floor was deleted outright, so the fail-closed guards
+are gone and the four Shade_priority presets produce genuinely different
+routes for the first time.
 """
 
 import logging
@@ -33,9 +38,13 @@ import sys
 import time
 
 from pipeline import config, export
+from pipeline.fetch import planimetrics
 from pipeline.fetch.boundaries import fetch_borough_boundaries
+from pipeline.fetch.trees import fetch_trees
 from pipeline.graph import naming, pedestrian
+from pipeline.graph.blockface import BlockFaceIndex
 from pipeline.graph.boundary import nyc_boundary
+from pipeline.scoring import blocks
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +95,12 @@ def main() -> int:
     logger.info("[build] naming")
     naming.assign_parent_names(edges, street_ways)
 
+    # Shade. Fills tree_deciduous / tree_evergreen / tree_count on every
+    # edge, and `side` from the block face -- which is what pedestrian.py's
+    # "C" placeholder was reserved for. Like naming above, this is labels
+    # and grouping: it adds no way, removes none, and connects nothing.
+    _score_shade(edges)
+
     logger.info(f"[build] exporting to {config.TILES_DIR}")
     out_path = export.write_citywide(nodes, edges)
 
@@ -94,6 +109,34 @@ def main() -> int:
 
     logger.info(f"[build] done in {time.monotonic() - started:.0f}s")
     return 0
+
+
+def _score_shade(edges: list[dict]) -> None:
+    """Give every edge the shade of the block face it lies on.
+
+    Three inputs, each cached on first use so a rebuild pays only the
+    scoring cost: NYC's kerb lines and CSCL (pipeline/fetch/planimetrics.py,
+    ~3 min cold) and the live Forestry tree points (~8 min cold, 898,643
+    living trees citywide).
+
+    Trees attach to a block face by NEAREST KERB, and sidewalk is sampled
+    along its own geometry every config.BLOCK_FACE_SAMPLE_STEP_M so that a
+    single OSM way running past many blocks credits each block the pavement
+    actually beside it. Both rules and their measurements live in
+    pipeline/graph/blockface.py; this function only sequences them.
+
+    Mutates `edges` in place, the same way naming.assign_parent_names does.
+    """
+    logger.info("[build] planimetrics (kerb lines + CSCL)")
+    index = BlockFaceIndex(planimetrics.load("pavement_edge"),
+                           planimetrics.load("cscl"))
+
+    logger.info("[build] trees")
+    trees = fetch_trees(config.CITY_BBOX, "citywide")
+    logger.info(f"[build] {len(trees):,} living trees")
+
+    logger.info("[build] scoring")
+    blocks.score_edges(edges, trees, index)
 
 
 def _readback_matches(out_path, expected_nodes: int, expected_edges: int) -> bool:
