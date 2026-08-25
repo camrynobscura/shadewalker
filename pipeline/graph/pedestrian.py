@@ -28,9 +28,10 @@ catastrophe and is purely an artifact of measuring Buffalo alongside
 Brooklyn. This was measured on 2026-08-22, after the omission produced
 precisely that false alarm.
 
-The centerline model had this step (`boundary.clip_to_nyc`, still there);
-its only caller was `run_tile.py`, so deleting that file left the clip
-with nothing calling it.
+The centerline model had a separate step for this (`boundary.clip_to_nyc`),
+orphaned when `run_tile.py` was deleted and still uncalled. This module does
+not use it: it clips way by way inside read_ways(), against a prepared
+boundary, before a graph exists at all.
 
 WHAT AN EDGE IS
 ---------------
@@ -93,6 +94,14 @@ class Way(NamedTuple):
     node_ids: list[int]
     lons: list[float]
     lats: list[float]
+    # OSM's own `highway`, plus `/<footway>` when it has one, e.g.
+    # "footway/sidewalk", "footway/crossing", "steps". Shade scoring needs
+    # this: a crossing runs ACROSS a roadway, so it has no block face and
+    # scores no shade, and it must not be counted into a block's pavement
+    # length either or it would dilute that block's density.
+    # Defaulted so the three existing keyword-only call sites (this module,
+    # tools/audit/measure_sidewalk_kerb_match.py, tests) keep working.
+    kind: str = ""
 
 
 def is_pedestrian(tags: dict) -> bool:
@@ -198,8 +207,11 @@ def read_ways(pbf_path, nyc_shape: BaseGeometry) -> tuple[list[Way], list[Way]]:
             continue
         if not _touches_nyc(prepared, lons, lats, *bounds):
             continue
+        footway = tags.get("footway")
         parsed = Way(osm_id=way.id, name=_normalize_name(tags.get("name")),
-                     node_ids=node_ids, lons=lons, lats=lats)
+                     node_ids=node_ids, lons=lons, lats=lats,
+                     kind=(tags.get("highway") or "?")
+                          + (f"/{footway}" if footway else ""))
         if walkable:
             pedestrian_ways.append(parsed)
         if street:
@@ -338,11 +350,12 @@ def build_graph(ways: list[Way]) -> tuple[dict, list[dict]]:
     junctions = find_junctions(ways)
     logger.info(f"  [pedestrian] {len(junctions):,} junction nodes")
 
-    chains, names = [], []
+    chains, names, kinds = [], [], []
     for way in ways:
         for chain in _split_way(way, junctions):
             chains.append(chain)
             names.append(way.name)
+            kinds.append(way.kind)
 
     lengths = _chain_lengths_m(chains)
 
@@ -352,7 +365,8 @@ def build_graph(ways: list[Way]) -> tuple[dict, list[dict]]:
     # separate paths between the same junctions. `key` distinguishes them,
     # matching the export contract the server dedupes on.
     keys: dict[tuple, int] = {}
-    for (node_ids, lons, lats), name, length_m in zip(chains, names, lengths):
+    for (node_ids, lons, lats), name, kind, length_m in zip(
+            chains, names, kinds, lengths):
         u, v = str(node_ids[0]), str(node_ids[-1])
         nodes.setdefault(u, [round(lons[0], 6), round(lats[0], 6)])
         nodes.setdefault(v, [round(lons[-1], 6), round(lats[-1], 6)])
@@ -370,6 +384,10 @@ def build_graph(ways: list[Way]) -> tuple[dict, list[dict]]:
             "side": "C",
             "length_m": round(float(length_m), 1),
             "name": name,
+            # OSM's own classification, carried through so scoring can tell
+            # a sidewalk from a crossing. Not exported: the server has no
+            # use for it, and the export is a contract worth keeping small.
+            "kind": kind,
             "coords": [[round(lon, 6), round(lat, 6)]
                        for lon, lat in zip(lons, lats)],
         })

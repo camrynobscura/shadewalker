@@ -49,6 +49,27 @@ TILES_DIR = Path(os.environ.get("SHADEWALKER_TILES_DIR", DATA_DIR / "tiles"))
 
 # ── Geography ─────────────────────────────────────────────────────────────────
 
+# The projected CRS for anything that BUFFERS or MEASURES AREA/DISTANCE.
+# UTM zone 18N — meter units, accurate for NYC.
+#
+# Geometry is stored and exported in EPSG:4326 (lon/lat degrees) because that
+# is what the frontend draws with, but a degree is not a meter and buffering
+# in degrees is this project's #1 bug class. Reproject here first, measure,
+# then come back. Route LENGTHS don't need this: they come from pyproj.Geod,
+# which measures on the WGS84 ellipsoid directly.
+#
+# Lived in pipeline/graph/centerline.py until 2026-08-23 and moved here when
+# that module was deleted -- it is a fact about New York's location, not
+# about how streets are modelled, so it never belonged to the centerline
+# code. pipeline/graph/pedestrian.py's own docstring was already telling
+# readers to "see config.METRIC_CRS" before this constant existed here.
+METRIC_CRS = "EPSG:32618"
+
+# Distinct from CANOPY_RASTER_CRS below (EPSG:2263, State Plane, US survey
+# feet), which is the land-cover raster's own CRS and is NOT interchangeable
+# with this one.
+
+
 class Bbox(NamedTuple):
     """A lat/lon bounding box. NamedTuple = a tuple with named, typed fields
     (JS analogy: a frozen object literal; TS analogy: a readonly interface)."""
@@ -216,26 +237,90 @@ def get_tile_ids_for_bbox(bbox: Bbox) -> list[str]:
 
 # ── Tree scoring ──────────────────────────────────────────────────────────────
 
-# How far from a street's centerline a tree still counts toward that street.
-# 14, up from the original 12: Central Park South's real tree row sits
-# 12.7-14.0m out (park-side, behind the fence line -- ~2m further than a
-# curbside tree pit), and the hard cutoff at 12m was excluding roughly half
-# of it, making the whole street read as barren. A 12-16m sweep showed 14m
-# captures everything 15m or 16m does on the measured blocks, so this is
-# the smallest bump that fixes the set-back-tree case (see PLAN.md's
-# 2026-07-22/23 scoring investigation).
-TREE_BUFFER_M = 14
-
-# Padding for the tree fetch around the *built edge table's* real extent
-# (run_tile.py derives the tree bbox from the edges, not the tile's nominal
-# padded bbox) -- must exceed TREE_BUFFER_M so every edge's full corridor is
-# covered by fetched tree data. The margin past TREE_BUFFER_M is slop for
-# the bbox math's ~meter-level approximations, nothing more.
-TREE_FETCH_MARGIN_M = 30
+# TREE_BUFFER_M and TREE_FETCH_MARGIN_M were deleted on 2026-08-23 with the
+# centerline scoring code. Both measured distance from a street CENTERLINE --
+# the corridor half-width that decided which edges a tree credited, and the
+# fetch padding defined only as "must exceed TREE_BUFFER_M". Under
+# per-sidewalk edges a tree belongs to the nearest pavement, so the question
+# a corridor width answered no longer exists. Their values and the
+# measurements behind them: history/centerline-scoring-constants.md.
 
 # A tree's size factor is min(dbh, cap)/cap — trunk diameter as a canopy proxy,
 # capped so one giant (or mistyped) trunk can't dominate a block's score.
 DBH_CAP_IN = 30
+
+# How far a sidewalk or a tree may sit from NYC's nearest kerb line and still
+# be attributed to that kerb's block face. Measured 2026-08-23/24 rather than
+# chosen:
+#   sidewalks sit a median 2.20m from their kerb (p90 3.35m), and 5m captures
+#   98.35% of sidewalk length -- 97.89% with a resolvable block face. 2m
+#   captures only 40.59% and 3m only 81.24%, so 5m is the knee, not a
+#   round number.
+#   trees attach at 80.9% at this cap, and DO NOT RAISE IT TO CHASE THAT.
+# Over a random 40,000 of all 898,643 trees the 19.1% that attach to nothing
+# break down as:
+#     80.8% inside an NYC park polygon
+#     17.3% no kerb within 5m and not in a park (private setbacks, housing
+#           grounds, plazas, campuses -- the "non-park street-less pavement"
+#           question that is still open elsewhere)
+#      1.1% a kerb is near but NYC's own `conflated` flag says its block-face
+#           link failed
+#      0.8% a kerb is near but its blockf_id does not resolve to a CSCL face
+# So four fifths of the "missing" trees are park trees, correctly excluded:
+# a tree inside Central Park is not shading a street sidewalk, and park
+# pavement is scored from the land-cover raster instead. Raising the cap to
+# 8m (84.2%) or 12m (86.7%) would mostly drag PARK canopy onto street block
+# faces, crediting sidewalks with shade that is not over them.
+# The genuine failure -- a street tree beside a kerb we cannot attach -- is
+# 1.9% of the unattached group and 0.36% of all trees.
+#   An earlier note here claimed "median 0.89m, so 5m is generous for trees".
+#   That was measured only on trees carrying a planting-space link, which are
+#   street trees BY CONSTRUCTION, and it did not generalise. Corrected with
+#   the breakdown above, 2026-08-24.
+# This replaces the centerline era's TREE_BUFFER_M, which measured from a
+# street's MIDDLE and so varied with road width (5.93m on a side street to
+# 13.38m on a boulevard). A kerb is scale-invariant: +0.0036 m/ft of street
+# width, versus the centerline's +0.0618.
+BLOCK_FACE_MAX_M = 5.0
+
+# How far apart to sample along a sidewalk edge when deciding which block
+# face each part of it is beside. Settled by measurement, not chosen.
+#
+# WHY SAMPLING AT ALL: one answer per whole edge fails for edges longer than
+# a block. OSM often draws a sidewalk as a single unbroken way, and beside
+# any ONE block that line is ~2m from the kerb -- but averaged over its whole
+# length most of it is far from that block, so a median-distance rule exceeds
+# BLOCK_FACE_MAX_M and the edge matches NOTHING. 28.3% of the city's sidewalk
+# length sits in pieces over 200m, so this was not a rare case. Sampling asks
+# the question separately for each step instead.
+#
+# WHY 2m: distance from the 1m answer, length-weighted, citywide --
+#     15m step   median 1.05%  p90 4.32%  p99 18.37%   >10% off: 2.22% of km
+#      5m step   median 0.88%  p90 3.13%  p99  8.48%   >10% off: 0.78%
+#      2m step   median 0.54%  p90 2.04%  p99  5.45%   >10% off: 0.36%
+# 2m lands within 0.5% of the 1m reference and is uniform across all five
+# boroughs (0.39-0.60% median). 1m costs roughly double for no useful gain.
+#
+# NOT 15m, which was inherited from the diagnostic tool: a 15m stride steps
+# clean OVER short blocks, finding 121,542 block faces against 1m's 130,815.
+# About 9,300 blocks would receive NO pavement at all and so manufacture the
+# starved-denominator pathology this sampling exists to remove. 2m finds
+# 130,159 of 130,815 (misses 0.5%).
+#
+# Cost is measured, not estimated: 14,482 point lookups/sec, so 2m over the
+# citywide sidewalk network is ~7.1M lookups, about 9.5 minutes.
+BLOCK_FACE_SAMPLE_STEP_M = 2.0
+
+# Pavement Edge `feat_code` for a ROAD EDGE -- the kerb along a street, which
+# is the only class that has sidewalks beside it. The layer also carries
+# 2270 ALLEY (7,613 lines, 581 km) and 2230 AIRPORT RUNWAY (349 lines, 15 km),
+# both of which were silently in the index until audited on 2026-08-24.
+# Leaving them in put 1,649 alley faces (5.5%) into the "block faces with no
+# sidewalk" pile -- which is why ALLEY topped that list, and it was never a
+# finding: alleys do not have sidewalks. It also mis-assigned 27 km of real
+# OSM sidewalk to alley faces. Excluding them lifts measured citywide
+# coverage 65.1% -> 66.9% and Brooklyn 80.9% -> 83.8%.
+ROAD_EDGE_FEAT_CODE = "2260"
 
 # tpcondition → score. Healthier canopy = denser shade. Dead is excluded
 # entirely in scoring; Unknown (~0.5% of living trees) gets the midpoint.
@@ -304,11 +389,25 @@ MAX_TREE_WEIGHT = 40.0
 # than weakening it; don't raise it without re-measuring the tail.
 MAX_TREE_WEIGHTS_PER_REQUEST = 8
 
-# When computing tree density (score ÷ length), treat very short edges as at
-# least this long. Tiny intersection stubs (2 m edges) inherit the cross
-# street's trees in their buffer corridor and would otherwise post absurd
-# densities (0.8+ vs a leafy block's 0.05).
-DENSITY_LENGTH_FLOOR_M = 20.0
+# DENSITY_LENGTH_FLOOR_M IS DELETED, NOT UNSET. Do not reintroduce it.
+#
+# It was 20.0 in the centerline model, where it stopped 2m intersection stubs
+# posting absurd densities after inheriting a cross street's trees through a
+# buffer corridor. There is no corridor now, and block-face scoring removes
+# the cause rather than the symptom: an edge takes a share of its block's
+# trees proportional to its own length, so it cannot out-read its block.
+#
+# Measured on the citywide export, 2026-08-24, length-weighted median density
+# by edge length:
+#     0-5m 0.0093 | 5-20m 0.0060 | 20-50m 0.0059 | 50-100m 0.0084 | 100m+ 0.0110
+# Short edges are LESS dense than long ones, not more. A floor exists solely
+# to suppress inflated short-edge densities, and there are none to suppress.
+#
+# Restoring it would actively harm: under block scoring a short edge
+# legitimately holds a small share, so dividing by a 20m floor deflates a
+# correct value (a 2.6m edge holding 0.11 of its face reads 0.0055 instead of
+# 0.042, 7.6x too low), and half of all sidewalk edges are under 5m.
+
 
 # The per-meter tree density at which an edge counts as FULLY shaded for
 # the /route response's shade_fraction stat: each edge contributes
@@ -340,7 +439,39 @@ DENSITY_LENGTH_FLOOR_M = 20.0
 # Deliberately dropped with the redesign, as decided in FIXES item 2:
 # its boolean both-neighbors-shaded gate has no continuous equivalent,
 # and it was a plain physical estimate, never calibrated.
-SHADE_SATURATION_DENSITY = 0.05
+# RE-DERIVED 2026-08-24 for the sidewalk model. Everything above this line
+# describes the CENTERLINE model's 0.05 and is kept as provenance only -- a
+# centerline edge carried two pavements' trees over one shared length, so its
+# densities run ~4x ours and none of its calibration transfers.
+#
+# Measured citywide on routable pavement only (side L/R -- about a third of
+# block faces carry no OSM sidewalk at all, and including them drags every
+# figure toward zero, calibrating the app to places nobody can walk).
+# Length-weighted, peak canopy:
+#     p10 0.0001 | p25 0.0042 | p50 0.0100 | p75 0.0170 | p90 0.0246 | p99 0.0460
+# The old 0.05 sits ABOVE our p99, which would make 0.7% of the city read as
+# fully shaded -- it is miscalibrated for this model, not merely stale.
+#
+# Chosen against real places rather than percentiles. What a walk reports:
+#                            0.02   0.03   0.05
+#     Park Slope (leafy)      76%    57%    34%
+#     Central Park perimeter  67%    50%    31%
+#     Bushwick                49%    34%    20%
+#     Midtown / Garment        9%     7%     4%
+# 0.02 keeps the widest spread between leafy and bare (67 points vs 30 at
+# 0.05) and puts the absolute numbers where they survive a plausibility
+# check: a tree-lined Brooklyn street in July reading 76% matches walking it,
+# where 34% would not, and a number people disbelieve is worse than none.
+#
+# NOTHING READS 100%. A route always includes crossings (zero by design),
+# corner stubs and gaps between trees, so the length-weighted mean never
+# approaches the cap even where individual blocks reach it. User's
+# requirement, 2026-08-24: full shade should be effectively unreachable.
+#
+# The cap costs only display detail, never routing: edge_costs() uses the
+# UNSATURATED density, so the router still separates two blocks that both
+# read 100% here. At 0.02, 17.5% of pavement pins at the cap.
+SHADE_SATURATION_DENSITY = 0.02
 
 # How far a requested point may sit from the nearest graph node and still be
 # considered "in coverage". Intersections along a real block are already
@@ -421,36 +552,16 @@ PARK_LIKE_SUBCATEGORIES = frozenset({
     "Large Park", "Neighborhood Park", "Flagship Park", "Garden", "Neighborhood Plgd",
 })
 
-# Canopy fraction -> tree-density calibration (Phase 2 street audit: 750
-# ordinary streets stratified across all 5 boroughs, ~150/borough, parks
-# excluded by the real polygon). Fit: density = 0.0798*fraction + 0.0050,
-# R^2=0.40 -- moderate, not high, is expected: fraction (area-based) and
-# density (Forestry's per-tree health/size scoring) are different
-# measurements, and this audit's population is deliberately where
-# Forestry already works, not the park edges this slope gets applied to.
-#
-# Only the SLOPE carries over to the park-edge reach credit
-# (apply_park_canopy() below) -- the intercept is an ordinary street's
-# typical non-street-tree-canopy baseline (private yards, etc.), which
-# doesn't apply to "how much extra shade does the park itself contribute
-# right behind this curb": a park reach fraction of 0 (a street bordering
-# open lawn) must add zero credit, not a phantom nonzero floor.
-CANOPY_FRACTION_TO_DENSITY_SLOPE = 0.0798
-
-# Buffer for the park-edge reach rule (apply_park_canopy) -- deliberately
-# its OWN constant, not TREE_BUFFER_M. TREE_BUFFER_M is tuned to where
-# real Forestry trees stand (12.7-14m for CPS's own fence-line row); the
-# Parks Properties polygon boundary itself sits much farther from a
-# park-edge street's centerline than that -- measured directly against
-# Central Park: Central Park West's real distance is 5.9-27.7m (median
-# 16.1m, only 1% within 14m), Central Park South 11.0-24.8m, Central Park
-# North 19.5-23.5m. A 14m buffer (correct for individual trees) misses
-# the park polygon entirely for ~99% of Central Park West's edges. 30m
-# captures 100% of all three measured -- and can't over-credit the far
-# (building) side of a street regardless of how generous it is, since
-# apply_park_canopy intersects the buffered corridor with the real park
-# polygon before sampling, which excludes anything not actually park land.
-PARK_REACH_BUFFER_M = 30
+# CANOPY_FRACTION_TO_DENSITY_SLOPE and PARK_REACH_BUFFER_M were deleted on
+# 2026-08-23 with the centerline scoring code. The slope was a linear fit of
+# canopy fraction against CENTERLINE tree density over 750 streets; the
+# buffer existed only because a centerline sits far from the park edge it
+# borders (measured against Central Park: CPW median 16.1m, only 1% within
+# 14m). A sidewalk on a park's perimeter IS the park edge, so the reach the
+# buffer reached for is not there to cross. Both must be re-derived against
+# real sidewalk geometry before park canopy is scored again -- that is
+# PLAN.md's `park-canopy` step. Values and measurements:
+# history/centerline-scoring-constants.md.
 
 
 # ── Data sources ──────────────────────────────────────────────────────────────

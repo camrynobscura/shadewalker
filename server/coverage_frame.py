@@ -36,7 +36,7 @@ from pyproj import Transformer
 from shapely.geometry import LineString, Polygon
 from shapely.ops import transform, unary_union
 
-from pipeline.graph.centerline import METRIC_CRS
+from pipeline.config import METRIC_CRS
 
 logger = logging.getLogger(__name__)
 

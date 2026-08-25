@@ -6,13 +6,16 @@ clone never have it. Build it with:
 
     uv run python -m pipeline.build
 
-DELIBERATELY NOT USING conftest's citywide_store FIXTURE. That one
-requires at least 10 tile files (tests/conftest.py:114), a threshold from
-the centerline era's 276-tile grid; the sidewalk model exports exactly
-one file, so it would always skip. Relaxing it there would instead
-un-skip the 18 existing centerline citywide tests and run them against
-sidewalk data they were never written for. These get their own fixtures
-until the fixture rework (PLAN.md step 2) sorts that out properly.
+DELIBERATELY NOT USING conftest's citywide_store FIXTURE. These read the
+export file directly rather than loading it through GraphStore, so they
+check what the PIPELINE wrote rather than what the server made of it --
+a distinction that matters when the question is whether the export itself
+is right.
+
+(The original reason was different and is now obsolete: citywide_store
+used to require 10+ tile files, a threshold left over from the centerline
+era's 276-tile grid, so it always skipped. That gate was fixed on
+2026-08-23 to skip only when there is no export at all.)
 
 WHAT THESE ARE FOR
 ------------------

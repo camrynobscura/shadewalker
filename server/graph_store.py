@@ -250,7 +250,12 @@ class GraphStore:
         self._edge_component = np.empty(0, dtype=np.int32)
         self._tree_deciduous = np.empty(0, dtype=np.float32)
         self._tree_evergreen = np.empty(0, dtype=np.float32)
-        self._tree_count = np.empty(0, dtype=np.int32)
+        # float32, not int32: block-face scoring gives an edge a fractional
+        # SHARE of its block's trees (a face with 3 trees over 10 edges =
+        # 0.3 each), and an integer dtype would round every one of those to
+        # zero on load. route() still reports a whole number -- it sums the
+        # shares along the path and rounds once at the end.
+        self._tree_count = np.empty(0, dtype=np.float32)
         # The slice of _tree_deciduous that is park-canopy credit rather
         # than countable trees (FIXES item 4) -- already inside
         # _tree_deciduous, so it's a share of the score, never an addition.
@@ -273,11 +278,10 @@ class GraphStore:
         tile_paths = sorted(config.TILES_DIR.glob("*.json.gz"))
         if not tile_paths:
             raise FileNotFoundError(
-                f"No graph data in {config.TILES_DIR}. The centerline "
-                "pipeline that produced it was deleted 2026-08-22 and its "
-                "sidewalk replacement is not built yet — point "
-                "SHADEWALKER_TILES_DIR at a directory holding "
-                "tests/fixtures/pilot.json.gz to run against the fixture."
+                f"No graph data in {config.TILES_DIR}. Build it with "
+                "`uv run python -m pipeline.build`, or point "
+                "SHADEWALKER_TILES_DIR at a directory holding a built "
+                "export to run against that instead."
             )
         coverage_fingerprint = _tiles_fingerprint(tile_paths)
         coverage_cache_path = config.TILES_DIR / COVERAGE_CACHE_FILENAME
@@ -390,7 +394,7 @@ class GraphStore:
         self._length = np.maximum(np.array(length, dtype=np.float32), 0.01)
         self._tree_deciduous = np.array(deciduous, dtype=np.float32)
         self._tree_evergreen = np.array(evergreen, dtype=np.float32)
-        self._tree_count = np.array(counts, dtype=np.int32)
+        self._tree_count = np.array(counts, dtype=np.float32)
         self._tree_park_canopy = np.array(canopy_credit, dtype=np.float32)
 
         # Pack the edge shapes: one flat buffer + an offsets array (see
@@ -710,10 +714,25 @@ class GraphStore:
         every edge. Shared by edge_costs() (unsaturated -- degree of
         density always matters to the router) and route()'s
         shade_fraction (the same number, saturated at
-        SHADE_SATURATION_DENSITY for reporting)."""
+        SHADE_SATURATION_DENSITY for reporting).
+
+        NO LENGTH FLOOR. There was one (DENSITY_LENGTH_FLOOR_M = 20.0) and it
+        is deleted, not unset -- see its epitaph in pipeline/config.py. It
+        patched a centerline-era symptom, short edges inheriting a cross
+        street's trees through a buffer corridor. Block-face scoring removes
+        the cause: an edge holds a share of its block's trees proportional to
+        its own length, so it cannot out-read its own block. Measured on the
+        citywide export 2026-08-24, short edges are LESS dense than long ones
+        (0-5m median 0.0093 against 100m+ 0.0110), so a floor would only
+        deflate correct values -- 7.6x on a 2.6m edge, and half of all
+        sidewalk edges are under 5m.
+
+        The fail-closed guard that lived here (all-zero while the floor was
+        None) is gone with it: both constants now have measured, sidewalk-era
+        values, which is the condition its own comment set for removal."""
         canopy = config.CANOPY_BY_MONTH[month - 1]  # month is 1-12; lists index from 0
         tree_score = self._tree_evergreen + self._tree_deciduous * canopy
-        return tree_score / np.maximum(self._length, config.DENSITY_LENGTH_FLOOR_M)
+        return tree_score / self._length
 
     def edge_costs(self, tree_weight: float, month: int) -> np.ndarray:
         """The plan's trees-only cost formula, vectorized over every edge."""
@@ -756,6 +775,12 @@ class GraphStore:
         # length to shade_fraction, replacing the old shaded-or-not
         # threshold whose cliff-edge let near-identical routes read 0%
         # vs 100% -- see the constant's comment for the calibration.
+        #
+        # The fail-closed branch here (all-zero while the constant was None)
+        # was removed on 2026-08-24 when the constant got a measured
+        # sidewalk-era value of 0.02. Saturation caps only what is REPORTED:
+        # edge_costs() above uses the unsaturated density, so the router
+        # still separates two blocks that both display as fully shaded.
         shade_credit = np.minimum(
             self._edge_density(month) / config.SHADE_SATURATION_DENSITY, 1.0
         )

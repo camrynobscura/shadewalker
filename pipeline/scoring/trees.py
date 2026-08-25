@@ -1,313 +1,144 @@
-"""Score trees and attach them to street edges.
+"""What one tree is worth, as shade.
 
-Three steps:
+This module is deliberately GEOMETRY-FREE. It answers "how much shade is
+this tree worth, and is it evergreen or deciduous" and nothing else -- no
+distances, no buffers, no streets. That separation is why the value formula
+and its constants survived the centerline deletion intact while everything
+around them died: the test applied was "does its justification mention a
+distance, a corridor, a centerline, or a route measurement? then it is
+geometry and it dies. Is it about a tree or the calendar? it lives."
 
-1. VALUE EACH TREE: health × size, from the plan's formula
-       tree_value = condition_score × min(dbh, 30) / 30
-   split into deciduous vs evergreen columns (by genus) so routing can apply
-   the monthly canopy factor to the deciduous part only.
+Where a tree's shade LANDS is pipeline/graph/blockface.py's problem.
+How it becomes a route statistic is server/graph_store.py's.
 
-2. JOIN TREES TO STREETS: draw a TREE_BUFFER_M corridor around every street
-   edge (buffering, in the meter-based CRS) and spatially join: each tree
-   lands in the corridor(s) containing it. Summing per edge gives the
-   street's totals. A tree between two corridors counts toward both —
-   acceptable when the corridors are genuinely different streets, since it
-   really does shade both.
+THE FORMULA
+-----------
+    value = condition_score x min(dbh, DBH_CAP_IN) / DBH_CAP_IN
 
-3. EXCEPT BETWEEN SIBLING CARRIAGEWAYS: a divided boulevard (Park Avenue,
-   Queens Boulevard, Grand Concourse...) is two parallel same-named edges
-   11–18m apart, so every median tree lands in both corridors and its full
-   value gets booked twice — measured at 19% of those streets' tree value
-   citywide, quietly inflating grand boulevards over ordinary streets. A
-   tree shared between edges of one sibling group counts only toward the
-   nearest one. (See PLAN.md's 2026-07-22/23 scoring investigation.)
+`dbh` is trunk diameter at breast height, in inches, and it is the ONLY
+size information Forestry publishes -- there is no canopy-radius field.
+Measured across 898,643 living trees: median 9in, p25 4, p75 16, p90 24,
+p99 38.
+
+The cap is not decoration. The largest `dbh` in the live citywide data is
+**2427 inches** -- 61 metres of trunk -- so without it one mistyped record
+would dominate an entire block's score.
+
+Seasonality is applied later, not here: the server multiplies the deciduous
+share by config.CANOPY_BY_MONTH for the month being routed, so one scored
+export serves every month. Evergreens are held out of that multiplication,
+which is the only reason the split exists.
 """
 
 import logging
-import math
-
-import geopandas as gpd
-from shapely.geometry import Point
-from shapely.strtree import STRtree
+from typing import NamedTuple
 
 from pipeline import config
-from pipeline.graph.centerline import METRIC_CRS
 
 logger = logging.getLogger(__name__)
 
-
-# ── Sibling-carriageway detection thresholds ──────────────────────────────
-# Validated citywide against the loaded graph (4,201 genuine pairs found;
-# spot-checked against real medians): two same-named edges are the two
-# sides of one divided street when they run near-parallel, close together,
-# alongside each other for a real stretch, and don't simply share an
-# endpoint (which would make them consecutive blocks of one street).
-SIBLING_MAX_SEPARATION_M = 25.0   # real median separations cluster at 10-18m
-SIBLING_MAX_BEARING_DIFF_DEG = 20.0
-SIBLING_MIN_OVERLAP_FRACTION = 0.5  # of the shorter edge's along-track span
-SIBLING_MIN_LENGTH_M = 15.0       # tiny stub edges match too noisily
-SIBLING_MAX_LENGTH_RATIO = 3.0    # a 20m stub isn't a 200m block's sibling
+# tpcondition values that contribute no shade at all. Standing dead trees
+# are still physically present -- the fetch filters on tpstructure='Full',
+# which means "standing" and includes them -- so they must be dropped HERE.
+# 10,635 of the 898,643 living-structure trees are Dead (1.2%).
+DEAD = "Dead"
 
 
-def score_and_join(edges: gpd.GeoDataFrame, tree_rows: list[dict]) -> gpd.GeoDataFrame:
-    """Return `edges` with tree_deciduous, tree_evergreen, tree_count columns."""
-    trees = _build_tree_table(tree_rows)
+class TreeValue(NamedTuple):
+    """One tree's shade contribution, split by whether it drops its leaves.
 
-    # Buffer: each street's line geometry grows into a TREE_BUFFER_M-wide
-    # polygon corridor. Done on geometry_m (meters) — buffering in degrees
-    # is the classic geospatial bug (14 "degrees" would swallow the East
-    # Coast).
-    corridors = gpd.GeoDataFrame(
-        geometry=edges["geometry_m"].buffer(config.TREE_BUFFER_M).values,
-        crs=METRIC_CRS,
-    )  # fresh 0..N-1 index, one row per edge, in edge order
-
-    # sjoin = spatial join: like a SQL JOIN, but the ON-condition is geometric
-    # ("point is inside polygon") instead of key equality. Returns one row per
-    # (tree, corridor) containment pair; index_right tells us which corridor.
-    joined = gpd.sjoin(trees, corridors, how="inner", predicate="within")
-
-    joined = _drop_far_sibling_credit(joined, edges, trees)
-
-    # groupby-sum per corridor (SQL: GROUP BY corridor), then align the
-    # aggregates back onto the edge table by position; edges with no trees
-    # get NaN from reindex, which fillna(0) turns into a clean zero.
-    per_edge = joined.groupby("index_right").agg(
-        tree_deciduous=("value_deciduous", "sum"),
-        tree_evergreen=("value_evergreen", "sum"),
-        tree_count=("value_deciduous", "size"),  # any column works for a row count
-    )
-    per_edge = per_edge.reindex(range(len(edges))).fillna(0)
-
-    edges = edges.copy()
-    edges["tree_deciduous"] = per_edge["tree_deciduous"].round(3).values
-    edges["tree_evergreen"] = per_edge["tree_evergreen"].round(3).values
-    edges["tree_count"] = per_edge["tree_count"].astype(int).values
-    # The park-canopy credit an edge later receives (apply_park_canopy
-    # adds it into tree_deciduous AND records it here) -- kept as its own
-    # column so the export can say which edges' shade comes from canopy
-    # area rather than countable trees (FIXES.md item 4's option A needs
-    # exactly this; the pipeline used to sum-and-forget the split).
-    # Initialized here, where every edge table is born, so the pilot/CI
-    # path (no canopy raster) exports a clean 0.0 rather than a missing
-    # column.
-    edges["tree_park_canopy"] = 0.0
-
-    with_trees = (edges["tree_count"] > 0).sum()
-    logger.info(f"  [scoring] {len(trees)} scoreable trees → "
-          f"{with_trees} of {len(edges)} edges have trees")
-    return edges
-
-
-def _drop_far_sibling_credit(
-    joined: gpd.GeoDataFrame, edges: gpd.GeoDataFrame, trees: gpd.GeoDataFrame
-) -> gpd.GeoDataFrame:
-    """Step 3 of the module docstring: where a tree fell into the corridors
-    of two-or-more edges of the SAME sibling group (the carriageways of one
-    divided street), keep only its row for the nearest edge.
-
-    Groups must be transitive, not pairwise — Queens Boulevard-style streets
-    run a main roadway plus service roads, up to 7 near-parallel same-named
-    edges abreast (511 of the 3,393 groups found citywide have 3+ members),
-    and a tree in the middle can sit in several corridors at once.
+    Exactly one of the two is non-zero. Both are kept as separate fields
+    rather than a value plus a flag because every consumer sums many trees
+    and needs the two totals, never the individual flags.
     """
-    group_of_edge = _sibling_groups(edges)
-    if not group_of_edge or joined.empty:
-        return joined
-
-    lines = edges["geometry_m"].to_list()
-
-    # Work per (tree, group): a tree appearing in one group's corridors
-    # 2+ times keeps only its nearest row. Rows outside any group — and a
-    # tree's rows in two DIFFERENT groups (a real corner between two
-    # distinct divided streets) — are left exactly as they were.
-    drop_labels = []
-    tree_and_group = [
-        (tree_idx, group_of_edge.get(edge_pos))
-        for tree_idx, edge_pos in zip(joined.index, joined["index_right"])
-    ]
-    rows_by_tree_and_group: dict[tuple, list[int]] = {}
-    for row_pos, (tree_idx, group_id) in enumerate(tree_and_group):
-        if group_id is None:
-            continue
-        rows_by_tree_and_group.setdefault((tree_idx, group_id), []).append(row_pos)
-
-    for (tree_idx, _group_id), row_positions in rows_by_tree_and_group.items():
-        if len(row_positions) < 2:
-            continue
-        tree_point = trees.geometry.loc[tree_idx]
-        nearest_row = min(
-            row_positions,
-            key=lambda row_pos: lines[joined["index_right"].iloc[row_pos]].distance(tree_point),
-        )
-        drop_labels.extend(row_pos for row_pos in row_positions if row_pos != nearest_row)
-
-    if not drop_labels:
-        return joined
-    dropped = set(drop_labels)
-    keep = [row_pos for row_pos in range(len(joined)) if row_pos not in dropped]
-    return joined.iloc[keep]
+    evergreen: float
+    deciduous: float
 
 
-def _sibling_groups(edges: gpd.GeoDataFrame) -> dict[int, int]:
-    """Detect divided-street sibling carriageways: same non-empty name,
-    near-parallel, close, running alongside each other, and not just two
-    consecutive blocks of one street (those share an endpoint node).
+def tree_value(row: dict) -> TreeValue | None:
+    """A tree's shade value, or None if it contributes nothing.
 
-    Returns {edge position -> group id} for grouped edges only; positions
-    match the fresh 0..N-1 order score_and_join's corridors (and therefore
-    sjoin's index_right) use. Empty dict when the table can't have siblings
-    (no name column — some tests score bare geometry-only tables).
+    None (rather than a zero TreeValue) for the two cases where the tree
+    should not be counted at all: it is Dead, or it has no usable trunk
+    diameter. A caller summing values wants those skipped, and a caller
+    counting trees must not count them either -- a block reporting "3 trees"
+    that are all dead would be a lie in the UI.
     """
-    if "name" not in edges.columns:
-        return {}
+    if (row.get("tpcondition") or "").strip() == DEAD:
+        return None
 
-    names = edges["name"].fillna("").to_list()
-    lines = edges["geometry_m"].to_list()
-    lengths = [line.length for line in lines]
+    # dbh arrives as a STRING ("22") from Socrata, and 77 of the 898,643
+    # citywide rows carry JSON null. float(None) raises TypeError, NOT
+    # ValueError -- the pre-rebuild version of this code caught only
+    # ValueError and would have crashed the first time it ran citywide. It
+    # never did run citywide, so nobody found out.
+    try:
+        dbh = float(row.get("dbh") or 0)
+    except (TypeError, ValueError):
+        dbh = 0.0
+    # A negative diameter is meaningless and would subtract shade. None are
+    # present in today's data; the guard is here because the feed is live
+    # and a sign error upstream must not silently make a block sunnier.
+    if dbh <= 0:
+        return None
 
-    # Node ids, for the shared-endpoint exclusion. The real edge table is
-    # indexed by (u, v, key); anything else (plain test tables) gets
-    # per-edge unique placeholders, which simply disables the exclusion.
-    if edges.index.nlevels >= 2:
-        node_pairs = [(index_value[0], index_value[1]) for index_value in edges.index]
-    else:
-        node_pairs = [(f"u{position}", f"v{position}") for position in range(len(edges))]
+    condition = (row.get("tpcondition") or "").strip()
+    # Unknown and blank both land on CONDITION_DEFAULT via the fallback --
+    # "Unknown" is an explicit key with the same 0.5, so both paths agree.
+    condition_score = config.CONDITION_SCORES.get(
+        condition, config.CONDITION_DEFAULT)
 
-    # Candidate pairs: real line-to-line distance within the sibling
-    # separation — a bulk STRtree query, in meters. Returns (left, right)
-    # position pairs including self-pairs and both orders; filtered below.
-    candidate_positions = [
-        position for position in range(len(edges))
-        if names[position] and lengths[position] >= SIBLING_MIN_LENGTH_M
-    ]
-    if len(candidate_positions) < 2:
-        return {}
-    candidate_lines = [lines[position] for position in candidate_positions]
-    tree_index = STRtree(candidate_lines)
-    left_ids, right_ids = tree_index.query(
-        candidate_lines, predicate="dwithin", distance=SIBLING_MAX_SEPARATION_M
-    )
+    value = condition_score * min(dbh, config.DBH_CAP_IN) / config.DBH_CAP_IN
+    if value <= 0:
+        return None
 
-    parent: dict[int, int] = {}
+    # genusspecies reads "Quercus bicolor - swamp white oak"; the genus is
+    # the first word. 21 citywide rows have none, which yields "" and falls
+    # through to deciduous -- the overwhelmingly right default for NYC's
+    # street forest.
+    genus = (row.get("genusspecies") or "").split(" ")[0]
+    if genus in config.EVERGREEN_GENERA:
+        return TreeValue(evergreen=value, deciduous=0.0)
+    return TreeValue(evergreen=0.0, deciduous=value)
 
-    def find(position: int) -> int:
-        while parent.setdefault(position, position) != position:
-            parent[position] = parent[parent[position]]
-            position = parent[position]
-        return position
 
-    for left, right in zip(left_ids, right_ids):
-        if left >= right:
-            continue  # self-pair, or the mirror of a pair already seen
-        position_a = candidate_positions[left]
-        position_b = candidate_positions[right]
-        if names[position_a] != names[position_b]:
+class Totals:
+    """Running sum of tree value for one block face."""
+
+    __slots__ = ("evergreen", "deciduous", "count")
+
+    def __init__(self):
+        self.evergreen = 0.0
+        self.deciduous = 0.0
+        self.count = 0
+
+    def add(self, value: TreeValue) -> None:
+        self.evergreen += value.evergreen
+        self.deciduous += value.deciduous
+        self.count += 1
+
+    def __repr__(self):
+        return (f"Totals(evergreen={self.evergreen:.3f}, "
+                f"deciduous={self.deciduous:.3f}, count={self.count})")
+
+
+def summarise(rows) -> dict:
+    """Count how a batch of raw tree rows broke down, for logging.
+
+    Worth its own function because the counts are the only warning that a
+    feed change has quietly gutted the scoring -- a jump in `unusable`
+    means Forestry altered a field, not that the trees died.
+    """
+    tally = {"scored": 0, "dead": 0, "unusable": 0, "evergreen": 0}
+    for row in rows:
+        if (row.get("tpcondition") or "").strip() == DEAD:
+            tally["dead"] += 1
             continue
-        if set(node_pairs[position_a]) & set(node_pairs[position_b]):
-            continue  # consecutive blocks of one street, not two carriageways
-        long_length = max(lengths[position_a], lengths[position_b])
-        short_length = min(lengths[position_a], lengths[position_b])
-        if long_length > SIBLING_MAX_LENGTH_RATIO * short_length + 20.0:
+        value = tree_value(row)
+        if value is None:
+            tally["unusable"] += 1
             continue
-        if _bearing_difference_deg(lines[position_a], lines[position_b]) > SIBLING_MAX_BEARING_DIFF_DEG:
-            continue
-        if _along_track_overlap_fraction(lines[position_a], lines[position_b]) < SIBLING_MIN_OVERLAP_FRACTION:
-            continue
-        root_a, root_b = find(position_a), find(position_b)
-        if root_a != root_b:
-            parent[root_a] = root_b
-
-    group_of_edge = {position: find(position) for position in parent}
-    # Singletons can appear in `parent` from find() calls without a union.
-    group_sizes: dict[int, int] = {}
-    for group_id in group_of_edge.values():
-        group_sizes[group_id] = group_sizes.get(group_id, 0) + 1
-    return {
-        position: group_id
-        for position, group_id in group_of_edge.items()
-        if group_sizes[group_id] >= 2
-    }
-
-
-def _bearing_difference_deg(line_a, line_b) -> float:
-    """Direction difference between two lines' end-to-end vectors, ignoring
-    which way each happens to be digitized (a street has no true forward)."""
-    def bearing(line) -> float:
-        (x0, y0), (x1, y1) = line.coords[0], line.coords[-1]
-        return math.degrees(math.atan2(x1 - x0, y1 - y0)) % 180.0
-
-    difference = abs(bearing(line_a) - bearing(line_b))
-    return min(difference, 180.0 - difference)
-
-
-def _along_track_overlap_fraction(line_a, line_b) -> float:
-    """How much of the shorter line runs alongside the longer one: both
-    lines' endpoints projected onto line_a's own direction give each a 1-D
-    span; the overlap of the spans, as a fraction of the shorter span,
-    separates true side-by-side carriageways from two same-named streets
-    that merely pass near each other at an end."""
-    (ax0, ay0), (ax1, ay1) = line_a.coords[0], line_a.coords[-1]
-    direction_x, direction_y = ax1 - ax0, ay1 - ay0
-    norm = (direction_x**2 + direction_y**2) ** 0.5
-    if norm == 0:
-        return 0.0
-
-    def project(x: float, y: float) -> float:
-        return ((x - ax0) * direction_x + (y - ay0) * direction_y) / norm
-
-    span_a = sorted((project(ax0, ay0), project(ax1, ay1)))
-    (bx0, by0), (bx1, by1) = line_b.coords[0], line_b.coords[-1]
-    span_b = sorted((project(bx0, by0), project(bx1, by1)))
-    overlap = min(span_a[1], span_b[1]) - max(span_a[0], span_b[0])
-    shorter_span = min(span_a[1] - span_a[0], span_b[1] - span_b[0])
-    if shorter_span <= 0:
-        return 0.0
-    return max(overlap, 0.0) / shorter_span
-
-
-def _build_tree_table(tree_rows: list[dict]) -> gpd.GeoDataFrame:
-    """Raw API dicts → GeoDataFrame with a point geometry and value columns."""
-    records = []
-    for row in tree_rows:
-        condition = row.get("tpcondition", "Unknown")
-        if condition == "Dead":
-            continue  # standing dead trees give no shade
-
-        # dbh arrives as a string ("22"); missing/garbage becomes 0 (no value).
-        try:
-            dbh = float(row.get("dbh", 0))
-        except ValueError:
-            dbh = 0.0
-
-        condition_score = config.CONDITION_SCORES.get(condition, config.CONDITION_DEFAULT)
-        value = condition_score * min(dbh, config.DBH_CAP_IN) / config.DBH_CAP_IN
-        if value == 0:
-            continue  # no dbh recorded → nothing to contribute
-
-        # genusspecies looks like "Quercus bicolor - swamp white oak";
-        # the genus is the first word. Unknown species default to deciduous
-        # (the overwhelmingly right guess for NYC streets).
-        genus = row.get("genusspecies", "").split(" ")[0]
-        is_evergreen = genus in config.EVERGREEN_GENERA
-
-        lon, lat = row["location"]["coordinates"]
-        records.append({
-            "value_deciduous": 0.0 if is_evergreen else value,
-            "value_evergreen": value if is_evergreen else 0.0,
-            "geometry": Point(lon, lat),
-        })
-
-    if not records:
-        # Every row got filtered out above (all Dead, or none with a usable
-        # dbh) -- gpd.GeoDataFrame([], crs=...) has no "geometry" column at
-        # all in that case and raises, so build the empty table explicitly
-        # instead of letting score_and_join crash on a tile/edge with zero
-        # scoreable trees.
-        return gpd.GeoDataFrame(
-            {"value_deciduous": [], "value_evergreen": [], "geometry": []},
-            crs=METRIC_CRS,
-        )
-
-    trees = gpd.GeoDataFrame(records, crs="EPSG:4326")  # raw coords are lat/lon
-    return trees.to_crs(METRIC_CRS)  # → meters, to match the buffered corridors
+        tally["scored"] += 1
+        if value.evergreen > 0:
+            tally["evergreen"] += 1
+    return tally
