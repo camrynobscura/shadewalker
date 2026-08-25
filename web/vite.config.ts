@@ -1,6 +1,15 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Where the frontend forwards API calls. Defaults to the ordinary dev
+// backend; playwright.config.ts overrides it so the e2e tier can run its own
+// backend on its own port WITHOUT colliding with a dev server you already
+// have up. Before that, the e2e tier reused whatever was listening on 8000 —
+// which meant a running citywide server silently supplied the wrong data and
+// the out-of-coverage spec failed for a reason that had nothing to do with
+// the code. That happened twice in one session on 2026-08-24.
+const API_TARGET = process.env.SHADEWALKER_API_URL ?? 'http://localhost:8000'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -9,10 +18,14 @@ export default defineConfig({
     // fetch("/route?...") with no CORS setup and no hardcoded host. In
     // production FastAPI serves the built files itself, so the same relative
     // URLs keep working unchanged.
+    //
+    // `vite preview` reuses this block: Vite falls back to server.proxy when
+    // preview.proxy is undefined, which is what lets the e2e tier proxy at
+    // all without a second copy of these rules.
     proxy: {
-      '/route': 'http://localhost:8000',
-      '/health': 'http://localhost:8000',
-      '/coverage': 'http://localhost:8000',
+      '/route': API_TARGET,
+      '/health': API_TARGET,
+      '/coverage': API_TARGET,
     },
   },
 })
