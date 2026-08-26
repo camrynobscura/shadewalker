@@ -87,15 +87,20 @@ def clamp_shade_monotonic(routes: list[dict], weights: list[float]) -> list[dict
     break the guarantee is replaced by the shadiest lower-or-equal-weight
     route already in the batch.
 
-    Why this is needed: route() minimizes a smooth density-weighted cost, but
-    shade_fraction saturates that density at SHADE_SATURATION_DENSITY -- so
-    the route chosen for a higher weight can genuinely report LESS shade
-    than a lower weight's route (the router keeps rewarding density past the
-    point where the stat stops crediting it). Far rarer since the stat went
-    continuous (2026-08-17: 0/24 sampled pairs pre-clamp, vs 7/24 under the
-    old shaded-or-not threshold whose measured rate was ~17% of citywide
-    routes, up to a 0.22 drop), but the mechanism is still real, so the
-    guarantee stays. /route computes every preset in one
+    Why this is needed: since 2026-08-26 cost and display share one
+    saturation point (config.DENSITY_AT_FULL_COVERAGE), so the old driver
+    -- the router rewarding density the stat could not credit -- is gone.
+    What remains is photo-finishes: near-tied routes swapping at a higher
+    weight, where the winner's displayed FRACTION lands a hair lower
+    (cost is hyperbolic per edge, the fraction is linear, so they rank
+    near-equal mixtures differently). Measured on 188 random pairs
+    (2026-08-26): 8 dips, every one 0.1-1.2 points, routes 1-21m apart.
+    Also measured: widening the preset ladder multiplies the dips (8 ->
+    23 at [0,8,30,150]) while buying ~3 points of median shade, so the
+    guard scales with any future preset change. Earlier history: 0/24
+    sampled pairs pre-clamp on 2026-08-17 -- a read that hid a 3.8% real
+    rate until n=400, which is why this guard does not get retired on a
+    small clean sample. /route computes every preset in one
     call, so this is pure post-processing: it only ever falls back to a real
     route the batch already produced, never one worse on shade than the
     preset's own route -- the walker strictly benefits, and length/time can
@@ -710,11 +715,31 @@ class GraphStore:
         return dist_m <= config.MAX_SNAP_DISTANCE_M
 
     def _edge_density(self, month: int) -> np.ndarray:
-        """Month-adjusted tree density (score per meter), vectorized over
-        every edge. Shared by edge_costs() (unsaturated -- degree of
-        density always matters to the router) and route()'s
-        shade_fraction (the same number, saturated at
-        SHADE_SATURATION_DENSITY for reporting).
+        """Month-adjusted CANOPY COVERAGE density (score per meter,
+        saturating at config.DENSITY_AT_FULL_COVERAGE), vectorized over
+        every edge. Shared by edge_costs() and route()'s shade_fraction,
+        so the router optimizes exactly the physical quantity the user
+        is shown: density/DENSITY_AT_FULL_COVERAGE is an edge's real
+        covered fraction, and above full coverage there is nothing more
+        to buy.
+
+        WHY THE CAP, AND WHY AT 0.031 AND NOT 0.02 (both measured,
+        2026-08-25/26): uncapped, the router paid for score past full
+        coverage -- trunk inventory, not shade (at constant >=90%
+        ground-truth cover, scores span 0.00-0.058, and a blind Street
+        View test could not tell 5-6.7x score gaps apart at matched
+        coverage). Fed the park-canopy data, that phantom credit cost
+        real shade: 22/188 random pairs reported less shade than the
+        prior export, 20 of them walking more metres in the sun (worst
+        +520m). But capping at the DISPLAY constant (then 0.02) was
+        falsified even harder: 120/188 routes lost real shade, because
+        0.02 is only ~65% coverage and the 0.02-0.031 band is the
+        genuine 65%->100% difference. The cap sits where coverage
+        physically saturates, per the exchange rate in the constant's
+        own comment. Two fully-covered paths now cost the same and the
+        tie resolves by length -- measured residual: 8/188 pairs show
+        sub-1.5-point display dips between near-tied routes, which
+        clamp_shade_monotonic absorbs.
 
         NO LENGTH FLOOR. There was one (DENSITY_LENGTH_FLOOR_M = 20.0) and it
         is deleted, not unset -- see its epitaph in pipeline/config.py. It
@@ -732,7 +757,8 @@ class GraphStore:
         values, which is the condition its own comment set for removal."""
         canopy = config.CANOPY_BY_MONTH[month - 1]  # month is 1-12; lists index from 0
         tree_score = self._tree_evergreen + self._tree_deciduous * canopy
-        return tree_score / self._length
+        return np.minimum(tree_score / self._length,
+                          config.DENSITY_AT_FULL_COVERAGE)
 
     def edge_costs(self, tree_weight: float, month: int) -> np.ndarray:
         """The plan's trees-only cost formula, vectorized over every edge."""
@@ -771,7 +797,7 @@ class GraphStore:
         """
         costs = self.edge_costs(tree_weight, month)
         # Continuous per-edge shade credit (FIXES item 2): an edge
-        # contributes min(density / SHADE_SATURATION_DENSITY, 1) of its
+        # contributes min(density / DENSITY_AT_FULL_COVERAGE, 1) of its
         # length to shade_fraction, replacing the old shaded-or-not
         # threshold whose cliff-edge let near-identical routes read 0%
         # vs 100% -- see the constant's comment for the calibration.
@@ -782,7 +808,7 @@ class GraphStore:
         # edge_costs() above uses the unsaturated density, so the router
         # still separates two blocks that both display as fully shaded.
         shade_credit = np.minimum(
-            self._edge_density(month) / config.SHADE_SATURATION_DENSITY, 1.0
+            self._edge_density(month) / config.DENSITY_AT_FULL_COVERAGE, 1.0
         )
 
         start_options = [(start.node_u, start.dist_to_u_m), (start.node_v, start.dist_to_v_m)]
@@ -897,7 +923,7 @@ class GraphStore:
             # per-meter credit over just the walked distance. (The old
             # binary definition also subtracted a per-intersection
             # exposure gap here, SHADE_CROSSING_GAP_M -- dropped with the
-            # continuous redesign, see SHADE_SATURATION_DENSITY's comment.)
+            # continuous redesign, see DENSITY_AT_FULL_COVERAGE's comment.)
             shaded_length_m = (
                 s_dist_m * float(shade_credit[start.edge])
                 + float((self._length[edge_path] * shade_credit[edge_path]).sum())

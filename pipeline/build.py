@@ -27,7 +27,8 @@ land-cover raster that covers them is not wired in yet, so
 design (they run ACROSS a roadway) while staying fully routable.
 
 The export carries real tree scores, and as of 2026-08-24 the server acts
-on them: SHADE_SATURATION_DENSITY was re-derived for this model (0.02) and
+on them: the shade saturation point was re-derived for this model (0.02,
+now DENSITY_AT_FULL_COVERAGE = 0.031 since the 2026-08-26 unification) and
 the per-edge length floor was deleted outright, so the fail-closed guards
 are gone and the four Shade_priority presets produce genuinely different
 routes for the first time.
