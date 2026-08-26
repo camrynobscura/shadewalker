@@ -561,6 +561,22 @@ CANOPY_RASTER_CRS = "EPSG:2263"
 # 7=other impervious, 8=railroad). Confirmed via the raster's own colormap.
 CANOPY_RASTER_TREE_CLASS = 1
 
+# The walker strip sampled from the raster: a buffer of this radius (in
+# metres, converted to the raster's survey feet at use) around a path's
+# line. 2.0m is what a walker occupies -- the same width
+# tools/audit/test_per_side_shade.py used to score real pavements -- and
+# the exchange rate it feeds is insensitive to it: re-fit at 1m/1.5m/3m
+# the rate moves under +/-7% (2026-08-26 sweep), so this is not a
+# tunable that can drift scores the way TREE_BUFFER_M once did.
+CANOPY_SAMPLE_STRIP_M = 2.0
+
+# Fewer valid (non-nodata) raster pixels than this under a strip and the
+# edge gets NO reading rather than a noisy one. At 6-inch pixels a 2m-wide
+# strip along even a 5m edge holds hundreds, so this is hit only by
+# slivers at the raster's border; measured citywide, exactly 1 edge of
+# 85,708 target edges fails it.
+CANOPY_MIN_VALID_PIXELS = 30
+
 # NYC Parks Properties `typecategory` values excluded from the park canopy
 # mask AND the park-reach routing rule (both share citywide_park_shape_m())
 # -- roadside/traffic-island types, a locked scope decision: these aren't
