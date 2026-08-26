@@ -9,36 +9,38 @@ import styles from './RouteStats.module.css'
  * different signal entirely — a Central Park route could show "83%
  * shaded" AND this warning).
  *
- * RE-DERIVED 2026-08-24 for the sidewalk model, 0.25 -> 0.20. The old
- * value came from a 200-route scan against CENTERLINE densities through a
- * saturation point of 0.05; this model's densities are ~4x lower and
- * saturate at 0.02, so that bar no longer meant what it was chosen to mean.
+ * RE-DERIVED 2026-08-26 for the coverage scale, 0.20 -> 0.15. The 0.20
+ * bar was chosen against the display that saturated at density 0.02 —
+ * which the leaf-cover exchange rate later revealed to be ~65% real
+ * coverage, i.e. an inflated scale. When shade_fraction became measured
+ * coverage (DENSITY_AT_FULL_COVERAGE, 2026-08-26) every displayed number
+ * dropped ~12-15 points and 0.20 began firing on 29% of default-preset
+ * April routes and 59% of April no-priority ones — worse than the 0.25
+ * value the previous derivation explicitly REJECTED for firing on 26%
+ * and 57%. Same failure, so same treatment: re-measure, don't re-tune.
  *
- * Measured on 400 real citywide routes at four presets and two months,
- * then REWEIGHTED to each borough's share of sidewalk km — the raw sample
- * drew random graph nodes, which over-represented Manhattan 1.71x and
- * under-represented Staten Island 0.36x. Reweighting moved the numbers
- * <1pt (Manhattan and Staten Island turn out to have near-identical shade,
- * so the two biases cancel), but the check is why that is known rather
- * than assumed. Share of routes warned:
+ * Measured on 188 routable random pairs (the routing harness's seeded
+ * draw; the 2026-08-24 derivation found borough reweighting moved every
+ * figure <1pt, so unweighted, with ±2-3pt sampling noise per cell).
+ * Share of routes warned on the COVERAGE scale:
  *
- *            July MED  July NONE  April MED  April NONE
- *     0.15       3.3%       9.8%       8.4%      19.2%
- *     0.20       5.2%      14.5%      14.7%      37.7%   <- chosen
- *     0.25       8.1%      22.4%      26.4%      57.1%
+ *             July MED  July NONE  April MED  April NONE
+ *     0.125       1.1%       5.3%       9.6%      21.3%
+ *     0.15        2.7%       8.5%      12.8%      35.1%   <- chosen
+ *     0.20        4.8%      21.3%      29.3%      58.5%
  *
- * 0.25 was rejected because it fires on a QUARTER of default-preset spring
- * routes and 57% of no-priority ones — a warning that appears more often
- * than not stops carrying information and gets tuned out, including on the
- * routes where it matters. 0.20 keeps the default preset at 5-15% while
- * staying literally true: below 20% shaded, four fifths of the walk is in
- * sun. The one high figure, 38%, is on NONE ("fastest route, no detours
- * for shade") where the user has already said shade is not a priority.
+ * 0.15 reproduces the firing profile 0.20 was originally PICKED to
+ * deliver (July MED ~5%/NONE ~15%, April MED ~15%/NONE ~38%) — the same
+ * editorial judgment about when exposure deserves saying, re-expressed on
+ * the truthful scale. And on this scale the words finally mean exactly
+ * what they say: below 15% covered, 85% of the walk is in open sun. The
+ * one high figure, 35%, is on April NONE ("fastest route, no detours for
+ * shade") where the user has already said shade is not a priority.
  *
  * Seasonal variation is deliberate, not drift: April really is less shaded
  * than July (CANOPY_BY_MONTH), so the same bar firing more in spring is
  * the honest geography. */
-const LOW_SHADE_FRACTION = 0.20
+const LOW_SHADE_FRACTION = 0.15
 
 /** When at least this share of the route's tree score is park-canopy AREA
  * credit (not countable trees), hide the "trees: N" stat -- the count
@@ -48,12 +50,12 @@ const LOW_SHADE_FRACTION = 0.20
  * ordinary street routes 0.000, a park-adjacent street 0.297 -- 1/3
  * hides the count only where canopy genuinely dominates.
  *
- * DELIBERATELY NOT RE-DERIVED 2026-08-24, unlike LOW_SHADE_FRACTION above.
- * Its input is tree_park_canopy, which is currently ZERO on every edge in
- * the city -- the land-cover raster is not wired in yet (PLAN's separate
- * `park-canopy` step), so this threshold cannot fire at all. Tuning it now
- * would mean calibrating against a signal that is identically zero. It
- * belongs to that step, with real park credit to measure against. */
+ * LIVE as of 2026-08-26: the park-canopy pipeline step fills
+ * tree_park_canopy on 57,507 kerb-less edges, so this threshold fires for
+ * the first time (a walk across Central Park reads canopy share 0.96 and
+ * correctly hides its near-meaningless tree count). The 1/3 value itself
+ * is still the 2026-08-17 guess, never derived against the live signal —
+ * calibrating it deliberately is in PLAN's Unresolved list. */
 const CANOPY_SHARE_HIDES_TREE_COUNT = 1 / 3
 
 interface RouteStatsProps {
