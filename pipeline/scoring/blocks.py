@@ -102,7 +102,11 @@ def score_edges(edges: list[dict], tree_rows: list[dict], index) -> dict:
         if not coords:
             dead_or_unusable += 1
             continue
-        match = index.match_point(coords[0], coords[1])
+        # Trees get their own, wider cap than sidewalk samples do -- a
+        # crown reaches over pavement in a way a kerb line cannot. See
+        # TREE_ATTACH_MAX_M's comment for the evidence and its 8m limit.
+        match = index.match_point(coords[0], coords[1],
+                                  max_m=config.TREE_ATTACH_MAX_M)
         if match is None:
             off_face += 1
             continue

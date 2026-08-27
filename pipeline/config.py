@@ -249,39 +249,46 @@ def get_tile_ids_for_bbox(bbox: Bbox) -> list[str]:
 # capped so one giant (or mistyped) trunk can't dominate a block's score.
 DBH_CAP_IN = 30
 
-# How far a sidewalk or a tree may sit from NYC's nearest kerb line and still
-# be attributed to that kerb's block face. Measured 2026-08-23/24 rather than
+# How far a SIDEWALK SAMPLE (or a naming probe) may sit from NYC's nearest
+# kerb line and still be attributed to that kerb's block face. LINES ONLY
+# since 2026-08-27 -- tree attachment has its own, wider cap with its own
+# evidence (TREE_ATTACH_MAX_M below). Measured 2026-08-23/24 rather than
 # chosen:
 #   sidewalks sit a median 2.20m from their kerb (p90 3.35m), and 5m captures
 #   98.35% of sidewalk length -- 97.89% with a resolvable block face. 2m
 #   captures only 40.59% and 3m only 81.24%, so 5m is the knee, not a
 #   round number.
-#   trees attach at 80.9% at this cap, and DO NOT RAISE IT TO CHASE THAT.
-# Over a random 40,000 of all 898,643 trees the 19.1% that attach to nothing
-# break down as:
-#     80.8% inside an NYC park polygon
-#     17.3% no kerb within 5m and not in a park (private setbacks, housing
-#           grounds, plazas, campuses -- the "non-park street-less pavement"
-#           question that is still open elsewhere)
-#      1.1% a kerb is near but NYC's own `conflated` flag says its block-face
-#           link failed
-#      0.8% a kerb is near but its blockf_id does not resolve to a CSCL face
-# So four fifths of the "missing" trees are park trees, correctly excluded:
-# a tree inside Central Park is not shading a street sidewalk, and park
-# pavement is scored from the land-cover raster instead. Raising the cap to
-# 8m (84.2%) or 12m (86.7%) would mostly drag PARK canopy onto street block
-# faces, crediting sidewalks with shade that is not over them.
-# The genuine failure -- a street tree beside a kerb we cannot attach -- is
-# 1.9% of the unattached group and 0.36% of all trees.
-#   An earlier note here claimed "median 0.89m, so 5m is generous for trees".
-#   That was measured only on trees carrying a planting-space link, which are
-#   street trees BY CONSTRUCTION, and it did not generalise. Corrected with
-#   the breakdown above, 2026-08-24.
 # This replaces the centerline era's TREE_BUFFER_M, which measured from a
 # street's MIDDLE and so varied with road width (5.93m on a side street to
 # 13.38m on a boulevard). A kerb is scale-invariant: +0.0036 m/ft of street
 # width, versus the centerline's +0.0618.
 BLOCK_FACE_MAX_M = 5.0
+
+# How far a TREE trunk may sit from its nearest kerb and still credit that
+# kerb's block face. Raised 5.0 -> 8.0 on 2026-08-27, overturning the
+# 2026-08-24 rejection ("mostly PARK trees dragged onto street faces",
+# history/per-side-trees.md) with the direct evidence that rejection asked
+# for. Full-population measurements (all 887,329 usable trees, not a
+# sample; method + tables in history/tree-reach-8m.md):
+#   - the 5-8m band holds 28,994 trees: 58% inside real parks, 42% outside.
+#   - raster residual test: sidewalks within 10m of a 5-8m band tree
+#     measure +5 to +36 points MORE leaf cover than their Forestry score
+#     predicts (control edges: +/-0), dose-responsive, in BOTH slices.
+#     Park-fence trees genuinely overhang perimeter sidewalks; front-yard
+#     trees overhang street sidewalks. Attach rate 80.8% -> 84.1%.
+# DO NOT RAISE TO 10 OR 12m. Measured the same day: where attribution is
+# clean (sidewalks already carrying some score), the effect DECAYS with
+# distance -- +13-17 points at 5-8m, +8 at 8-10m, +4 at 10-12m -- which is
+# crown reach fading. The outer rings' residual signal sits only on
+# bare-scored sidewalks and does NOT decay with distance: that is a MARKER
+# effect (a recorded tree 10m out flags unrecorded private canopy nearby),
+# and crediting a tree for canopy that is not its own is the
+# works-but-unjustifiable rule family this project deletes on sight.
+# Of trees attaching to nothing even at this cap, ~4/5 are inside parks
+# (correctly excluded -- park pavement scores from the raster); the genuine
+# failure, a street tree beside a kerb we cannot attach, is well under 1%
+# of all trees (breakdown measured 2026-08-24, re-validated 2026-08-27).
+TREE_ATTACH_MAX_M = 8.0
 
 # How far apart to sample along a sidewalk edge when deciding which block
 # face each part of it is beside. Settled by measurement, not chosen.
@@ -502,14 +509,24 @@ MAX_TREE_WEIGHTS_PER_REQUEST = 8
 # unbroken canopy -- the user's "full shade effectively unreachable"
 # requirement, strengthened.
 #
-# Routing consequence: only ~3-4% of pavement sits above 0.031, so cost
+# Routing consequence: only ~3-4% of pavement sits above the rate, so cost
 # changes are surgical -- artifact faces (trunk pile-ups reading 0.10+)
 # lose wormhole status, and raster-scored park paths (whose stored values
-# are 0.031 x coverage by construction) compete with streets on equal,
+# are rate x coverage by construction) compete with streets on equal,
 # physical terms. The earlier attempt to saturate cost at 0.02 instead
 # was falsified at 120/188 routes losing real shade: the 0.02-0.031 band
 # is the genuine 65%->100% coverage difference, not phantom credit.
-DENSITY_AT_FULL_COVERAGE = 0.031
+#
+# RE-FIT 2026-08-27, 0.031 -> 0.033, forced by TREE_ATTACH_MAX_M 5->8m:
+# more attached trees means more density at the same physical coverage, so
+# the rate HAS to move with the cap -- they are one calibration. Refit by
+# tools/audit/fit_exchange_rate.py (the durable rebuild of the original
+# scratchpad fit), which was first validated against the 5m export where
+# the answer was known (0.0302-0.0327, reproducing 0.031) and then read
+# 0.0325-0.0336 on the 8m export -- a TIGHTER three-method spread than the
+# original's 0.027-0.033. 0.033 is the three-method center at the same
+# rounding the original used.
+DENSITY_AT_FULL_COVERAGE = 0.033
 
 # How far a requested point may sit from the nearest graph node and still be
 # considered "in coverage". Intersections along a real block are already

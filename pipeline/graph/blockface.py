@@ -211,7 +211,13 @@ class BlockFaceIndex:
 
     def match_point(self, lon: float, lat: float,
                     max_m: float = None) -> Match | None:
-        """The face a single point sits on -- a tree, typically."""
+        """The face a single point sits on.
+
+        The default cap is the LINE cap (BLOCK_FACE_MAX_M). Tree scoring
+        passes config.TREE_ATTACH_MAX_M explicitly -- trees earned a wider
+        cap (8m) by direct evidence on 2026-08-27, and the two caps are
+        deliberately separate constants; see their comments in config.py.
+        """
         max_m = config.BLOCK_FACE_MAX_M if max_m is None else max_m
         point = Point(*_to_m(lon, lat))
         return self._resolve(point.buffer(max_m), point.distance, max_m)

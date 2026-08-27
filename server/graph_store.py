@@ -723,8 +723,11 @@ class GraphStore:
         covered fraction, and above full coverage there is nothing more
         to buy.
 
-        WHY THE CAP, AND WHY AT 0.031 AND NOT 0.02 (both measured,
-        2026-08-25/26): uncapped, the router paid for score past full
+        WHY THE CAP, AND WHY AT THE EXCHANGE RATE AND NOT 0.02 (both
+        measured, 2026-08-25/26; the rate itself was 0.031 then and was
+        re-fit to 0.033 on 2026-08-27 when tree attachment widened to 8m
+        -- see DENSITY_AT_FULL_COVERAGE's comment): uncapped, the router
+        paid for score past full
         coverage -- trunk inventory, not shade (at constant >=90%
         ground-truth cover, scores span 0.00-0.058, and a blind Street
         View test could not tell 5-6.7x score gaps apart at matched
@@ -804,9 +807,12 @@ class GraphStore:
         #
         # The fail-closed branch here (all-zero while the constant was None)
         # was removed on 2026-08-24 when the constant got a measured
-        # sidewalk-era value of 0.02. Saturation caps only what is REPORTED:
-        # edge_costs() above uses the unsaturated density, so the router
-        # still separates two blocks that both display as fully shaded.
+        # sidewalk-era value of 0.02. Since the 2026-08-26 unification,
+        # saturation applies to BOTH sides: _edge_density() caps at
+        # DENSITY_AT_FULL_COVERAGE, so cost and display saturate together
+        # and two fully-covered blocks tie on shade, resolving by length --
+        # see _edge_density's docstring for why the earlier split-scale
+        # design (unsaturated cost, saturated display) was falsified.
         shade_credit = np.minimum(
             self._edge_density(month) / config.DENSITY_AT_FULL_COVERAGE, 1.0
         )
