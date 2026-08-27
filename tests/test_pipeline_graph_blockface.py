@@ -183,3 +183,27 @@ def test_an_edge_shorter_than_one_step_is_still_sampled_once():
     index = index_of([kerb("F1", 0, 100)], [cscl("F1")])
     profile = index.match_line_profile(sidewalk(10.0, 11.2))
     assert profile["F1"] == pytest.approx(1.2, rel=0.05)
+
+
+# --- the two caps, pinned apart (2026-08-27) ---------------------------
+
+def test_the_tree_cap_is_wider_than_the_line_cap():
+    """A tree 6.5m from the kerb attaches under TREE_ATTACH_MAX_M (8m)
+    and NOT under the default line cap (BLOCK_FACE_MAX_M, 5m); 9m out
+    attaches under neither. The 5->8m widening lives entirely in which
+    cap a caller passes, so a refactor that collapses the two constants
+    -- or stops passing the tree cap -- must fail here, not in a
+    citywide number months later. Evidence for the split: the raster
+    residual tests of 2026-08-27, see TREE_ATTACH_MAX_M's comment."""
+    index = index_of([kerb("F1", 0, 100)], [cscl("F1")])
+
+    lon, lat = at(50.0, 6.5)
+    with_tree_cap = index.match_point(lon, lat,
+                                      max_m=config.TREE_ATTACH_MAX_M)
+    assert with_tree_cap is not None
+    assert with_tree_cap.face.face_id == "F1"
+    assert index.match_point(lon, lat) is None      # line cap: too far
+
+    lon, lat = at(50.0, 9.0)
+    assert index.match_point(lon, lat,
+                             max_m=config.TREE_ATTACH_MAX_M) is None

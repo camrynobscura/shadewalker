@@ -20,6 +20,7 @@ block, which is 28.3% of the city's sidewalk length.
 
 import pytest
 
+from pipeline import config
 from pipeline.graph.blockface import Face, Match
 from pipeline.scoring import blocks
 
@@ -345,3 +346,24 @@ def test_the_tally_counts_spanning_edges():
     tally = blocks.score_edges(edges, [tree(-73.9, 40.7)], index)
     assert tally["spanning"] == 1
     assert tally["scored"] == 2
+
+
+def test_trees_are_matched_at_the_tree_cap_not_the_line_default():
+    """score_edges must pass TREE_ATTACH_MAX_M to match_point -- the
+    2026-08-27 5->8m widening lives entirely in that argument, so a
+    refactor that drops it silently reverts the model while every other
+    test stays green. The distance semantics themselves are pinned in
+    test_pipeline_graph_blockface.py; this pins the call site."""
+    f = face()
+    index = fake_index(points={(-73.9, 40.7): f},
+                       spans={(0.0, 0.0): [(f, 10.0)]})
+    seen = []
+    original = index.match_point
+
+    def recording(lon, lat, max_m=None):
+        seen.append(max_m)
+        return original(lon, lat, max_m)
+
+    index.match_point = recording
+    blocks.score_edges([edge("a", "b", 10.0)], [tree(-73.9, 40.7)], index)
+    assert seen == [config.TREE_ATTACH_MAX_M]
