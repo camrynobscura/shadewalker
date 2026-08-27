@@ -16,6 +16,7 @@ import pytest
 import rasterio
 from pyproj import Transformer
 from rasterio.transform import from_origin
+from shapely.geometry import box
 
 from pipeline import config
 from pipeline.scoring import canopy
@@ -102,7 +103,13 @@ def test_half_covered_path_scores_half(synthetic_raster):
     assert 0.35 < fraction < 0.65
 
 
-def test_sidewalk_and_crossing_are_never_touched(synthetic_raster):
+def test_score_park_paths_never_touches_sidewalks_or_crossings(synthetic_raster):
+    """Deliberately REWRITTEN 2026-08-27, not deleted: the old name
+    promised sidewalks were never raster-scored AT ALL, and that premise
+    changed -- score_sidewalk_fallback now covers the sidewalks Forestry
+    could not answer, under its own tests below. What still holds, and is
+    pinned here, is that score_park_paths itself never crosses the kind
+    line, and that crossings get raster credit from NEITHER function."""
     sidewalk = edge_at("footway/sidewalk", -200.0, synthetic_raster)
     sidewalk["tree_deciduous"] = 7.7      # pretend blocks.py scored it
     crossing = edge_at("footway/crossing", -200.0, synthetic_raster)
@@ -112,6 +119,114 @@ def test_sidewalk_and_crossing_are_never_touched(synthetic_raster):
     assert "tree_park_canopy" not in sidewalk
     assert crossing["tree_deciduous"] == 0.0
     assert "tree_park_canopy" not in crossing
+
+
+# --- the sidewalk fallback (2026-08-27) -------------------------------
+#
+# blocks.score_edges marks the sidewalk edges Forestry could not answer
+# (`face_outcome`), and score_sidewalk_fallback gives exactly those the
+# raster's answer: no-face edges unconditionally, treeless-face edges only
+# when majority-inside the park polygon. Everything else it must not
+# touch. The park shape is injected -- production builds it from Parks
+# Properties; these tests only need "covers the edge" / "doesn't".
+
+def park_over_everything():
+    return box(BASE_LON - 0.01, BASE_LAT - 0.01,
+               BASE_LON + 0.01, BASE_LAT + 0.01)
+
+
+def test_no_face_sidewalk_falls_back_to_the_raster(synthetic_raster):
+    edge = edge_at("footway/sidewalk", -200.0, synthetic_raster)
+    edge["face_outcome"] = "no_face"
+    tally = canopy.score_sidewalk_fallback([edge])   # no park shape needed
+    assert tally["no_face_scored"] == 1
+    assert edge["tree_deciduous"] == pytest.approx(
+        config.DENSITY_AT_FULL_COVERAGE * 100.0, rel=0.02)
+    assert edge["tree_park_canopy"] == pytest.approx(
+        edge["tree_deciduous"], abs=0.001)
+
+
+def test_in_park_treeless_sidewalk_falls_back(synthetic_raster):
+    edge = edge_at("footway/sidewalk", -200.0, synthetic_raster)
+    edge["face_outcome"] = "treeless_face"
+    tally = canopy.score_sidewalk_fallback([edge],
+                                           park_shape=park_over_everything())
+    assert tally["park_treeless_scored"] == 1
+    assert edge["tree_deciduous"] == pytest.approx(
+        config.DENSITY_AT_FULL_COVERAGE * 100.0, rel=0.02)
+    assert edge["tree_park_canopy"] > 0
+
+
+def test_street_treeless_sidewalk_keeps_its_honest_zero(synthetic_raster):
+    """The load-bearing negative: a bare street's zero is Forestry's
+    ANSWER, and the leafy exceptions are private-garden canopy the user
+    declined to credit (2026-08-26). Outside a park, treeless stays 0."""
+    edge = edge_at("footway/sidewalk", -200.0, synthetic_raster)
+    edge["face_outcome"] = "treeless_face"
+    far_away = box(BASE_LON + 0.5, BASE_LAT + 0.5,
+                   BASE_LON + 0.6, BASE_LAT + 0.6)
+    tally = canopy.score_sidewalk_fallback([edge], park_shape=far_away)
+    assert tally["street_treeless_kept_zero"] == 1
+    assert tally["park_treeless_scored"] == 0
+    assert edge["tree_deciduous"] == 0.0
+    assert "tree_park_canopy" not in edge
+
+
+def test_a_fence_straddling_edge_is_majority_ruled_to_the_street(synthetic_raster):
+    """~30% of the edge's probes inside the park is below the 0.5
+    majority (config.SIDEWALK_FALLBACK_PARK_FRACTION): mostly-street
+    pavement keeps Forestry's zero. Probes sample the WHOLE line, so
+    this is decided by length share, not by any single point."""
+    edge = edge_at("footway/sidewalk", -200.0, synthetic_raster)
+    edge["face_outcome"] = "treeless_face"
+    # The edge runs BASE_LAT-0.00027 -> +0.00027; cover its southern ~30%.
+    south_sliver = box(BASE_LON - 0.01, BASE_LAT - 0.01,
+                       BASE_LON + 0.01, BASE_LAT - 0.00011)
+    tally = canopy.score_sidewalk_fallback([edge], park_shape=south_sliver)
+    assert tally["street_treeless_kept_zero"] == 1
+    assert edge["tree_deciduous"] == 0.0
+
+
+def test_unmarked_edges_are_untouched_by_the_fallback(synthetic_raster):
+    """The marker's absence is the protection: a scored sidewalk and a
+    crossing carry no `face_outcome`, so the fallback must not know they
+    exist -- whatever their kind or position over the canopy."""
+    scored = edge_at("footway/sidewalk", -200.0, synthetic_raster)
+    scored["tree_deciduous"] = 7.7
+    crossing = edge_at("footway/crossing", -200.0, synthetic_raster)
+    tally = canopy.score_sidewalk_fallback(
+        [scored, crossing], park_shape=park_over_everything())
+    assert tally == {"no_face_scored": 0, "park_treeless_scored": 0,
+                     "street_treeless_kept_zero": 0, "no_reading": 0,
+                     "km": 0.0}
+    assert scored["tree_deciduous"] == 7.7
+    assert "tree_park_canopy" not in scored
+    assert crossing["tree_deciduous"] == 0.0
+    assert "tree_park_canopy" not in crossing
+
+
+def test_fallback_nodata_yields_no_reading_not_zero_credit(synthetic_raster):
+    edge = edge_at("footway/sidewalk", 350.0, synthetic_raster)  # nodata band
+    edge["face_outcome"] = "no_face"
+    tally = canopy.score_sidewalk_fallback([edge])
+    assert tally["no_reading"] == 1
+    assert tally["no_face_scored"] == 0
+    assert edge["tree_deciduous"] == 0.0
+    assert "tree_park_canopy" not in edge
+
+
+def test_missing_raster_skips_the_fallback_cleanly(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CANOPY_RASTER_PATH",
+                        tmp_path / "not_there.tif")
+    edge = {"kind": "footway/sidewalk", "length_m": 50.0,
+            "face_outcome": "no_face",
+            "coords": [[BASE_LON, BASE_LAT], [BASE_LON, BASE_LAT + 0.0005]],
+            "tree_deciduous": 0.0, "tree_evergreen": 0.0}
+    tally = canopy.score_sidewalk_fallback([edge])
+    assert tally == {"no_face_scored": 0, "park_treeless_scored": 0,
+                     "street_treeless_kept_zero": 0, "no_reading": 0,
+                     "km": 0.0}
+    assert edge["tree_deciduous"] == 0.0
 
 
 def test_nodata_band_yields_no_reading_not_zero(synthetic_raster):
