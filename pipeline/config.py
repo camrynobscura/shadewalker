@@ -468,10 +468,48 @@ MAX_TREE_WEIGHTS_PER_REQUEST = 8
 # approaches the cap even where individual blocks reach it. User's
 # requirement, 2026-08-24: full shade should be effectively unreachable.
 #
-# The cap costs only display detail, never routing: edge_costs() uses the
-# UNSATURATED density, so the router still separates two blocks that both
-# read 100% here. At 0.02, 17.5% of pavement pins at the cap.
-SHADE_SATURATION_DENSITY = 0.02
+# SUPERSEDED 2026-08-26 by DENSITY_AT_FULL_COVERAGE below. Everything
+# above is kept as provenance: it explains how 0.02 was chosen, and 0.02
+# was chosen BLIND -- the leaf-cover exchange rate did not exist yet, so
+# nobody could know that density 0.02 corresponds to ~65% real canopy
+# coverage. The display was therefore calling 65%-covered blocks "100%
+# shaded", and the believable route-level numbers (76% Park Slope) came
+# from that inflation cancelling against dilution by zero-shade
+# crossings. Two intermediate fixes were tried and killed by
+# measurement before the replacement below; the account lives in
+# server/graph_store.py's _edge_density() docstring.
+
+# The density at which pavement is FULLY COVERED by canopy -- the single
+# saturation point for BOTH routing cost and displayed shade_fraction, so
+# the router optimizes exactly what the user is shown and shade_fraction
+# IS measured coverage (a 65%-covered block displays 65%).
+#
+# 0.031 is the leaf-cover exchange rate measured 2026-08-25 on 25,000
+# sidewalks (2m walker strip against the 2021 land-cover raster): density
+# = 0.031 x covered fraction, three fitting methods agreeing 0.027-0.033,
+# stable across strip widths 1-3m (+/-6%). Read forward it converts
+# raster leaf cover to score (pipeline park-canopy work); read backward,
+# density/0.031 is an edge's real covered fraction, capping at 1 because
+# coverage cannot exceed "completely covered" -- above 0.031, score is
+# trunk inventory, not shade (measured: at constant >=90% ground-truth
+# cover, scores span 0.00-0.058; a blind Street View test could not
+# distinguish 5-6.7x score gaps at matched coverage).
+#
+# Display consequence, previewed on 188 random routes + 8 named walks
+# before adoption (user-approved 2026-08-26): every number drops ~12-15
+# points; the leafiest end-to-end walks read ~70-74% instead of ~84-87%;
+# leafy-vs-bare spread stays ~43 points. 100% now means literally
+# unbroken canopy -- the user's "full shade effectively unreachable"
+# requirement, strengthened.
+#
+# Routing consequence: only ~3-4% of pavement sits above 0.031, so cost
+# changes are surgical -- artifact faces (trunk pile-ups reading 0.10+)
+# lose wormhole status, and raster-scored park paths (whose stored values
+# are 0.031 x coverage by construction) compete with streets on equal,
+# physical terms. The earlier attempt to saturate cost at 0.02 instead
+# was falsified at 120/188 routes losing real shade: the 0.02-0.031 band
+# is the genuine 65%->100% coverage difference, not phantom credit.
+DENSITY_AT_FULL_COVERAGE = 0.031
 
 # How far a requested point may sit from the nearest graph node and still be
 # considered "in coverage". Intersections along a real block are already
@@ -484,10 +522,33 @@ MAX_SNAP_DISTANCE_M = 200.0
 # ── Park canopy (raster supplement) ─────────────────────────────────────────────
 
 # 2021 NYC Land Cover raster (Zenodo record 14053441, TNC + UVM Spatial
-# Analysis Lab) -- supplements the Forestry tree dataset for parks, whose
-# Conservancy-managed trees Forestry doesn't cover (see PLAN.md's
-# Park-canopy section). 1.7GB, gitignored under data/* -- not fetched by
-# any pipeline/fetch/ script; download manually from the Zenodo record.
+# Analysis Lab) -- supplements the Forestry tree dataset for parks (see
+# PLAN.md's Park-canopy section). 1.7GB, gitignored under data/* -- not
+# fetched by any pipeline/fetch/ script; download manually from the Zenodo
+# record.
+#
+# WHAT FORESTRY MISSES, corrected 2026-08-25. This comment used to say
+# "Conservancy-managed trees Forestry doesn't cover". That is wrong and it
+# predicts the wrong parks. Forestry inventories INDIVIDUALLY MANAGED
+# trees, so the gap is (a) forest interior, which has no individual trees
+# to record, and (b) particular institutional properties. Measured as
+# canopy m2 per recorded tree, against the physical fact that a mature
+# crown is ~50-200 m2:
+#     Prospect 108, Fort Greene 109, Flushing Meadows 100, Bryant 93,
+#     Riverside 93, Madison Square 69   <- all Conservancy/Alliance-run,
+#                                          all recorded at a plausible density
+#     Central Park 18,810, Brooklyn Botanic Garden 52,955,
+#     The High Line and Wave Hill: zero trees on record
+#     Pelham Bay 925, Forest Park 913, Van Cortlandt 868  <- park roads
+#                                          recorded, forest interior not
+# Across 459 parks >=1 ha, by area: a third plausible, a third thin, a
+# third missing. Central Park is an outlier, not an instance of a rule.
+#
+# THE LIMIT OF THIS TEST: it separates "recorded" from "essentially absent"
+# (108 vs 18,810 is 174x) but NOT "fully recorded" from "half recorded" -- a
+# park missing half its trees still reads ~54 m2/tree, as plausible as 108.
+# So the covered parks are "not demonstrably missing trees", not "verified
+# complete". Upgrading that claim needs an independent count.
 CANOPY_RASTER_PATH = RAW_DIR / "canopy" / "landcover_nyc_2021_6in.tif"
 
 # The raster's own CRS (NAD83 State Plane Long Island, US survey feet) --
@@ -499,6 +560,22 @@ CANOPY_RASTER_CRS = "EPSG:2263"
 # 8-class legend (2=grass/shrub, 3=bare, 4=water, 5=building, 6=road,
 # 7=other impervious, 8=railroad). Confirmed via the raster's own colormap.
 CANOPY_RASTER_TREE_CLASS = 1
+
+# The walker strip sampled from the raster: a buffer of this radius (in
+# metres, converted to the raster's survey feet at use) around a path's
+# line. 2.0m is what a walker occupies -- the same width
+# tools/audit/test_per_side_shade.py used to score real pavements -- and
+# the exchange rate it feeds is insensitive to it: re-fit at 1m/1.5m/3m
+# the rate moves under +/-7% (2026-08-26 sweep), so this is not a
+# tunable that can drift scores the way TREE_BUFFER_M once did.
+CANOPY_SAMPLE_STRIP_M = 2.0
+
+# Fewer valid (non-nodata) raster pixels than this under a strip and the
+# edge gets NO reading rather than a noisy one. At 6-inch pixels a 2m-wide
+# strip along even a 5m edge holds hundreds, so this is hit only by
+# slivers at the raster's border; measured citywide, exactly 1 edge of
+# 85,708 target edges fails it.
+CANOPY_MIN_VALID_PIXELS = 30
 
 # NYC Parks Properties `typecategory` values excluded from the park canopy
 # mask AND the park-reach routing rule (both share citywide_park_shape_m())

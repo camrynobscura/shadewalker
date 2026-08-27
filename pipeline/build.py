@@ -19,15 +19,20 @@ the production directory more than once. The export itself is atomic
 (pipeline/export.py), so a reader never sees a half-written file, but
 atomic still means the new file replaces the old one.
 
-WHAT IT DOES NOT DO
--------------------
-No park canopy: park paths have no kerb and so no block face, and the
-land-cover raster that covers them is not wired in yet, so
-`tree_park_canopy` is still zero everywhere. Crossings score zero shade by
-design (they run ACROSS a roadway) while staying fully routable.
+SHADE, IN TWO INSTRUMENTS
+-------------------------
+Sidewalks are scored from the Forestry tree data via block faces
+(pipeline/scoring/blocks.py); everything kerb-less -- park paths, plazas,
+steps, alleys -- is scored from the land-cover raster
+(pipeline/scoring/canopy.py, wired 2026-08-26), which fills
+`tree_park_canopy` for the first time. One instrument per pavement kind,
+so the two can never double-count. Crossings score zero shade by design
+(they run ACROSS a roadway) while staying fully routable. A build without
+the 1.7GB raster on disk skips the canopy step cleanly.
 
 The export carries real tree scores, and as of 2026-08-24 the server acts
-on them: SHADE_SATURATION_DENSITY was re-derived for this model (0.02) and
+on them: the shade saturation point was re-derived for this model (0.02,
+now DENSITY_AT_FULL_COVERAGE = 0.031 since the 2026-08-26 unification) and
 the per-edge length floor was deleted outright, so the fail-closed guards
 are gone and the four Shade_priority presets produce genuinely different
 routes for the first time.
@@ -44,7 +49,7 @@ from pipeline.fetch.trees import fetch_trees
 from pipeline.graph import naming, pedestrian
 from pipeline.graph.blockface import BlockFaceIndex
 from pipeline.graph.boundary import nyc_boundary
-from pipeline.scoring import blocks
+from pipeline.scoring import blocks, canopy
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +142,12 @@ def _score_shade(edges: list[dict]) -> None:
 
     logger.info("[build] scoring")
     blocks.score_edges(edges, trees, index)
+
+    # Kerb-less pavement gets its shade from the raster instead -- park
+    # paths, plazas, steps. Selection is by kind inside, so this cannot
+    # touch a sidewalk or a crossing.
+    logger.info("[build] park canopy")
+    canopy.score_park_paths(edges)
 
 
 def _readback_matches(out_path, expected_nodes: int, expected_edges: int) -> bool:

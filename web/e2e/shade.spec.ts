@@ -34,7 +34,7 @@ async function shadeAtEveryPreset(page: Page): Promise<number[]> {
  * The promise the Shade_priority control makes is that asking for more
  * shade never returns a route reporting less of it. That can genuinely
  * break: the router minimises an UNSATURATED density while the displayed
- * stat saturates at SHADE_SATURATION_DENSITY, so the router keeps being
+ * stat saturates at DENSITY_AT_FULL_COVERAGE, so the router keeps being
  * rewarded for density the stat has stopped crediting.
  *
  * Measured 2026-08-24 over 400 citywide routes computed PRE-clamp: 3.8% of
@@ -65,7 +65,7 @@ test('raising Shade_priority never lowers the reported shade', async ({ page }) 
 /** The shade path is LIVE, not failing closed.
  *
  * Until 2026-08-24 graph_store returned zero shade for every route by
- * design: DENSITY_LENGTH_FLOOR_M and SHADE_SATURATION_DENSITY were both
+ * design: DENSITY_LENGTH_FLOOR_M and DENSITY_AT_FULL_COVERAGE were both
  * None with explicit guards, so nothing the pipeline scored could reach the
  * UI. That was correct then and would be a silent, total regression now --
  * every preset would render "0%" and every route would be the shortest
