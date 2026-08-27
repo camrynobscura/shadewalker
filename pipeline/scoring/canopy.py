@@ -9,24 +9,59 @@ zero by construction: 94.3% of the 1,230km of pavement inside real parks,
 Central Park's 95km of paths included. The raster covers exactly that
 pavement.
 
-ONE INSTRUMENT PER PAVEMENT KIND
---------------------------------
-Selection is by KIND, never by geometry and never by a park mask:
+ONE INSTRUMENT PER PAVEMENT KIND, ONE FALLBACK FOR NO ANSWER
+------------------------------------------------------------
+Selection is by KIND, never by geometry:
 
-    footway/sidewalk       Forestry tree data, via block faces. Never
-                           touched here -- even where no block face was
-                           found. Mixing instruments on one pavement kind
-                           makes neighbouring blocks incomparable.
+    footway/sidewalk       Forestry tree data, via block faces. Where
+                           Forestry structurally has NO answer, the raster
+                           fills in -- score_sidewalk_fallback below. A
+                           HIERARCHY, not a blend: every edge is scored by
+                           exactly one instrument, so neighbouring blocks
+                           stay comparable.
     crossings + islands    zero by user decision (2026-08-24); a crossing
-                           runs ACROSS a roadway.
-    everything else        this module. "What fraction of this pavement is
-                           under canopy" is already a fraction at any
-                           length, so there is no denominator to build and
-                           none of the block-face machinery applies.
+                           runs ACROSS a roadway. Never touched by either
+                           function here.
+    everything else        score_park_paths. "What fraction of this
+                           pavement is under canopy" is already a fraction
+                           at any length, so there is no denominator to
+                           build and none of the block-face machinery
+                           applies.
 
-No park polygons are involved: the raster answers per-strip, so whether a
-plaza is "a park" never has to be decided, and the state/federal parks the
-city's own park list omits are covered like everywhere else.
+WHERE FORESTRY HAS NO ANSWER (score_sidewalk_fallback, 2026-08-27)
+------------------------------------------------------------------
+Two sidewalk populations read 0% while the satellite saw real canopy
+overhead (all numbers measured 2026-08-27; the instrument reproduced the
+build tally exactly before its new numbers were trusted):
+
+  no_face        2,325 edges / 66.5 km: sidewalk-tagged pavement with no
+                 kerb within BLOCK_FACE_MAX_M -- boardwalks, esplanades,
+                 campus walkways. No face means no route by which ANY tree
+                 data could reach the edge, so its zero is the absence of
+                 the instrument, not a finding. Falls back everywhere,
+                 park or not.
+  treeless_face  a real face with zero attached trees. Two diseases, one
+                 symptom: 37,575 of these are ordinary streets whose zero
+                 the raster CONFIRMS (median leaf fraction 0.000) -- they
+                 keep it. The 300 edges / 11.0 km majority-inside a city
+                 park are Forestry blindness wearing a zero (41% mean
+                 measured canopy; 60% of the length is Central Park).
+                 Only those fall back. The empty face itself selects the
+                 blind parks: well-inventoried parks' drives carry their
+                 recorded trees, so Prospect / Riverside / Flushing
+                 Meadows measure 0.00 km affected and stay untouched.
+
+Park polygons therefore enter scoring for exactly ONE narrow question --
+"is this treeless-face edge inside a city park" -- with bounded error both
+ways: a street mislabeled park gets the raster, which reads bare as bare;
+park pavement mislabeled street keeps today's zero. The original
+no-mixing fear does not apply to fallback: for a no-answer edge the
+alternative is not Forestry's number, it is a hard zero, the least
+comparable score pavement can have. Deliberately NOT falling back:
+ordinary treeless streets (their leafy tail is unrecorded PRIVATE canopy,
+the raster blend the user declined 2026-08-26), and the state/federal
+parks the city list omits (39 km measuring ~10% mean canopy -- near-bare,
+not worth dragging an OSM area pass into the build).
 
 THE SCORE
 ---------
@@ -53,8 +88,11 @@ from pyproj import Transformer
 from rasterio.features import geometry_mask
 from shapely.geometry import LineString
 from shapely.ops import transform as shp_transform
+from shapely.prepared import prep
 
 from pipeline import config
+from pipeline.fetch.parks import fetch_park_properties
+from pipeline.graph.boundary import park_polygon
 from pipeline.scoring.blocks import SHADED_KINDS
 
 logger = logging.getLogger(__name__)
@@ -106,9 +144,11 @@ def score_park_paths(edges: list[dict]) -> dict:
     """Fill canopy shade on every kerb-less, non-crossing edge.
 
     Runs AFTER blocks.score_edges() and mutates `edges` in place the same
-    way it does. Sidewalks and crossings are never touched, so this can
-    only add shade to pavement that scored zero -- it cannot double-count
-    against the tree data and cannot change a street.
+    way it does. Sidewalks and crossings are never touched BY THIS
+    FUNCTION -- sidewalk edges Forestry could not answer get their raster
+    shade from score_sidewalk_fallback below, under its own narrow rules
+    -- so this cannot double-count against the tree data and cannot
+    change a street.
     """
     tally = {"scored": 0, "no_reading": 0, "km": 0.0, "full_cover": 0}
     if not config.CANOPY_RASTER_PATH.exists():
@@ -145,4 +185,107 @@ def score_park_paths(edges: list[dict]) -> dict:
         f"  [canopy] {tally['scored']:,} kerb-less edges scored from the "
         f"raster ({tally['km']:,.0f} km); {tally['no_reading']:,} no "
         f"reading; {tally['full_cover']:,} fully covered")
+    return tally
+
+
+def _fraction_of_line_in_parks(coords, length_m: float, park_prep) -> float:
+    """Fraction of probes along the WHOLE line inside the park union.
+
+    One probe per ~10m (min 3), the same sampling rule as
+    naming._probe_points -- never a midpoint, the extent trap this
+    project has hit four times. The probes interpolate the lon/lat line
+    directly: spacing comes from the edge's own metric length, and
+    point-in-polygon needs no metric geometry (nothing is buffered or
+    measured in degrees).
+    """
+    line = LineString(coords)
+    if line.length < 1e-12:
+        return 0.0
+    count = max(3, int(length_m // 10))
+    inside = 0
+    for i in range(count):
+        probe = line.interpolate(line.length * i / (count - 1))
+        if park_prep.contains(probe):
+            inside += 1
+    return inside / count
+
+
+def score_sidewalk_fallback(edges: list[dict], park_shape=None) -> dict:
+    """Raster shade for the sidewalk edges Forestry could not answer.
+
+    Runs AFTER score_park_paths and consumes the `face_outcome` marker
+    blocks.score_edges records (only sidewalk-kind edges ever carry it,
+    so crossings and park paths cannot reach this). Two cases fall back;
+    everything else is untouched -- see WHERE FORESTRY HAS NO ANSWER in
+    the module docstring for the populations and their measurements:
+
+      no_face        -> raster, unconditionally
+      treeless_face  -> raster ONLY when the edge is majority-inside the
+                        city park union
+                        (config.SIDEWALK_FALLBACK_PARK_FRACTION)
+
+    `park_shape` is injectable for tests; by default it is the same
+    Parks Properties union the audit maps draw (boundary.park_polygon,
+    cached fetch). It is built lazily and only when a treeless-face edge
+    exists, so raster-less pilot/CI builds never touch parks data.
+
+    Fallback edges set `tree_park_canopy`, which both tells the frontend
+    the credit is area-based and lets tools/audit/fit_exchange_rate.py
+    exclude them -- a future fit that kept them would regress the raster
+    against itself.
+    """
+    tally = {"no_face_scored": 0, "park_treeless_scored": 0,
+             "street_treeless_kept_zero": 0, "no_reading": 0, "km": 0.0}
+    if not config.CANOPY_RASTER_PATH.exists():
+        logger.warning(
+            f"  [canopy] no raster at {config.CANOPY_RASTER_PATH} -- "
+            "no-answer sidewalks keep zero shade (pilot/CI builds run "
+            "without the 1.7GB raster on purpose)")
+        return tally
+
+    no_face, treeless = [], []
+    for edge in edges:
+        outcome = edge.get("face_outcome")
+        if outcome == "no_face":
+            no_face.append(edge)
+        elif outcome == "treeless_face":
+            treeless.append(edge)
+
+    in_park = []
+    if treeless:
+        if park_shape is None:
+            park_shape = park_polygon(fetch_park_properties())
+        park_prep = prep(park_shape)
+        for edge in treeless:
+            fraction = _fraction_of_line_in_parks(
+                edge["coords"], edge["length_m"], park_prep)
+            if fraction >= config.SIDEWALK_FALLBACK_PARK_FRACTION:
+                in_park.append(edge)
+            else:
+                tally["street_treeless_kept_zero"] += 1
+
+    to_raster = Transformer.from_crs(
+        "EPSG:4326", config.CANOPY_RASTER_CRS, always_xy=True).transform
+    with rasterio.open(config.CANOPY_RASTER_PATH) as src:
+        for edge, bucket in ([(e, "no_face_scored") for e in no_face]
+                             + [(e, "park_treeless_scored") for e in in_park]):
+            fraction = leaf_fraction(src, edge["coords"], to_raster)
+            if fraction is None:
+                tally["no_reading"] += 1
+                continue
+            credit = (config.DENSITY_AT_FULL_COVERAGE * fraction
+                      * edge["length_m"])
+            # These edges are zero by construction (that is what the
+            # marker means), so this sets rather than tops up.
+            edge["tree_deciduous"] = edge.get("tree_deciduous", 0.0) + credit
+            edge["tree_park_canopy"] = round(credit, 3)
+            tally[bucket] += 1
+            tally["km"] += edge["length_m"] / 1000.0
+
+    logger.info(
+        f"  [canopy] sidewalk fallback: {tally['no_face_scored']:,} "
+        f"no-face + {tally['park_treeless_scored']:,} in-park treeless "
+        f"edges scored from the raster ({tally['km']:,.1f} km); "
+        f"{tally['street_treeless_kept_zero']:,} street treeless edges "
+        f"keep their honest zero; {tally['no_reading']:,} no reading")
     return tally

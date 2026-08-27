@@ -594,6 +594,20 @@ CANOPY_SAMPLE_STRIP_M = 2.0
 # 85,708 target edges fails it.
 CANOPY_MIN_VALID_PIXELS = 30
 
+# A sidewalk edge whose block face came back TREELESS counts as
+# park-interior -- and falls back to the raster (canopy.py:
+# score_sidewalk_fallback) -- when at least this fraction of probes
+# sampled along its WHOLE line (one per ~10m, min 3; never a midpoint,
+# the trap this project has hit four times) lands inside the city park
+# union. Why a majority and not "any probe": an edge straddling a park
+# fence is mostly street, and its street part has an honest Forestry
+# answer. Measured 2026-08-27 over all 38,721 treeless-face sidewalk
+# edges: 300 edges / 11.0 km are majority-in-park (60% of that length in
+# Central Park, 0.00 km in well-inventoried Prospect/Riverside/Flushing
+# Meadows -- the empty face itself selects the Forestry-blind parks), 84
+# edges straddle a boundary majority-outside and correctly stay street.
+SIDEWALK_FALLBACK_PARK_FRACTION = 0.5
+
 # NYC Parks Properties `typecategory` values excluded from the park canopy
 # mask AND the park-reach routing rule (both share citywide_park_shape_m())
 # -- roadside/traffic-island types, a locked scope decision: these aren't

@@ -149,6 +149,15 @@ def _score_shade(edges: list[dict]) -> None:
     logger.info("[build] park canopy")
     canopy.score_park_paths(edges)
 
+    # And the sidewalks Forestry could NOT answer -- no block face found,
+    # or a treeless face inside a city park (Central Park's paths beside
+    # its drives) -- fall back to the raster too. Ordinary treeless
+    # streets keep their honest zero; crossings are untouched. The
+    # populations and their 2026-08-27 measurements are in canopy.py's
+    # module docstring.
+    logger.info("[build] sidewalk fallback")
+    canopy.score_sidewalk_fallback(edges)
+
 
 def _readback_matches(out_path, expected_nodes: int, expected_edges: int) -> bool:
     """Re-open the written file and check it holds what we just built.

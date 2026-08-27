@@ -267,6 +267,33 @@ def test_a_tree_off_any_face_is_not_credited_anywhere():
     assert tally["face_without_trees"] == 1
 
 
+def test_the_two_zero_cases_are_recorded_on_the_edge():
+    """canopy.score_sidewalk_fallback consumes `face_outcome` to tell
+    "Forestry could not answer" from "Forestry answered zero" -- if the
+    marker silently stops being written, the fallback becomes a no-op
+    while every scoring test stays green. Scored edges and non-sidewalk
+    kinds must NOT carry it: the marker's absence is what protects them
+    from the fallback."""
+    f = face()
+    no_face = edge("a", "b", 40.0, first=(9.9, 9.9))       # no profile
+    treeless = edge("b", "c", 40.0, first=(0.0, 0.0))      # face, no trees
+    scored = edge("c", "d", 40.0, first=(0.1, 0.1))        # face with a tree
+    crossing = edge("d", "e", 12.0, kind="footway/crossing",
+                    first=(0.2, 0.2))
+    index = fake_index(points={(-73.9, 40.7): f},
+                       spans={(0.0, 0.0): [(face("F9"), 40.0)],
+                              (0.1, 0.1): [(f, 40.0)],
+                              (0.2, 0.2): [(f, 12.0)]})
+
+    blocks.score_edges([no_face, treeless, scored, crossing],
+                       [tree(-73.9, 40.7)], index)
+
+    assert no_face["face_outcome"] == "no_face"
+    assert treeless["face_outcome"] == "treeless_face"
+    assert "face_outcome" not in scored
+    assert "face_outcome" not in crossing
+
+
 def test_dead_trees_never_reach_a_block():
     f = face()
     edges = [edge("a", "b", 40.0, first=(0.0, 0.0))]

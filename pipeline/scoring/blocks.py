@@ -54,13 +54,23 @@ WHAT SCORES ZERO, AND WHY
               shade. They are also kept OUT of a face's length denominator,
               or a crossing's metres would dilute the density of pavement
               it is not part of.
-  park paths  No kerb, no block face. Covered by the land-cover raster
-              under the settled parks rule; that code is not written yet,
-              so they score zero for now.
+  park paths  No kerb, no block face. Scored from the land-cover raster
+              by pipeline/scoring/canopy.py, which runs after this.
   the rest    Anything with no block face within config.BLOCK_FACE_MAX_M.
               80.9% of trees and ~98% of sidewalk length do attach; of the
               trees that do not, 80.8% are inside park polygons and are
               correctly excluded.
+
+The two ways a SIDEWALK edge can end up at zero here are recorded on the
+edge as `face_outcome` ("no_face" / "treeless_face"), because they mean
+different things and only downstream code can act on the difference:
+no-face means Forestry structurally COULD NOT answer, and a treeless face
+inside a park means Forestry was never there to ask (2026-08-27
+measurements in config.SIDEWALK_FALLBACK_PARK_FRACTION's comment).
+canopy.score_sidewalk_fallback consumes the marker and gives exactly those
+edges the raster's answer instead; an ordinary treeless street keeps its
+honest zero. The marker is pipeline-internal -- export.py whitelists its
+fields, so it never reaches the file.
 """
 
 import logging
@@ -150,6 +160,10 @@ def score_edges(edges: list[dict], tree_rows: list[dict], index) -> dict:
             continue
         profile = profile_of.get(position)
         if profile is None:
+            # Recorded on the edge, not just tallied: canopy.py's
+            # score_sidewalk_fallback needs to know WHICH zeros are
+            # "Forestry could not answer" rather than "answered zero".
+            edge["face_outcome"] = "no_face"
             tally["no_face"] += 1
             continue
 
@@ -181,6 +195,7 @@ def score_edges(edges: list[dict], tree_rows: list[dict], index) -> dict:
             scored_any = True
 
         if not scored_any:
+            edge["face_outcome"] = "treeless_face"
             tally["face_without_trees"] += 1
             continue
 

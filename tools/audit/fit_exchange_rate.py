@@ -88,14 +88,25 @@ def main() -> int:
     ped_ways, _ = pedestrian.read_ways(config.OSM_EXTRACT_PATH, nyc_shape)
     _, edges = pedestrian.build_graph(ped_ways)
     sidewalks = []
+    fallback_excluded = 0
     for edge in edges:
         if edge.get("kind") not in SHADED_KINDS:
             continue
         rec = scores.get((edge["u"], edge["v"], int(edge["key"])))
-        if rec is not None and rec["length_m"] >= args.min_edge_m:
-            sidewalks.append(rec)
+        if rec is None or rec["length_m"] < args.min_edge_m:
+            continue
+        # Sidewalk edges Forestry could not answer carry raster-derived
+        # scores since 2026-08-27 (canopy.score_sidewalk_fallback), and
+        # tree_park_canopy marks exactly that. Keeping them in the sample
+        # would regress the raster against itself and drag the fit toward
+        # the current DENSITY_AT_FULL_COVERAGE by construction.
+        if rec.get("tree_park_canopy"):
+            fallback_excluded += 1
+            continue
+        sidewalks.append(rec)
     logger.info(f"[fit] {len(sidewalks):,} sidewalk edges >= "
-                f"{args.min_edge_m}m")
+                f"{args.min_edge_m}m ({fallback_excluded:,} raster-fallback "
+                f"edges excluded)")
 
     rng = random.Random(args.seed)
     sample = rng.sample(sidewalks, min(args.sample, len(sidewalks)))
