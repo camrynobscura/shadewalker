@@ -1,5 +1,6 @@
 import type { RouteFeature } from '../api'
 import { formatDistance, formatDistanceParts } from '../format'
+import { displayShade } from '../shade'
 import styles from './RouteStats.module.css'
 
 /** Below this shade_fraction, the route is objectively exposed — say so
@@ -39,7 +40,16 @@ import styles from './RouteStats.module.css'
  *
  * Seasonal variation is deliberate, not drift: April really is less shaded
  * than July (CANOPY_BY_MONTH), so the same bar firing more in spring is
- * the honest geography. */
+ * the honest geography.
+ *
+ * The 2026-08-27 display curve (shade.ts) does NOT move this bar: the
+ * comparison stays on the raw measured fraction, and because
+ * displayShade is strictly monotone, exactly the same routes fire as
+ * before -- the firing profile above is preserved without re-derivation.
+ * Only the PRINTED numbers go through the curve (both of them, stat and
+ * warning, so they can never disagree); at this bar the warning shows
+ * itself at ~18% displayed rather than 15% measured, and its words stay
+ * true either way. */
 const LOW_SHADE_FRACTION = 0.15
 
 /** When at least this share of the route's tree score is park-canopy AREA
@@ -98,6 +108,10 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
 function StatsBody({ route, description }: { route: RouteFeature; description: string }) {
   const stats = route.properties
   const isLowShade = stats.shade_fraction < LOW_SHADE_FRACTION
+  // Computed once and used by BOTH the stat and the warning below --
+  // the invariant that the warning can never disagree with the number
+  // now includes agreeing about the display curve.
+  const shownShadePct = Math.round(displayShade(stats.shade_fraction) * 100)
   const dist = formatDistanceParts(stats.length_m)
 
   return (
@@ -143,14 +157,14 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
             </div>
           )}
           <div className={styles.stat}>
-            <span className={styles.statVal}>{Math.round(stats.shade_fraction * 100)}%</span>
+            <span className={styles.statVal}>{shownShadePct}%</span>
             <span className={styles.statLabel}>shaded</span>
           </div>
         </div>
 
         {isLowShade && (
           <p className={styles.sparseNote}>
-            // LOW_SHADE: {Math.round(stats.shade_fraction * 100)}% shaded over{' '}
+            // LOW_SHADE: {shownShadePct}% shaded over{' '}
             {formatDistance(stats.length_m)} — expect mostly direct sun
           </p>
         )}

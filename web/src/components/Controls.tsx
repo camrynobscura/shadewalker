@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { geocode, reverseGeocode, type Point, type RouteFeature } from '../api'
 import { formatCoords, formatDistance } from '../format'
+import { displayShade } from '../shade'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import styles from './Controls.module.css'
 
@@ -185,11 +186,19 @@ export interface RouteComparison {
  * "-3 trees" beside "+5% shade" would muddy the very thing this line is for.
  * Absolute tree_count still shows in RouteStats. After the clamp, all three
  * deltas here are guaranteed >= 0, which is why the template can hardcode a
- * leading "+". */
+ * leading "+".
+ *
+ * The shade delta subtracts DISPLAYED values (shade.ts), not raw
+ * fractions: RouteStats shows curved numbers, and "+5% shade" must equal
+ * the difference a user can check between two presets on screen.
+ * displayShade is strictly monotone, so the clamp's >= 0 guarantee
+ * carries through to the curved delta unchanged. */
 export function compareRoutes(selected: RouteFeature, baseline: RouteFeature): RouteComparison {
   return {
     extraMinutes: Math.round(selected.properties.minutes - baseline.properties.minutes),
-    extraShadePct: Math.round((selected.properties.shade_fraction - baseline.properties.shade_fraction) * 100),
+    extraShadePct: Math.round(
+      (displayShade(selected.properties.shade_fraction) - displayShade(baseline.properties.shade_fraction)) * 100,
+    ),
     extraLengthM: Math.round((selected.properties.length_m - baseline.properties.length_m) * 10) / 10,
   }
 }
