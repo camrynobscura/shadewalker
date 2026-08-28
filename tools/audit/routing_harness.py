@@ -26,8 +26,9 @@ USAGE
 
     uv run python tools/audit/routing_harness.py compare before.json after.json
 
-Loading the graph takes ~30-60s and ~1.5GB RAM per run; run and compare
-are separate processes so two graphs never coexist.
+Loading the graph takes ~10-60s and peaks ~1.1GB RAM (0.7GB steady,
+measured in-process 2026-08-28); run and compare are separate processes
+so two graphs never coexist.
 """
 
 import argparse
