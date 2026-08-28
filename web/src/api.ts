@@ -11,8 +11,28 @@ export interface Point {
   lon: number
 }
 
-export interface RouteSegment {
+/** One turn-by-turn step. The server folds crossings and nameless scraps
+ * into the street runs they interrupt (evidence-based, no length
+ * thresholds -- server/graph_store.py's build_steps), so each step is a
+ * stretch a walker experiences as one instruction. */
+export interface RouteStep {
+  /** What to do at the start of this stretch. */
+  action:
+    | 'depart'
+    | 'continue'
+    | 'left'
+    | 'right'
+    | 'sharp_left'
+    | 'sharp_right'
+    | 'cross_side'
+  /** Street name, or "unnamed path". */
   name: string
+  /** Which side of the street this stretch walks — 'north'/'south'/
+   * 'east'/'west', or '' when no plain word is honest (diagonal streets,
+   * curves, kerbless paths). Always set on 'cross_side' steps. */
+  side: string
+  /** 8-way compass word on 'depart' steps, '' otherwise. */
+  heading: string
   length_m: number
 }
 
@@ -44,7 +64,7 @@ export interface RouteFeature {
      * tree_count undersells the real cover (a Central Park loop can be
      * "83% shaded, 3 trees"), so RouteStats hides the count. */
     park_canopy_share: number
-    segments: RouteSegment[]
+    segments: RouteStep[]
   }
 }
 

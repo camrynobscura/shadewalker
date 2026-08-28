@@ -41,7 +41,8 @@ def _minimal_citywide():
         "u": "10135442390",
         "v": "10135442393",
         "key": 0,
-        "side": "C",
+        "side": "",
+        "kind": "footway/sidewalk",
         "length_m": 84.2,
         "name": "Court Street",
         "coords": [[-74.002788, 40.680597], [-74.001390, 40.680205]],
@@ -77,8 +78,25 @@ def test_write_citywide_round_trips_nodes_and_edges(citywide_dir):
     assert edge["v"] == "10135442393"
     assert edge["name"] == "Court Street"
     assert edge["length_m"] == 84.2
-    assert edge["side"] == "C"
+    assert edge["side"] == ""
+    assert edge["kind"] == "footway/sidewalk"
     assert edge["coords"] == [[-74.002788, 40.680597], [-74.001390, 40.680205]]
+
+
+def test_fold_names_are_written_only_when_present(citywide_dir):
+    """The folding evidence rides along on unnamed edges and stays off
+    named ones -- an absent key is the contract, not an empty list."""
+    nodes, edges = _minimal_citywide()
+    edges[0]["name"] = ""
+    edges[0]["fold_names"] = ["Court Street", "Union Street"]
+    export.write_citywide(nodes, edges)
+    edge = _read_back(citywide_dir)["edges"][0]
+    assert edge["fold_names"] == ["Court Street", "Union Street"]
+
+    nodes, edges = _minimal_citywide()
+    export.write_citywide(nodes, edges)
+    edge = _read_back(citywide_dir)["edges"][0]
+    assert "fold_names" not in edge
 
 
 def test_write_citywide_lands_where_graph_store_globs_for_it(citywide_dir):

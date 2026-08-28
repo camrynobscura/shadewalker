@@ -38,10 +38,11 @@ class FakeIndex:
     within range" reaches the code under test.
     """
 
-    def __init__(self, points=None, lines=None, faces=None):
+    def __init__(self, points=None, lines=None, faces=None, sides=None):
         self._points = points or {}
         self._lines = lines or {}
         self._faces = faces or {}
+        self._sides = sides or {}
 
     def match_point(self, lon, lat, max_m=None):
         hit = self._points.get((lon, lat))
@@ -53,8 +54,14 @@ class FakeIndex:
     def face(self, face_id):
         return self._faces.get(face_id)
 
+    def compass_side(self, coords, face_id):
+        # The real thing is geometric (kerb direction); its own tests live
+        # in test_pipeline_graph_blockface.py. Here it's a lookup so these
+        # tests can assert the wiring, not the geometry.
+        return self._sides.get(face_id, "")
 
-def fake_index(points=None, spans=None):
+
+def fake_index(points=None, spans=None, sides=None):
     """Build a FakeIndex from {first coord: [(Face, metres), ...]}.
 
     Spelled out per edge rather than derived from edge length, because the
@@ -71,11 +78,11 @@ def fake_index(points=None, spans=None):
         lines[first] = profile
     for block_face in (points or {}).values():
         faces[block_face.face_id] = block_face
-    return FakeIndex(points=points, lines=lines, faces=faces)
+    return FakeIndex(points=points, lines=lines, faces=faces, sides=sides)
 
 
 def edge(u, v, length_m, kind="footway/sidewalk", first=(0.0, 0.0)):
-    return {"u": u, "v": v, "key": 0, "side": "C", "length_m": length_m,
+    return {"u": u, "v": v, "key": 0, "side": "", "length_m": length_m,
             "name": "", "kind": kind,
             "coords": [list(first), [1.0, 1.0]]}
 
@@ -305,15 +312,18 @@ def test_dead_trees_never_reach_a_block():
 
 # --- side, and the evergreen split ------------------------------------
 
-def test_side_is_filled_from_the_block_face():
-    """pedestrian.py leaves side as the placeholder "C" for this step."""
+def test_side_is_the_compass_side_of_the_dominant_face():
+    """pedestrian.py leaves side as the "" placeholder; scoring fills the
+    COMPASS side from the edge's geometry against its face's kerb -- not
+    the face's CSCL L/R, which flips arbitrarily between blocks."""
     edges = [edge("a", "b", 40.0, first=(0.0, 0.0))]
-    assert edges[0]["side"] == "C"
+    assert edges[0]["side"] == ""
     f = face(side="R")
     index = fake_index(points={(-73.9, 40.7): f},
-                       spans={(0.0, 0.0): [(f, 40.0)]})
+                       spans={(0.0, 0.0): [(f, 40.0)]},
+                       sides={"F1": "N"})
     blocks.score_edges(edges, [tree(-73.9, 40.7)], index)
-    assert edges[0]["side"] == "R"
+    assert edges[0]["side"] == "N"
 
 
 def test_a_spanning_edge_takes_the_side_of_its_dominant_face():
@@ -323,9 +333,10 @@ def test_a_spanning_edge_takes_the_side_of_its_dominant_face():
     barely = face("F2", side="L")
     spanning = edge("a", "b", 100.0, first=(0.0, 0.0))
     index = fake_index(points={(-73.9, 40.7): mostly},
-                       spans={(0.0, 0.0): [(mostly, 90.0), (barely, 10.0)]})
+                       spans={(0.0, 0.0): [(mostly, 90.0), (barely, 10.0)]},
+                       sides={"F1": "N", "F2": "S"})
     blocks.score_edges([spanning], [tree(-73.9, 40.7)], index)
-    assert spanning["side"] == "R"
+    assert spanning["side"] == "N"
 
 
 def test_evergreen_and_deciduous_stay_in_their_own_columns():
@@ -352,14 +363,15 @@ def test_two_faces_are_scored_independently():
              edge("c", "d", 50.0, first=(0.1, 0.1))]
     index = fake_index(points={(-73.9, 40.7): left},
                        spans={(0.0, 0.0): [(left, 50.0)],
-                              (0.1, 0.1): [(right, 50.0)]})
+                              (0.1, 0.1): [(right, 50.0)]},
+                       sides={"F1": "W", "F2": "E"})
 
     blocks.score_edges(edges, [tree(-73.9, 40.7)], index)
 
     assert edges[0]["tree_deciduous"] == pytest.approx(1.0)
     assert edges[1]["tree_deciduous"] == 0.0   # the other side of the street
-    assert edges[0]["side"] == "L"
-    assert edges[1]["side"] == "R"
+    assert edges[0]["side"] == "W"
+    assert edges[1]["side"] == "E"
 
 
 def test_the_tally_counts_spanning_edges():

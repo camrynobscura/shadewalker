@@ -97,8 +97,11 @@ def score_edges(edges: list[dict], tree_rows: list[dict], index) -> dict:
     absent key and a zero mean different things and only one of them is
     true here.
 
-    Also fills `side` from the block face's own L/R, which is what
-    pedestrian.py's "C" placeholder was reserved for.
+    Also fills `side` -- the COMPASS side of the parent street this
+    pavement is on ("N"/"S"/"E"/"W", or "" when no plain word is honest),
+    which is what pedestrian.py's placeholder was reserved for. See
+    BlockFaceIndex.compass_side for why it is geometric rather than
+    CSCL's L/R.
     """
     # --- trees onto faces ---------------------------------------------
     per_face: dict[str, Totals] = {}
@@ -170,11 +173,13 @@ def score_edges(edges: list[dict], tree_rows: list[dict], index) -> dict:
         # The face this edge has the most pavement on. An edge spanning
         # blocks still has to report ONE side, and the dominant face is the
         # only defensible answer -- it is also what the whole edge is named
-        # after downstream.
+        # after downstream. The side is COMPASS ("N"/"S"/"E"/"W", "" when
+        # no plain word is honest), computed from this edge's own geometry
+        # against that face's kerb -- NOT the face's CSCL L/R, which flips
+        # arbitrarily between blocks (measured 53.3% at side-street
+        # boundaries, 2026-08-28; see BlockFaceIndex.compass_side).
         dominant = max(profile.items(), key=lambda item: item[1])[0]
-        dominant_face = index.face(dominant)
-        if dominant_face is not None:
-            edge["side"] = dominant_face.side
+        edge["side"] = index.compass_side(edge["coords"], dominant)
 
         deciduous = evergreen = count = 0.0
         scored_any = False

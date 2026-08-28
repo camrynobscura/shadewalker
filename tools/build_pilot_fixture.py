@@ -132,7 +132,11 @@ def main() -> int:
         logger.error("empty selection -- refusing to write")
         return 1
 
-    scored = [e for e in kept_edges if e["side"] in ("L", "R")]
+    # A non-empty side means the edge matched a block face and went through
+    # scoring (compass words since 2026-08-28; some scored edges legitimately
+    # read "" on diagonals/curves, so this UNDERCOUNTS a little -- fine for
+    # a sanity statistic that exists to catch "all zeroed").
+    scored = [e for e in kept_edges if e["side"]]
     trees = sum(e["tree_count"] for e in kept_edges)
     logger.info(f"  {len(scored):,} scored pavement edges, "
                 f"{trees:,.0f} trees -- the fixture carries REAL shade, so "

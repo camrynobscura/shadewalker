@@ -28,6 +28,7 @@ import gzip
 import hashlib
 import json
 import math
+import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,17 +68,269 @@ def _dist2(p: list[float] | np.ndarray, q: np.ndarray) -> float:
     return (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2
 
 
-def _add_segment(segments: list[dict], name: str, length_m: float) -> None:
-    """Appends one leg of turn-by-turn directions, merging into the previous
-    leg if it's the same street. Skips legs that round to 0 m — a click
-    landing almost exactly at a real intersection would otherwise add a
-    spurious "0 m along X" leg."""
-    if round(length_m, 1) <= 0:
-        return
-    if segments and segments[-1]["name"] == name:
-        segments[-1]["length_m"] += length_m
-    else:
-        segments.append({"name": name, "length_m": length_m})
+# ── Turn-by-turn step building ──────────────────────────────────────────
+#
+# A route arrives as tiny legs -- one per graph edge, chopped wherever OSM
+# chopped the pavement -- and used to be rendered one line per name change,
+# which made a 3km walk read as 72 lines: every corner is
+# [run along A] [8m crossing] [run along A], so the crossings and kerb
+# scraps shredded each street into fragments. Geometry alone cannot fix it
+# (a filter loose enough to keep real corners keeps 2m kerb jogs; one tight
+# enough to drop the jogs collapsed the Brooklyn Bridge to a single step --
+# measured 2026-08-23). So folding is EVIDENCE-based, no length thresholds:
+#
+#   - a crossing/traffic-island leg (OSM's own label) is never a street
+#     someone walks along: it folds into the runs around it regardless of
+#     its own derived name (which under parallel naming is usually the
+#     along-street anyway, but for a crossing over your own street is the
+#     side street -- either way a labeling artifact, not a walk).
+#   - an unnamed leg folds into an adjacent run only when that run's name
+#     is among the leg's own fold_names (pipeline/graph/naming.py's
+#     plausible-parents evidence). A nameless path NO street claims stays
+#     an honest "unnamed path" step whatever its length -- that is the 69m
+#     park cut-through, and hiding it would misreport where the walker
+#     walks.
+#   - a step boundary is where the street NAME changes; bearings supply
+#     only the word (left/right/straight).
+#   - a side switch inside one street ("cross to the north side") is
+#     believed only when a crossing leg sits between the two sides --
+#     you cannot switch sides of a roadway without crossing it, so a
+#     single mis-computed side value cannot inject a phantom step.
+
+_STRAIGHT_MAX_DEG = 30.0   # |turn| at most this reads as "continue"
+_SHARP_MIN_DEG = 150.0     # beyond this, "sharp left/right"
+_BEARING_SAMPLE_M = 20.0   # how much of a run's geometry sets its bearing
+
+_SIDE_WORDS = {"N": "north", "S": "south", "E": "east", "W": "west"}
+_COMPASS8 = ["north", "northeast", "east", "southeast",
+             "south", "southwest", "west", "northwest"]
+
+
+def _is_connector_kind(kind: str) -> bool:
+    return "crossing" in kind or "traffic_island" in kind
+
+
+def _bearing(a, b) -> float:
+    """Forward bearing a->b in degrees clockwise from north. Flat-earth
+    with the cos(lat) correction -- fine at the ~20m scale bearings are
+    sampled over."""
+    dx = (b[0] - a[0]) * math.cos(math.radians((a[1] + b[1]) / 2))
+    dy = b[1] - a[1]
+    return math.degrees(math.atan2(dx, dy)) % 360.0
+
+
+def _run_bearing(coords, from_start: bool) -> float:
+    """A run's direction over ~_BEARING_SAMPLE_M of geometry: leaving its
+    start (from_start) or arriving at its end (facing travel direction
+    both ways)."""
+    points = coords if from_start else coords[::-1]
+    accumulated = 0.0
+    chosen = points[min(1, len(points) - 1)]
+    for a, b in zip(points, points[1:]):
+        accumulated += math.hypot(
+            (b[0] - a[0]) * math.cos(math.radians(a[1])) * 111_320.0,
+            (b[1] - a[1]) * 110_540.0)
+        chosen = b
+        if accumulated >= _BEARING_SAMPLE_M:
+            break
+    bearing = _bearing(points[0], chosen)
+    return bearing if from_start else (bearing + 180.0) % 360.0
+
+
+def _run_coords(run) -> list:
+    points: list = []
+    for leg in run["legs"]:
+        points.extend(leg["coords"] if not points else leg["coords"][1:])
+    return points
+
+
+def _foldable_into(leg, name: str) -> bool:
+    """May this leg vanish into a run called `name`?"""
+    if _is_connector_kind(leg["kind"]):
+        return True
+    return not leg["name"] and name in leg["fold_names"]
+
+
+def _display_name(leg) -> str:
+    """Crossings never form runs under their own name -- their derived
+    name is which street they cross, not a street being walked along."""
+    return "" if _is_connector_kind(leg["kind"]) else leg["name"]
+
+
+def _build_runs(legs: list[dict]) -> list[dict]:
+    """Consecutive same-name legs -> runs, then fold interruptions into
+    the street runs around them on the evidence rules above."""
+    runs: list[dict] = []
+    for leg in legs:
+        if round(leg["length_m"], 1) <= 0:
+            continue
+        name = _display_name(leg)
+        if runs and runs[-1]["name"] == name:
+            runs[-1]["legs"].append(leg)
+        else:
+            runs.append({"name": name, "legs": [leg]})
+
+    def is_interruption(run) -> bool:
+        return run["name"] == ""
+
+    def foldable(run, name) -> bool:
+        return all(_foldable_into(leg, name) for leg in run["legs"])
+
+    changed = True
+    while changed:
+        changed = False
+        for i in range(1, len(runs) - 1):
+            if is_interruption(runs[i]) \
+                    and runs[i - 1]["name"] == runs[i + 1]["name"] \
+                    and runs[i - 1]["name"] != "" \
+                    and foldable(runs[i], runs[i - 1]["name"]):
+                runs[i - 1]["legs"].extend(runs[i]["legs"])
+                runs[i - 1]["legs"].extend(runs[i + 1]["legs"])
+                del runs[i:i + 2]
+                changed = True
+                break
+        if changed:
+            continue
+        # a connector at a NAME boundary (turning off A onto B) is
+        # transition ground; it joins the arrival street's step. The
+        # crossing at a corner is the common case.
+        for i in range(1, len(runs) - 1):
+            if not is_interruption(runs[i]):
+                continue
+            if foldable(runs[i], runs[i + 1]["name"]):
+                runs[i + 1]["legs"][0:0] = runs[i]["legs"]
+                del runs[i]
+                changed = True
+                break
+            if foldable(runs[i], runs[i - 1]["name"]):
+                runs[i - 1]["legs"].extend(runs[i]["legs"])
+                del runs[i]
+                changed = True
+                break
+        if changed:
+            continue
+        if len(runs) >= 2 and is_interruption(runs[0]) \
+                and foldable(runs[0], runs[1]["name"]):
+            runs[1]["legs"][0:0] = runs[0]["legs"]
+            del runs[0]
+            changed = True
+            continue
+        if len(runs) >= 2 and is_interruption(runs[-1]) \
+                and foldable(runs[-1], runs[-2]["name"]):
+            runs[-2]["legs"].extend(runs[-1]["legs"])
+            del runs[-1]
+            changed = True
+
+    for run in runs:
+        run["length_m"] = sum(leg["length_m"] for leg in run["legs"])
+    return runs
+
+
+def _leg_bearing_180(coords) -> float:
+    """A leg's direction end-to-end, mod 180 (undirected)."""
+    return _bearing(coords[0], coords[-1]) % 180.0
+
+
+def _split_run_at_side_switches(run) -> list[dict]:
+    """One street run -> pieces at real side switches. A switch needs BOTH
+    a new non-empty side and, since the last sided leg, a crossing
+    PERPENDICULAR to the direction of travel -- crossing your own street
+    is always across your path, while the corner crossing over a side
+    street runs along it. Without the perpendicularity test, the 6.78% of
+    block boundaries where the compass word shifts (bends, near-diagonal
+    tilts -- measured on the 2026-08-28 export) would each fire a phantom
+    "cross to the X side" at their corner crossing. A side flip with no
+    perpendicular crossing behind it is treated as the data artifact it
+    is and ignored.
+
+    Each piece's displayed side is the word carrying a strict MAJORITY of
+    the piece's sided length -- a run that genuinely bends between words
+    shows none rather than the first half's."""
+    pieces = [{"name": run["name"], "legs": [], "switched": False}]
+    last_side = ""         # last side actually committed
+    crossed_since = False  # perpendicular crossing since the last sided leg
+    travel_bearing = None  # last walked (non-connector) leg's direction
+    for leg in run["legs"]:
+        if _is_connector_kind(leg["kind"]):
+            if travel_bearing is not None and len(leg["coords"]) >= 2:
+                d = abs(_leg_bearing_180(leg["coords"]) - travel_bearing)
+                if min(d, 180.0 - d) >= 60.0:
+                    crossed_since = True
+        else:
+            if len(leg["coords"]) >= 2 and round(leg["length_m"], 1) > 0:
+                travel_bearing = _leg_bearing_180(leg["coords"])
+        side = leg["side"]
+        if side:
+            if not last_side or side == last_side:
+                last_side = side
+                crossed_since = False
+            elif crossed_since:
+                pieces.append({"name": run["name"], "legs": [],
+                               "switched": True})
+                last_side = side
+                crossed_since = False
+            # else: a flip with no perpendicular crossing -- ignored
+        pieces[-1]["legs"].append(leg)
+    for piece in pieces:
+        piece["length_m"] = sum(leg["length_m"] for leg in piece["legs"])
+        by_side: dict[str, float] = {}
+        sided_total = 0.0
+        for leg in piece["legs"]:
+            if leg["side"]:
+                by_side[leg["side"]] = (by_side.get(leg["side"], 0.0)
+                                        + leg["length_m"])
+                sided_total += leg["length_m"]
+        piece["side"] = ""
+        for side, side_length in by_side.items():
+            if side_length * 2 > sided_total:
+                piece["side"] = side
+    return pieces
+
+
+def build_steps(legs: list[dict]) -> list[dict]:
+    """Raw route legs -> turn-by-turn steps, the response's `segments`.
+
+    Each step: {action, name, side, heading, length_m}.
+      action   "depart" | "continue" | "left" | "right" | "sharp_left" |
+               "sharp_right" | "cross_side"
+      name     street name, or "unnamed path"
+      side     "north"/"south"/"east"/"west" or "" -- which side of the
+               street this stretch walks
+      heading  8-way compass word on "depart" steps, "" otherwise
+      length_m rounded to 0.1
+    """
+    pieces: list[dict] = []
+    for run in _build_runs(legs):
+        pieces.extend(_split_run_at_side_switches(run))
+
+    steps: list[dict] = []
+    previous = None
+    for piece in pieces:
+        name = piece["name"] or "unnamed path"
+        side = _SIDE_WORDS.get(piece["side"], "")
+        coords = _run_coords(piece)
+        if previous is None:
+            outbound = _run_bearing(coords, from_start=True)
+            action = "depart"
+            heading = _COMPASS8[int(((outbound + 22.5) % 360) // 45)]
+        elif piece.get("switched"):
+            action, heading = "cross_side", ""
+        else:
+            inbound = _run_bearing(_run_coords(previous), from_start=False)
+            outbound = _run_bearing(coords, from_start=True)
+            delta = ((outbound - inbound + 180.0) % 360.0) - 180.0
+            heading = ""
+            if abs(delta) <= _STRAIGHT_MAX_DEG:
+                action = "continue"
+            elif abs(delta) >= _SHARP_MIN_DEG:
+                action = "sharp_right" if delta > 0 else "sharp_left"
+            else:
+                action = "right" if delta > 0 else "left"
+        steps.append({"action": action, "name": name, "side": side,
+                      "heading": heading,
+                      "length_m": round(piece["length_m"], 1)})
+        previous = piece
+    return steps
 
 
 def clamp_shade_monotonic(routes: list[dict], weights: list[float]) -> list[dict]:
@@ -266,6 +519,14 @@ class GraphStore:
         # _tree_deciduous, so it's a share of the score, never an addition.
         self._tree_park_canopy = np.empty(0, dtype=np.float32)
         self._names: list[str] = []
+        # Direction-rendering fields (2026-08-28): OSM's own kind
+        # ("footway/crossing"...) so crossings fold into the street run
+        # they interrupt; the COMPASS side of the parent street; and the
+        # fold_names evidence for absorbing nameless scraps. All three
+        # default empty for exports that predate them.
+        self._kinds: list[str] = []
+        self._sides: list[str] = []
+        self._fold_names: list[tuple] = []
         # Edge shapes, packed: all edges' [lon, lat] points concatenated
         # into one flat block. float64, not float32 — at NYC longitudes
         # float32's resolution is ~0.5m, too coarse for snapping/drawing.
@@ -299,6 +560,9 @@ class GraphStore:
         # what they mean -- no canopy credit was computed for them.
         canopy_credit: list[float] = []
         names: list[str] = []
+        kinds: list[str] = []
+        sides: list[str] = []
+        fold_names: list[tuple] = []
         coords_per_edge: list[list[list[float]]] = []  # packed into _coord_buf after the loop
         seen_edges: dict[tuple, int] = {}  # (u, v, key, side) -> position in the lists above
         seen_geometries: set[tuple] = set()  # (u, v, side, geometry hash) -- see below
@@ -314,7 +578,7 @@ class GraphStore:
                     node_lonlat.append([lon, lat])
 
         def _emit(u_id, v_id, key, side, seg_length_m, decid, everg,
-                  cnt, canopy, name, coords):
+                  cnt, canopy, name, kind, folds, coords):
             """Add one edge (a whole edge, or one piece of a split one) to
             the graph arrays, through the existing border-dedupe. Splitting
             reduces the severed-overlap class to the already-solved
@@ -343,6 +607,8 @@ class GraphStore:
                     counts[existing] = cnt
                     canopy_credit[existing] = canopy
                     names[existing] = name
+                    kinds[existing] = kind
+                    fold_names[existing] = folds
                     coords_per_edge[existing] = coords
                 return
 
@@ -370,6 +636,9 @@ class GraphStore:
             counts.append(cnt)
             canopy_credit.append(canopy)
             names.append(name)
+            kinds.append(kind)
+            sides.append(side)
+            fold_names.append(folds)
             coords_per_edge.append(coords)
 
         # Pass 2: edges, each emitted through the dedupe above.
@@ -380,9 +649,16 @@ class GraphStore:
                       edge["length_m"], edge["tree_deciduous"],
                       edge["tree_evergreen"], edge["tree_count"],
                       edge.get("tree_park_canopy", 0.0), edge["name"],
+                      # sys.intern: 488k kind strings are ~7 distinct
+                      # values; interning stores each once.
+                      sys.intern(edge.get("kind", "")),
+                      tuple(edge.get("fold_names", ())),
                       edge["coords"])
 
         self._names = names
+        self._kinds = kinds
+        self._sides = sides
+        self._fold_names = fold_names
         self._node_lonlat = np.array(node_lonlat)
         # The data's actual extent — whatever tiles happen to be loaded —
         # rather than a hardcoded bbox from pipeline/config.py, so this
@@ -863,7 +1139,15 @@ class GraphStore:
             # clean "no route" here rather than an error.
             return None
 
-        segments: list[dict] = []  # consecutive same-street runs, for text directions
+        legs: list[dict] = []  # raw per-edge legs; build_steps folds them
+
+        def _leg(edge_idx: int, leg_length_m: float, leg_coords) -> None:
+            legs.append({"name": self._names[edge_idx],
+                         "side": self._sides[edge_idx],
+                         "kind": self._kinds[edge_idx],
+                         "fold_names": self._fold_names[edge_idx],
+                         "length_m": float(leg_length_m),
+                         "coords": [list(point) for point in leg_coords]})
 
         if best_plan[0] == "direct":
             _, direct_dist_m = best_plan
@@ -877,12 +1161,12 @@ class GraphStore:
             walked_tree_score = float(
                 self._tree_deciduous[start.edge] + self._tree_evergreen[start.edge]
             )
-            _add_segment(segments, self._names[start.edge] or "unnamed path", length_m)
+            _leg(start.edge, direct_dist_m, coords)
         else:
             _, s_node, s_dist_m, e_node, e_dist_m, edge_path = best_plan
 
             coords = self._edge_substring(start.edge, start.point, self._node_lonlat[s_node].tolist())
-            _add_segment(segments, self._names[start.edge] or "unnamed path", s_dist_m)
+            _leg(start.edge, s_dist_m, coords)
 
             current = s_node
             for e in edge_path:
@@ -908,11 +1192,11 @@ class GraphStore:
                 # JSON-serializable and coords feeds the response directly.
                 coords.extend(step[1:].tolist())  # skip duplicated joint
                 current = next_node
-                _add_segment(segments, self._names[e] or "unnamed path", float(self._length[e]))
+                _leg(e, float(self._length[e]), step.tolist())
 
             lead_out = self._edge_substring(end.edge, self._node_lonlat[e_node].tolist(), end.point)
             coords.extend(lead_out[1:])
-            _add_segment(segments, self._names[end.edge] or "unnamed path", e_dist_m)
+            _leg(end.edge, e_dist_m, lead_out)
 
             network_length_m = float(self._length[edge_path].sum())
             length_m = s_dist_m + network_length_m + e_dist_m
@@ -972,7 +1256,5 @@ class GraphStore:
                 round(float(canopy_score) / float(walked_tree_score), 3)
                 if walked_tree_score else 0.0
             ),
-            "segments": [
-                {"name": s["name"], "length_m": round(s["length_m"], 1)} for s in segments
-            ],
+            "segments": build_steps(legs),
         }

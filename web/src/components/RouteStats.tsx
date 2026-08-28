@@ -1,7 +1,28 @@
-import type { RouteFeature } from '../api'
+import type { RouteFeature, RouteStep } from '../api'
 import { formatDistance, formatDistanceParts } from '../format'
 import { displayShade } from '../shade'
 import styles from './RouteStats.module.css'
+
+/** One step's instruction text, minus the distance (the <li> appends
+ * that uniformly). Must tell the same story as server/app.py's
+ * _describe — the aria description and this list are twins. */
+function stepText(step: RouteStep): string {
+  const side = step.side ? ` (${step.side} side)` : ''
+  switch (step.action) {
+    case 'depart':
+      return `Head ${step.heading} on ${step.name}${side}`
+    case 'continue':
+      return `Continue onto ${step.name}${side}`
+    case 'cross_side':
+      return `Cross to the ${step.side} side of ${step.name}`
+    case 'sharp_left':
+      return `Turn sharply left onto ${step.name}${side}`
+    case 'sharp_right':
+      return `Turn sharply right onto ${step.name}${side}`
+    default:
+      return `Turn ${step.action} onto ${step.name}${side}`
+  }
+}
 
 /** Below this shade_fraction, the route is objectively exposed — say so
  * instead of overselling (honest stats). Reads the same continuous stat
@@ -169,6 +190,16 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
           </p>
         )}
 
+        {/* The one caution the product owes every route (user-approved
+            wording, 2026-08-28), ABOVE the list so it reads before the
+            instructions do (user call, 2026-08-28). Deliberately GENERAL:
+            uncertainty about street names is disclosed structurally,
+            per-step, as "unnamed path", not by a blanket note. */}
+        <p className={styles.disclaimer}>
+          // CAUTION: routes follow map data — conditions on the ground may
+          differ
+        </p>
+
         {stats.segments.length > 0 ? (
           /* Ordered list, not the old one-sentence paragraph: each turn gets
              its own line, and a screen reader announces "item 2 of 4" instead
@@ -178,10 +209,13 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
              of the panel. Always the selected preset's directions -- Shade
              priority's NONE option gives the plain shortest route directly
              (same segments), so there's no separate route to switch to here. */
-          <ol className={styles.directionsList}>
-            {stats.segments.map((segment, i) => (
+          /* role="list" is NOT redundant: the stylesheet sets
+             list-style: none for the flush-left numbering, which strips
+             the list role in Safari/VoiceOver. */
+          <ol className={styles.directionsList} role="list">
+            {stats.segments.map((step, i) => (
               <li key={i}>
-                {i === 0 ? 'Head' : 'then'} {formatDistance(segment.length_m)} along {segment.name}
+                {stepText(step)} — {formatDistance(step.length_m)}
               </li>
             ))}
           </ol>
