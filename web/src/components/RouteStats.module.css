@@ -89,16 +89,36 @@
   line-height: 1.55;
 }
 
+/* Browser list markers hang OUTSIDE the content box, so any padding that
+   makes room for them indents the numbers off the panel's left edge (the
+   old padding-left: 20px). Custom counters in a per-item grid instead:
+   the number column starts at x=0, flush with the rest of the panel, and
+   wrapped instruction lines keep a hanging indent under the text column.
+   list-style: none strips list semantics in Safari/VoiceOver, so the <ol>
+   carries an explicit role="list" -- do not remove one without the other. */
 .directionsList {
   font-size: var(--font-size-sm);
   color: var(--muted);
   margin: 0;
-  padding-left: 20px;
+  padding-left: 0;
+  list-style: none;
+  counter-reset: step;
   line-height: 1.6;
 }
 
 .directionsList li {
+  counter-increment: step;
+  display: grid;
+  /* 3ch fits a two-digit step ("13.") exactly in the mono face; single
+     digits sit flush left with a trailing space, which is the alignment
+     the eye wants. */
+  grid-template-columns: 3ch 1fr;
+  column-gap: 4px;
   margin-bottom: 2px;
+}
+
+.directionsList li::before {
+  content: counter(step) '.';
 }
 
 .sparseNote {
@@ -116,5 +136,15 @@
   /* Previously unset — silently fell back to the browser's default <p>
      margin (~1em top/bottom), one of the actual sources of "spacing is all
      over the place". Now the parent's `gap` is the only source. */
+  margin: 0;
+}
+
+/* The standing route caution. Quieter than .sparseNote on purpose: that
+   one is a per-route WARNING (this route is sunny), this is ambient
+   context that must not compete with it — muted text, no box, no accent
+   stripe. The parent .section's gap provides the spacing. */
+.disclaimer {
+  color: var(--muted);
+  font-size: var(--font-size-sm);
   margin: 0;
 }
