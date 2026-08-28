@@ -190,7 +190,7 @@ def collect_routing(names, shapes, tree):
     shows what the app HAS rather than what OSM holds. No simplification --
     these average 2.88 vertices per edge already.
     """
-    path = config.TILES_DIR / "citywide.json.gz"
+    path = config.EXPORT_DIR / "citywide.json.gz"
     if not path.exists():
         raise SystemExit(
             f"no export at {path} -- run `uv run python -m pipeline.build` first"

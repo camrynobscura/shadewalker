@@ -28,9 +28,8 @@ catastrophe and is purely an artifact of measuring Buffalo alongside
 Brooklyn. This was measured on 2026-08-22, after the omission produced
 precisely that false alarm.
 
-The centerline model had a separate step for this (`boundary.clip_to_nyc`),
-orphaned when `run_tile.py` was deleted and still uncalled. This module does
-not use it: it clips way by way inside read_ways(), against a prepared
+The centerline model had a separate step for this (`boundary.clip_to_nyc`,
+deleted 2026-08-28 after sitting orphaned for a week). This module clips way by way inside read_ways(), against a prepared
 boundary, before a graph exists at all.
 
 WHAT AN EDGE IS

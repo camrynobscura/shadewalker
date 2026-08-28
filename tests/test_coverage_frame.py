@@ -75,9 +75,9 @@ def test_frame_params_are_part_of_the_coverage_fingerprint(tmp_path, monkeypatch
     # recipe must invalidate cached frames like a re-exported tile does.
     (tmp_path / "fake.json.gz").write_bytes(b"placeholder tile bytes")
     paths = sorted(tmp_path.glob("*.json.gz"))
-    before = graph_store._tiles_fingerprint(paths)
+    before = graph_store._export_fingerprint(paths)
     monkeypatch.setattr(coverage_frame, "FRAME_PARAMS", "frame:v999-test")
-    assert graph_store._tiles_fingerprint(paths) != before
+    assert graph_store._export_fingerprint(paths) != before
 
 
 def test_build_frame_logs_its_ring_count(caplog):

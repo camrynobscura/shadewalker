@@ -31,7 +31,7 @@ from pipeline import config
 
 logger = logging.getLogger(__name__)
 
-# Basename of the one citywide export. Any *.json.gz in TILES_DIR is loaded,
+# Basename of the one citywide export. Any *.json.gz in EXPORT_DIR is loaded,
 # so this only has to be stable, not special.
 CITYWIDE_NAME = "citywide"
 
@@ -70,8 +70,8 @@ def _write_atomically(out_path, payload: dict) -> float:
 def _display_path(path):
     """A repo-relative path for logging, falling back to the absolute one.
 
-    TILES_DIR can point outside the repo (SHADEWALKER_TILES_DIR, e.g. a
-    scratch dir for a rebuild that must not touch data/tiles/) --
+    EXPORT_DIR can point outside the repo (SHADEWALKER_EXPORT_DIR, e.g. a
+    scratch dir for a rebuild that must not touch data/export/) --
     relative_to() raises then, so fall back rather than crashing after the
     file is already written.
     """
@@ -95,9 +95,10 @@ def write_citywide(nodes: dict, edges: list[dict]) -> Path:
     deleted to escape. The client never downloads this -- it loads into
     server RAM at startup.
 
-    It still lands in TILES_DIR under a *.json.gz name because that is
-    what GraphStore.load() globs (server/graph_store.py:301); the
-    directory keeps its old name until the tile grid is stripped.
+    It lands in EXPORT_DIR under a *.json.gz name because that is what
+    GraphStore.load() globs -- the server merges every matching file it
+    finds there, which is also how the e2e tier serves the pilot fixture
+    without a citywide build.
 
     Tree fields are written as zeros when the caller has not scored the
     edges. An unscored graph is a legitimate intermediate -- it routes by
@@ -166,7 +167,7 @@ def write_citywide(nodes: dict, edges: list[dict]) -> Path:
         "edges": edge_records,
     }
 
-    out_path = config.TILES_DIR / f"{CITYWIDE_NAME}.json.gz"
+    out_path = config.EXPORT_DIR / f"{CITYWIDE_NAME}.json.gz"
     size_kb = _write_atomically(out_path, payload)
     logger.info(f"  [export] {_display_path(out_path)}: "
                 f"{len(node_records):,} nodes, {len(edge_records):,} edges, "

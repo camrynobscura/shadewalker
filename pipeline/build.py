@@ -8,10 +8,10 @@ produced 276 files; this produces one, for all five boroughs, every time.
 
 WHERE IT WRITES
 ---------------
-config.TILES_DIR, which is data/tiles/ unless SHADEWALKER_TILES_DIR says
+config.EXPORT_DIR, which is data/export/ unless SHADEWALKER_EXPORT_DIR says
 otherwise. A practice run must set that variable:
 
-    SHADEWALKER_TILES_DIR=/tmp/scratch uv run python -m pipeline.build
+    SHADEWALKER_EXPORT_DIR=/tmp/scratch uv run python -m pipeline.build
 
 Without it this overwrites the file a running server is serving from.
 That is not hypothetical -- smoke-test runs of the old runner wrote into
@@ -106,7 +106,7 @@ def main() -> int:
     # and grouping: it adds no way, removes none, and connects nothing.
     _score_shade(edges)
 
-    logger.info(f"[build] exporting to {config.TILES_DIR}")
+    logger.info(f"[build] exporting to {config.EXPORT_DIR}")
     out_path = export.write_citywide(nodes, edges)
 
     if not _readback_matches(out_path, len(nodes), len(edges)):

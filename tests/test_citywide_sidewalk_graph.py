@@ -1,6 +1,6 @@
 """Invariants for the sidewalk model's citywide export.
 
-Run against the real data/tiles/citywide.json.gz when it is present, and
+Run against the real data/export/citywide.json.gz when it is present, and
 skipped otherwise -- that file is gitignored and ~16MB, so CI and a fresh
 clone never have it. Build it with:
 
@@ -58,15 +58,15 @@ STATEN_ISLAND = (40.54723, -74.15724)
 MAINLAND = (40.71887, -74.00472)
 
 
-def _production_tiles_dir() -> Path:
-    return Path(os.environ.get("SHADEWALKER_TILES_DIR",
-                               config.DATA_DIR / "tiles"))
+def _production_export_dir() -> Path:
+    return Path(os.environ.get("SHADEWALKER_EXPORT_DIR",
+                               config.DATA_DIR / "export"))
 
 
 @pytest.fixture(scope="session")
 def sidewalk_export() -> dict:
     """The parsed citywide export, or a skip if it hasn't been built."""
-    path = _production_tiles_dir() / f"{export.CITYWIDE_NAME}.json.gz"
+    path = _production_export_dir() / f"{export.CITYWIDE_NAME}.json.gz"
     if not path.exists():
         pytest.skip(f"no citywide export at {path} -- "
                     "run `uv run python -m pipeline.build`")
@@ -81,14 +81,14 @@ def sidewalk_store(sidewalk_export) -> GraphStore:
     Depends on sidewalk_export purely for its skip: if the file is
     missing, skip before paying a load.
     """
-    production = _production_tiles_dir()
-    saved = config.TILES_DIR
-    config.TILES_DIR = production
+    production = _production_export_dir()
+    saved = config.EXPORT_DIR
+    config.EXPORT_DIR = production
     try:
         store = GraphStore()
         store.load()
     finally:
-        config.TILES_DIR = saved
+        config.EXPORT_DIR = saved
     return store
 
 

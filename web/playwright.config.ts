@@ -11,11 +11,11 @@ import { defineConfig, devices } from '@playwright/test'
 //
 // The backend command copies the committed pilot fixture
 // (tests/fixtures/pilot.json.gz) into its own directory and points
-// SHADEWALKER_TILES_DIR at it before starting uvicorn, rather than loading
-// data/tiles/ directly — that directory holds the real citywide tiles once
-// the pipeline's done real borough work, and these specs are written against
-// the small, deterministic pilot tile specifically (see pipeline/config.py's
-// TILES_DIR comment).
+// SHADEWALKER_EXPORT_DIR at it before starting uvicorn, rather than loading
+// data/export/ directly — that directory holds the real citywide export once
+// the pipeline has run, and these specs are written against the small,
+// deterministic pilot fixture specifically (see pipeline/config.py's
+// EXPORT_DIR comment).
 //
 // DEDICATED PORTS, AND reuseExistingServer: false. Both matter, and the
 // second is why the first exists.
@@ -48,8 +48,8 @@ export default defineConfig({
   webServer: [
     {
       command:
-        'mkdir -p data/e2e_tiles && cp tests/fixtures/pilot.json.gz data/e2e_tiles/ && ' +
-        `SHADEWALKER_TILES_DIR="$(pwd)/data/e2e_tiles" uv run uvicorn server.app:app --port ${API_PORT}`,
+        'mkdir -p data/e2e_export && cp tests/fixtures/pilot.json.gz data/e2e_export/ && ' +
+        `SHADEWALKER_EXPORT_DIR="$(pwd)/data/e2e_export" uv run uvicorn server.app:app --port ${API_PORT}`,
       cwd: '..',
       url: `http://localhost:${API_PORT}/health`,
       reuseExistingServer: false,

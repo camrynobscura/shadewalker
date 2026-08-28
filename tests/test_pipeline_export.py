@@ -51,7 +51,7 @@ def _minimal_citywide():
 
 
 def _read_back(tmp_path):
-    out = tmp_path / "tiles" / f"{export.CITYWIDE_NAME}.json.gz"
+    out = tmp_path / "export" / f"{export.CITYWIDE_NAME}.json.gz"
     assert out.exists(), f"nothing written to {out}"
     with gzip.open(out, "rt") as fh:
         return json.load(fh)
@@ -59,11 +59,11 @@ def _read_back(tmp_path):
 
 @pytest.fixture
 def citywide_dir(tmp_path, monkeypatch):
-    # REPO_ROOT alongside TILES_DIR for the same reason write_tile's tests
+    # REPO_ROOT alongside EXPORT_DIR for the same reason write_tile's tests
     # patch it: the log line does relative_to(REPO_ROOT), which raises for a
     # tmp_path outside the repo.
     monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(config, "TILES_DIR", tmp_path / "tiles")
+    monkeypatch.setattr(config, "EXPORT_DIR", tmp_path / "export")
     return tmp_path
 
 
@@ -100,12 +100,12 @@ def test_fold_names_are_written_only_when_present(citywide_dir):
 
 
 def test_write_citywide_lands_where_graph_store_globs_for_it(citywide_dir):
-    """server/graph_store.py:301 does TILES_DIR.glob("*.json.gz"). A file
+    """server/graph_store.py:301 does EXPORT_DIR.glob("*.json.gz"). A file
     written anywhere else, or under any other suffix, is invisible to the
     server no matter how correct its contents are."""
     nodes, edges = _minimal_citywide()
     export.write_citywide(nodes, edges)
-    assert sorted(p.name for p in (citywide_dir / "tiles").glob("*.json.gz")) \
+    assert sorted(p.name for p in (citywide_dir / "export").glob("*.json.gz")) \
         == ["citywide.json.gz"]
 
 
@@ -201,7 +201,7 @@ def test_write_citywide_keeps_a_fractional_tree_count(citywide_dir):
 def test_write_citywide_leaves_no_temp_file_after_a_clean_write(citywide_dir):
     nodes, edges = _minimal_citywide()
     export.write_citywide(nodes, edges)
-    assert list((citywide_dir / "tiles").glob("*.tmp")) == []
+    assert list((citywide_dir / "export").glob("*.tmp")) == []
 
 
 def test_write_citywide_crash_mid_write_leaves_no_partial_file(citywide_dir):
@@ -223,8 +223,8 @@ def test_write_citywide_crash_mid_write_leaves_no_partial_file(citywide_dir):
     finally:
         monkeypatch_target.dump = original_dump
 
-    assert not (citywide_dir / "tiles" / "citywide.json.gz").exists()
-    assert list((citywide_dir / "tiles").glob("*")) == []
+    assert not (citywide_dir / "export" / "citywide.json.gz").exists()
+    assert list((citywide_dir / "export").glob("*")) == []
 
 
 def test_write_citywide_overwrites_a_previous_export_in_place(citywide_dir):
@@ -235,5 +235,5 @@ def test_write_citywide_overwrites_a_previous_export_in_place(citywide_dir):
     edges[0]["name"] = "Union Street"
     export.write_citywide(nodes, edges)
 
-    assert len(list((citywide_dir / "tiles").glob("*.json.gz"))) == 1
+    assert len(list((citywide_dir / "export").glob("*.json.gz"))) == 1
     assert _read_back(citywide_dir)["edges"][0]["name"] == "Union Street"

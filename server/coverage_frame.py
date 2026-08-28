@@ -61,7 +61,7 @@ SIMPLIFY_M = 50.0
 # the line (chosen from the 2026-08-18 mockup review, variant G).
 FEATHERS_M = (350.0, 800.0)
 
-# Part of the coverage-cache fingerprint (graph_store._tiles_fingerprint):
+# Part of the coverage-cache fingerprint (graph_store._export_fingerprint):
 # any change to the recipe must invalidate cached frames.
 FRAME_PARAMS = f"frame:v1|off:{OFFSHORE_M}|close:{CLOSE_M}|simp:{SIMPLIFY_M}|feath:{FEATHERS_M}"
 

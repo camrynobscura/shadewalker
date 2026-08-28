@@ -144,7 +144,7 @@ def validate_on_mall(src):
 
 
 def load_edges():
-    export_path = config.TILES_DIR / "citywide.json.gz"
+    export_path = config.EXPORT_DIR / "citywide.json.gz"
     logger.info(f"[load] export: {export_path}")
     with gzip.open(export_path, "rt") as fh:
         payload = json.load(fh)
