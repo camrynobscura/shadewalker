@@ -82,7 +82,7 @@ def _edge_record(u, v, name, length_m, deciduous, evergreen, count):
 def store(tmp_path, monkeypatch) -> GraphStore:
     """A fresh store per test -- these tests MUTATE the tree arrays, so a
     shared instance would leak zeroed data into whichever test ran next."""
-    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    monkeypatch.setattr(config, "EXPORT_DIR", tmp_path)
     with gzip.open(tmp_path / "tile.json.gz", "wt") as fh:
         json.dump({"nodes": NODES,
                    "edges": [_edge_record(*e) for e in EDGES]}, fh)

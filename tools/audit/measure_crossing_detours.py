@@ -26,6 +26,15 @@ Reports the full distribution, not just a pass/fail, because the
 question is "how often and how badly", not "does it ever happen".
 
 Local only. Four boroughs; Staten Island excluded.
+
+PROMOTED TO A TEST 2026-08-28 (PLAN `citywide-guards`):
+tests/test_citywide_invariants.py's crossing-detour test runs this method
+against the EXPORT graph (the one that actually routes) on every citywide
+pytest run, re-baselined there because the populations differ (this
+tool's raw-pbf graph read median 12m / 3.1% > 200m; the export reads
+13.5m / 2.13%). This tool stays as the pbf-side instrument: when the test
+goes red, running this against the same OSM pin says whether the change
+came from OSM's data or from our pipeline.
 """
 import argparse
 import heapq

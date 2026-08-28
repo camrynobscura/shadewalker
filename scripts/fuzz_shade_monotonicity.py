@@ -10,8 +10,8 @@ exact failing routes -- rerun with --seed <n> to replay a red result.
     uv run python scripts/fuzz_shade_monotonicity.py --n 2000     # a bigger sweep
     uv run python scripts/fuzz_shade_monotonicity.py --seed 12345 # replay a specific run
 
-Not part of pytest/CI: it needs the real (gitignored) data/tiles/ citywide
-data. Exits nonzero if it finds any route where raising Shade_priority lowers
+Not part of pytest/CI: it needs the real (gitignored) data/export/
+citywide data. Exits nonzero if it finds any route where raising Shade_priority lowers
 shade_fraction -- which the clamp should make impossible.
 """
 import argparse
@@ -48,11 +48,15 @@ def main() -> int:
     months = [int(m) for m in args.months.split(",")]
     print(f"seed={seed}  n={args.n}  months={months}  (replay a red run with --seed {seed})")
 
-    tiles = sorted(config.TILES_DIR.glob("*.json.gz"))
-    if len(tiles) < 10:
+    # Was `len(tiles) < 10`, inherited from the tiled pipeline -- a gate the
+    # one-file citywide export could never satisfy, so this tool was silently
+    # dead from the citywide export's arrival until 2026-08-28 (same bug
+    # class as the conftest gate documented in CLAUDE.md's Tests section).
+    exports = sorted(config.EXPORT_DIR.glob("*.json.gz"))
+    if not exports:
         print(
-            f"ERROR: citywide tiles not found in {config.TILES_DIR} ({len(tiles)} found). "
-            "Run the pipeline first, e.g. `uv run python -m pipeline.run_tile brooklyn`.",
+            f"ERROR: no citywide export in {config.EXPORT_DIR}. "
+            "Run the pipeline first: `uv run python -m pipeline.build`.",
             file=sys.stderr,
         )
         return 2

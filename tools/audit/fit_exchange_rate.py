@@ -16,7 +16,7 @@ CURRENT production export first. It must reproduce ~0.031 within the
 and its new number is worthless.
 
     uv run python tools/audit/fit_exchange_rate.py                  # validate
-    SHADEWALKER_TILES_DIR=/tmp/scratch \\
+    SHADEWALKER_EXPORT_DIR=/tmp/scratch \\
         uv run python tools/audit/fit_exchange_rate.py              # new fit
 
 METHOD
@@ -77,7 +77,7 @@ def main() -> int:
     args = parser.parse_args()
 
     started = time.monotonic()
-    export_path = config.TILES_DIR / "citywide.json.gz"
+    export_path = config.EXPORT_DIR / "citywide.json.gz"
     logger.info(f"[fit] export: {export_path}")
     with gzip.open(export_path, "rt") as fh:
         payload = json.load(fh)

@@ -3,7 +3,7 @@
 Only one fixture survives here: `citywide_store`, which loads the real
 production tiles for the opt-in citywide sweep.
 
-The pilot-tile fixtures (`PILOT_FIXTURE`, `_pilot_only_tiles_dir`,
+The pilot-tile fixtures (`PILOT_FIXTURE`, `_pilot_only_export_dir`,
 `client`, `graph_store`, `self_loop_store`) were deleted on 2026-08-23
 along with `tests/fixtures/pilot.json.gz` itself. That fixture was
 centerline data, and every test routing against it was pinned to
@@ -60,31 +60,32 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(scope="session")
 def citywide_store() -> GraphStore:
-    """A GraphStore loaded against the REAL production tiles (data/tiles/),
-    for the opt-in-by-default citywide sweep (see the `citywide` marker).
+    """A GraphStore loaded against the REAL production export
+    (data/export/), for the opt-in-by-default citywide sweep (see the
+    `citywide` marker).
 
     Skips cleanly when that data isn't present, so CI and a fresh clone
     never fail for lack of the gitignored citywide export. Saves and
-    restores config.TILES_DIR around the load rather than leaving it
+    restores config.EXPORT_DIR around the load rather than leaving it
     pointed at production for the rest of the session. The ~15s load is
     paid once per session, and only when this fixture is actually used
     (i.e. the citywide test wasn't deselected)."""
-    production_tiles = Path(os.environ.get("SHADEWALKER_TILES_DIR", config.DATA_DIR / "tiles"))
-    tiles = sorted(production_tiles.glob("*.json.gz"))
+    production_export = Path(os.environ.get("SHADEWALKER_EXPORT_DIR", config.DATA_DIR / "export"))
+    exports = sorted(production_export.glob("*.json.gz"))
     # Was `< 10`, from the tiled centerline pipeline that emitted one file
     # per tile. The sidewalk pipeline emits exactly ONE citywide export, so
     # that condition could never be satisfied and every citywide test
     # skipped permanently -- present data, zero coverage, green suite.
-    if not tiles:
+    if not exports:
         pytest.skip(
-            f"no citywide export in {production_tiles} "
+            f"no citywide export in {production_export} "
             "-- run `uv run python -m pipeline.build` to enable the citywide sweep"
         )
-    saved_tiles_dir = config.TILES_DIR
-    config.TILES_DIR = production_tiles
+    saved_export_dir = config.EXPORT_DIR
+    config.EXPORT_DIR = production_export
     try:
         store = GraphStore()
         store.load()
     finally:
-        config.TILES_DIR = saved_tiles_dir
+        config.EXPORT_DIR = saved_export_dir
     return store

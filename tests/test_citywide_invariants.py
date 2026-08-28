@@ -1,39 +1,33 @@
 """Graph-wide invariants, run against the real citywide export.
 
-Three checks that say nothing about HOW the graph was built: an edge is
-never shorter than its own chord, geometry ends where its nodes are, and a
-route's drawn length matches its reported length.
+Checks that say nothing about HOW the graph was built: an edge is never
+shorter than its own chord, geometry ends where its nodes are, a route's
+drawn length matches its reported length, crossing the street never takes
+a silent multi-hundred-meter detour, and raising Shade_priority never
+lowers the shade a route reports.
 
-The near-coincident-disconnected-nodes sweep lived here until 2026-08-23 and
-was removed with the centerline scoring code: it excluded divided-carriageway
-pairs using pipeline/scoring/trees.py's sibling detector, and a divided
-carriageway only exists as a concept when a street is a single centerline.
-Under per-sidewalk edges each pavement is already its own edge, so the test
-could not be ported -- it would have to be rebuilt around a different
-question. See history/centerline-scoring-constants.md.
+The near-coincident-disconnected-nodes sweep lived here until 2026-08-23
+and was removed with the centerline scoring code: its bug signature --
+close in reality, far in the graph -- is just a street in a sidewalk
+model. The crossing-detour distribution test below is its replacement
+(PLAN's `citywide-guards`): it asks the same underlying question ("can
+you get between two nearby points without an absurd walk?") in the one
+form that IS a defect signal on this model.
 
-These run automatically whenever data/tiles/ holds a built export, and skip
+These run automatically whenever data/export/ holds a built export, and skip
 cleanly otherwise so CI and a fresh clone never fail for lack of the
-gitignored data. They are the ONLY tests left that exercise a real graph --
-the pilot fixture and everything pinned to it went on 2026-08-23 -- so a
-run without them proves considerably less than it used to. Loading the full
-graph costs ~35s; in a tight edit-test loop skip it with:
+gitignored data. Loading the full graph costs ~35s; in a tight edit-test
+loop skip the tier with:
 
     uv run pytest -m "not citywide"
 """
+import math
 import random
+from collections import defaultdict
 
 import pytest
 
-from server.graph_store import _local_distance_m
-
-# The citywide shade-monotonicity sweep lived here until 2026-08-23 and was
-# deleted with the centerline scoring code, alongside its pilot-tile
-# companion in test_route_invariants.py. It swept the whole city asserting
-# that raising Shade_priority never lowers shade_fraction -- a real and still
-# correct invariant, but one that cannot be checked at all until sidewalk
-# scoring produces non-zero shade. Rebuild it then; see
-# history/centerline-scoring-constants.md.
+from server.graph_store import _local_distance_m, clamp_shade_monotonic
 
 
 # --- Multi-tile merge integrity (FIXES.md, 2026-08-13) ----------------------
@@ -201,3 +195,156 @@ def test_route_geometry_length_matches_reported_length(store_fixture, request):
     )
 
 
+
+# --- Crossing the street (PLAN `citywide-guards`, 2026-08-28) ----------------
+# A sidewalk-only model routes across a street only where OSM maps a
+# crossing. Where one is missing, the two sides stay CONNECTED (component
+# counts see nothing) but only via a crossing far away -- the walker gets
+# marched to a distant corner and back. tools/audit/measure_crossing_detours.py
+# measured this on the raw pbf (median 12m, 3.1% > 200m, 2026-08-22, four
+# boroughs); this is that method promoted to a test against the EXPORT
+# graph, i.e. the graph that actually routes, re-baselined there because
+# the two populations differ (the export is clipped, deduped, and split).
+#
+# Baseline on the export, seed 20260828, 2026-08-28: over 1500 sampled
+# pairs, median 13.5m, p90 34.9m, 2.13% over 200m, worst 1129.8m. The test
+# samples 500 (runtime), where the full-run values are median 13.5m /
+# 2.2% -- deterministic on a fixed export; the bands below are sized for
+# legitimate drift across REBUILDS (a fresh OSM pin is effectively a new
+# 500-pair draw: binomial sd at 2.13%/500 is ~0.65pt, so the 4.5% ceiling
+# sits ~3.6 sd out, and the pbf-era 3.1% level stays comfortably inside).
+# A real regression -- a pipeline change that drops crossings wholesale --
+# moves the median or the rate by multiples, not fractions.
+
+CROSSING_NEAR_MIN_M = 8.0    # closer is usually the same pavement
+CROSSING_NEAR_MAX_M = 40.0   # further is not "across the street" any more
+CROSSING_SAMPLES = 500
+CROSSING_SEED = 20260828
+CROSSING_MEDIAN_MAX_M = 25.0
+CROSSING_OVER_200M_MAX_SHARE = 0.045
+
+
+@pytest.mark.citywide
+def test_crossing_the_street_stays_a_short_walk(citywide_store):
+    store = citywide_store
+    main_comp = max(store._graph.connected_components(mode="weak"), key=len)
+    lonlat = store._node_lonlat
+
+    # Spatial hash at NEAR_MAX cell size: candidates within the band are
+    # always in the node's own or an adjacent cell.
+    k_lon = 111_320.0 * math.cos(math.radians(40.7))
+    k_lat = 110_540.0
+    cell = CROSSING_NEAR_MAX_M
+    grid = defaultdict(list)
+    for v in main_comp:
+        lon, lat = lonlat[v]
+        grid[(int(lon * k_lon / cell), int(lat * k_lat / cell))].append(v)
+
+    order = list(main_comp)
+    random.Random(CROSSING_SEED).shuffle(order)
+
+    walks = []
+    for v in order:
+        if len(walks) >= CROSSING_SAMPLES:
+            break
+        lon, lat = lonlat[v]
+        gx, gy = int(lon * k_lon / cell), int(lat * k_lat / cell)
+        direct = set(store._graph.neighbors(v))
+        best = None
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for m in grid.get((gx + dx, gy + dy), ()):
+                    if m == v or m in direct:
+                        continue
+                    d = _local_distance_m(lat, lon, lonlat[m][1], lonlat[m][0])
+                    if CROSSING_NEAR_MIN_M <= d <= CROSSING_NEAR_MAX_M and (
+                            best is None or d < best[1]):
+                        best = (m, d)
+        if best is None:
+            continue
+        walk = store._graph.distances(
+            source=[v], target=[best[0]], weights=store._length)[0][0]
+        walks.append(walk)
+
+    # Say what we divided by: the shares below are meaningless if the
+    # sampler quietly found fewer pairs than the baseline run did.
+    assert len(walks) == CROSSING_SAMPLES, (
+        f"only {len(walks)} sampled pairs -- the sampler thinned out, so the "
+        f"baseline bands no longer describe this population"
+    )
+    walks.sort()
+    median = walks[len(walks) // 2]
+    over_200 = sum(1 for w in walks if w > 200.0) / len(walks)
+    assert median <= CROSSING_MEDIAN_MAX_M, (
+        f"median street-crossing walk is {median:.1f}m (baseline 13.5m) -- "
+        f"crossings are disappearing from the graph wholesale"
+    )
+    assert over_200 <= CROSSING_OVER_200M_MAX_SHARE, (
+        f"{over_200:.1%} of nearby pairs need a >200m walk (baseline 2.13%) "
+        f"-- missing-crossing detours are multiplying"
+    )
+
+
+# --- Shade monotonicity (restored 2026-08-28, PLAN `citywide-guards`) --------
+# Deleted 2026-08-23 with the centerline scoring code, with an explicit
+# "rebuild when sidewalk scoring produces non-zero shade" note; scoring has
+# been live since `per-side-trees`. Raising Shade_priority must never
+# LOWER the shade a route reports. The invariant holds POST-CLAMP, which
+# is what users see: the frontend always requests the full preset ladder
+# in one call and app.py runs clamp_shade_monotonic over the batch --
+# querying one weight alone skips the clamp (this project's
+# best-documented trap; see server/graph_store.py).
+#
+# Seeded and bounded here; scripts/fuzz_shade_monotonicity.py is the
+# fresh-entropy broad-sweep sibling (500+ routes, any months) for
+# occasional deeper runs. At 400 sampled pairs in July the clamp genuinely
+# fires on ~3.8% of pairs, so 30 pairs exercise the clamp path itself,
+# not just the already-monotonic majority.
+
+SHADE_WEIGHTS = [0.0, 5.0, 15.0, 40.0]  # the frontend's four presets
+SHADE_PAIRS = 30
+SHADE_SEED = 20260828
+SHADE_MONTH = 7
+
+
+@pytest.mark.citywide
+def test_raising_shade_priority_never_lowers_reported_shade(citywide_store):
+    store = citywide_store
+    nodes = list(max(store._graph.connected_components(mode="weak"), key=len))
+    rng = random.Random(SHADE_SEED)
+    checked = 0
+    attempts = 0
+    violations = []
+    while checked < SHADE_PAIRS and attempts < SHADE_PAIRS * 80:
+        attempts += 1
+        a, b = rng.choice(nodes), rng.choice(nodes)
+        if a == b:
+            continue
+        lon_a, lat_a = store._node_lonlat[a]
+        lon_b, lat_b = store._node_lonlat[b]
+        if not (500.0 <= _local_distance_m(lat_a, lon_a, lat_b, lon_b) <= 2500.0):
+            continue
+        pair = store.snap_pair(lat_a, lon_a, lat_b, lon_b)
+        if pair is None:
+            continue
+        routes = [store.route(pair[0], pair[1], w, SHADE_MONTH)
+                  for w in SHADE_WEIGHTS]
+        if any(r is None for r in routes):
+            continue
+        routes = clamp_shade_monotonic(routes, SHADE_WEIGHTS)
+        checked += 1
+        shades = [r["shade_fraction"] for r in routes]
+        for lower, higher in zip(shades, shades[1:]):
+            if higher < lower - 1e-9:
+                violations.append((shades, (lat_a, lon_a), (lat_b, lon_b)))
+                break
+    assert checked >= SHADE_PAIRS - 5, (
+        f"only {checked} pairs routed -- sampling got too sparse to mean much"
+    )
+    assert not violations, (
+        f"{len(violations)} route(s) reported LESS shade at a higher "
+        f"Shade_priority even after the clamp. First few:\n" + "\n".join(
+            f"  shades {[round(s, 4) for s in sh]} from {a} to {b}"
+            for sh, a, b in violations[:5]
+        )
+    )

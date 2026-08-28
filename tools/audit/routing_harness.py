@@ -18,16 +18,17 @@ this same script -- which is the only use it has.
 
 USAGE
 -----
-    # against whatever the server would load (honors SHADEWALKER_TILES_DIR)
+    # against whatever the server would load (honors SHADEWALKER_EXPORT_DIR)
     uv run python tools/audit/routing_harness.py run --out before.json
 
-    SHADEWALKER_TILES_DIR=/tmp/scratch \
+    SHADEWALKER_EXPORT_DIR=/tmp/scratch \
         uv run python tools/audit/routing_harness.py run --out after.json
 
     uv run python tools/audit/routing_harness.py compare before.json after.json
 
-Loading the graph takes ~30-60s and ~1.5GB RAM per run; run and compare
-are separate processes so two graphs never coexist.
+Loading the graph takes ~10-60s and peaks ~1.1GB RAM (0.7GB steady,
+measured in-process 2026-08-28); run and compare are separate processes
+so two graphs never coexist.
 """
 
 import argparse
@@ -93,7 +94,7 @@ def run(args) -> int:
     started = time.monotonic()
     store.load()
     logger.info(f"[harness] graph loaded in {time.monotonic() - started:.0f}s "
-                f"from {config.TILES_DIR}")
+                f"from {config.EXPORT_DIR}")
 
     results = []
     routable = clamp_fired = 0
@@ -126,7 +127,7 @@ def run(args) -> int:
                  "discarded_on_distance": discarded,
                  "weights": args.weights, "month": args.month,
                  "routable": routable, "clamp_fired": clamp_fired,
-                 "tiles_dir": str(config.TILES_DIR),
+                 "export_dir": str(config.EXPORT_DIR),
                  "measured": time.strftime("%Y-%m-%d %H:%M:%S")},
         "results": results,
     }

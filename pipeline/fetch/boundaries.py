@@ -7,8 +7,8 @@ the hand-picked rectangles' overreach (see PLAN.md's Stage 2 section,
 
 Deliberately the water-INCLUDED sibling dataset, not the water-excluded
 one that shares the same schema: a bridge's midspan sits directly over
-water, and clip_to_nyc() (pipeline/graph/boundary.py) drops any node
-outside this polygon -- the water-excluded version silently severed
+water, and pipeline/graph/pedestrian.py drops any way that never
+touches this polygon -- the water-excluded version silently severed
 every inter-borough bridge crossing, discovered when Brooklyn and
 Manhattan's mainlands loaded as two disconnected components. This
 version's jurisdiction still stops at the real state line (verified

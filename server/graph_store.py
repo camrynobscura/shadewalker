@@ -1,4 +1,4 @@
-"""In-memory routing graph, loaded once at server startup from data/tiles/.
+"""In-memory routing graph, loaded once at server startup from data/export/.
 
 Design (the memory-conscious layout from the plan):
 - Per-edge NUMBERS live in numpy arrays — one tightly-packed array per
@@ -394,43 +394,43 @@ COVERAGE_SIMPLIFY_DEG = 0.0002
 # Caches _compute_coverage_rings()'s output across server restarts --
 # measured at ~12s of a ~15s cold start at Brooklyn+Manhattan scale (a
 # shapely union_all over every edge's buffered geometry, which grows with
-# the graph), for output that only changes when the tiles themselves do.
-# Named with a leading dot so it reads as a derived artifact, not a tile;
-# living inside TILES_DIR (rather than a fixed path elsewhere) is
-# deliberate -- the cache automatically follows TILES_DIR wherever it
+# the graph), for output that only changes when the export files themselves do.
+# Named with a leading dot so it reads as a derived artifact, not an export;
+# living inside EXPORT_DIR (rather than a fixed path elsewhere) is
+# deliberate -- the cache automatically follows EXPORT_DIR wherever it
 # points, tests included, rather than every test that monkeypatches
-# TILES_DIR to a tmp_path silently reading/writing the real repo's cache
+# EXPORT_DIR to a tmp_path silently reading/writing the real repo's cache
 # file instead of its own sandboxed one.
 COVERAGE_CACHE_FILENAME = ".coverage_cache.json"
 
 # A version tag for load()'s MERGE SEMANTICS, folded into the coverage
-# fingerprint (see _tiles_fingerprint). load() can change which components
-# exist without any tile's bytes changing, so a cached coverage from before
-# such a change must be invalidated even when every tile file is unchanged.
-# Bump when load()'s edge topology can change for identical tiles.
+# fingerprint (see _export_fingerprint). load() can change which components
+# exist without any file's bytes changing, so a cached coverage from before
+# such a change must be invalidated even when every export file is unchanged.
+# Bump when load()'s edge topology can change for identical files.
 LOAD_PARAMS = "load-v23|no-hide-rule"
 
 
-def _tiles_fingerprint(tile_paths: list) -> str:
-    """A cheap fingerprint of every loaded tile's identity (name, size,
+def _export_fingerprint(export_paths: list) -> str:
+    """A cheap fingerprint of every loaded export file's identity (name, size,
     mtime) — changes whenever a tile is added, removed, or re-exported,
     which is exactly when the coverage cache (above) needs recomputing
     rather than reused.
 
     Two recipe tags ride along, because the drawn coverage depends on more
-    than the tiles' bytes: the offshore frame's parameters
+    than the export files' bytes: the offshore frame's parameters
     (server/coverage_frame.py) and LOAD_PARAMS, which covers any change to
     WHICH components end up visible. Deleting the hide rule was exactly
     that kind of change -- without a LOAD_PARAMS bump it would have served
     rings computed under the old rule from every existing cache."""
-    parts = sorted(f"{p.name}:{p.stat().st_size}:{p.stat().st_mtime_ns}" for p in tile_paths)
+    parts = sorted(f"{p.name}:{p.stat().st_size}:{p.stat().st_mtime_ns}" for p in export_paths)
     rule = coverage_frame.FRAME_PARAMS + "|" + LOAD_PARAMS
     return hashlib.sha256(("\n".join(parts) + "\n" + rule).encode()).hexdigest()
 
 
 def _load_cached_coverage(cache_path, fingerprint: str) -> dict | None:
     """The on-disk coverage cache ({"rings": ..., "frame": ...}), if its
-    fingerprint matches the tiles being loaded right now — None on any
+    fingerprint matches the export files being loaded right now — None on any
     mismatch, missing file, corrupt cache, or pre-frame cache format, all
     treated the same way (recompute), since this is strictly a speed
     optimization with no correctness dependency on it."""
@@ -453,9 +453,9 @@ def _save_cached_coverage(cache_path, fingerprint: str, rings, frame: dict) -> N
 
 def _local_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Flat-earth distance between two nearby points -- fine at the
-    few-meters-to-tens-of-meters scale it is used at (same approximation
-    pipeline/config.py's buffered_bbox() already uses for short local
-    distances, just inverted)."""
+    few-meters-to-tens-of-meters scale it is used at (the standard
+    ~111km-per-degree-of-latitude approximation, with the cos(lat)
+    longitude correction)."""
     mean_lat = (lat1 + lat2) / 2
     dlat_m = (lat2 - lat1) * METERS_PER_DEGREE_LAT
     dlon_m = (lon2 - lon1) * METERS_PER_DEGREE_LAT * math.cos(math.radians(mean_lat))
@@ -540,17 +540,21 @@ class GraphStore:
     # ── Loading ───────────────────────────────────────────────────────────────
 
     def load(self) -> None:
-        """Read every tile in data/tiles/ into one merged graph."""
-        tile_paths = sorted(config.TILES_DIR.glob("*.json.gz"))
-        if not tile_paths:
+        """Read every export file in EXPORT_DIR into one merged graph.
+
+        Normally that is exactly one file (the citywide export), but the
+        glob-and-merge shape is load-bearing: the e2e tier points
+        EXPORT_DIR at a directory holding only the pilot fixture."""
+        export_paths = sorted(config.EXPORT_DIR.glob("*.json.gz"))
+        if not export_paths:
             raise FileNotFoundError(
-                f"No graph data in {config.TILES_DIR}. Build it with "
+                f"No graph data in {config.EXPORT_DIR}. Build it with "
                 "`uv run python -m pipeline.build`, or point "
-                "SHADEWALKER_TILES_DIR at a directory holding a built "
+                "SHADEWALKER_EXPORT_DIR at a directory holding a built "
                 "export to run against that instead."
             )
-        coverage_fingerprint = _tiles_fingerprint(tile_paths)
-        coverage_cache_path = config.TILES_DIR / COVERAGE_CACHE_FILENAME
+        coverage_fingerprint = _export_fingerprint(export_paths)
+        coverage_cache_path = config.EXPORT_DIR / COVERAGE_CACHE_FILENAME
 
         node_lonlat: list[list[float]] = []
         edge_pairs: list[tuple[int, int]] = []  # (u_idx, v_idx) for igraph
@@ -566,13 +570,13 @@ class GraphStore:
         coords_per_edge: list[list[list[float]]] = []  # packed into _coord_buf after the loop
         seen_edges: dict[tuple, int] = {}  # (u, v, key, side) -> position in the lists above
         seen_geometries: set[tuple] = set()  # (u, v, side, geometry hash) -- see below
-        # Pass 1: every node from every tile, so the complete node universe
+        # Pass 1: every node from every export file, so the complete node universe
         # is known before any edge is ingested. (Tiles are re-read in pass 2
-        # rather than held in memory -- one tile at a time keeps peak RAM
+        # rather than held in memory -- one file at a time keeps peak RAM
         # flat across a citywide load.)
-        for path in tile_paths:
-            tile = json.loads(gzip.open(path, "rt").read())
-            for node_id, (lon, lat) in tile["nodes"].items():
+        for path in export_paths:
+            payload = json.loads(gzip.open(path, "rt").read())
+            for node_id, (lon, lat) in payload["nodes"].items():
                 if node_id not in self._id_to_idx:
                     self._id_to_idx[node_id] = len(node_lonlat)
                     node_lonlat.append([lon, lat])
@@ -582,12 +586,13 @@ class GraphStore:
             """Add one edge (a whole edge, or one piece of a split one) to
             the graph arrays, through the existing border-dedupe. Splitting
             reduces the severed-overlap class to the already-solved
-            duplicate-border-edge class: after the split, two tiles'
-            overlapping copies have identical endpoints and identical coords,
-            so this same dedupe collapses them."""
-            # Border edges appear in two neighboring tiles; a canonical
-            # (sorted) node pair makes both copies hash identically. Each
-            # tile scored its copy against only its own tree fetch, so the
+            duplicate-border-edge class: after the split, two overlapping
+            copies have identical endpoints and identical coords, so this
+            same dedupe collapses them."""
+            # In the tiled era border edges appeared in two neighboring
+            # tiles; a canonical (sorted) node pair makes both copies hash
+            # identically. Each tile scored its copy against only its own
+            # tree fetch, so the
             # copies can disagree -- when they do, keep the better-scored
             # one, not the first-seen one. Both copies count trees in the
             # identical corridor, so a copy can only be MISSING trees its
@@ -615,7 +620,7 @@ class GraphStore:
             # OSM itself sometimes contains the same way twice -- identical
             # geometry between the same two nodes, which osmnx keeps as
             # parallel edges under different multigraph keys (159 confirmed
-            # citywide, all within a single tile). Keep one: same endpoints,
+            # citywide). Keep one: same endpoints,
             # so dropping the extra copy can't disconnect anything. Hashing
             # the coords (direction-insensitive) instead of storing them
             # keeps this set small; genuinely different parallel edges
@@ -642,9 +647,9 @@ class GraphStore:
             coords_per_edge.append(coords)
 
         # Pass 2: edges, each emitted through the dedupe above.
-        for path in tile_paths:
-            tile = json.loads(gzip.open(path, "rt").read())
-            for edge in tile["edges"]:
+        for path in export_paths:
+            payload = json.loads(gzip.open(path, "rt").read())
+            for edge in payload["edges"]:
                 _emit(edge["u"], edge["v"], edge["key"], edge["side"],
                       edge["length_m"], edge["tree_deciduous"],
                       edge["tree_evergreen"], edge["tree_count"],
@@ -660,9 +665,10 @@ class GraphStore:
         self._sides = sides
         self._fold_names = fold_names
         self._node_lonlat = np.array(node_lonlat)
-        # The data's actual extent — whatever tiles happen to be loaded —
-        # rather than a hardcoded bbox from pipeline/config.py, so this
-        # stays correct without a server change once Stage 2 adds more tiles.
+        # The data's actual extent — whatever export files are loaded —
+        # rather than a hardcoded bbox from pipeline/config.py, so the
+        # same server code is correct for the citywide export and the
+        # pilot fixture alike.
         lon_min, lat_min = self._node_lonlat.min(axis=0)
         lon_max, lat_max = self._node_lonlat.max(axis=0)
         self._bounds = (float(lon_min), float(lat_min), float(lon_max), float(lat_max))
@@ -695,9 +701,9 @@ class GraphStore:
         # coastline (see the old BROOKLYN_BBOX), sweeping in street
         # fragments from across the water (Jersey City, a Lower Manhattan
         # sliver, the Rockaways) with no real connection to the rest of the
-        # data. That's no longer possible: pipeline/graph/boundary.py's
-        # clip_to_nyc() now drops non-NYC territory at fetch time, before it
-        # ever reaches data/tiles/, so every component here is trusted as
+        # data. That's no longer possible: pipeline/graph/pedestrian.py
+        # clips every way against the real borough polygons at read time,
+        # before anything reaches data/export/, so every component here is trusted as
         # real NYC data -- including genuinely disconnected real places
         # (Governors Island, ferry-only; eventually Staten Island, whose
         # only bridges lead to NJ, not the rest of NYC) alongside plenty of
@@ -728,7 +734,7 @@ class GraphStore:
             _save_cached_coverage(coverage_cache_path, coverage_fingerprint,
                                   self._coverage_rings, self._coverage_frame)
 
-        logger.info(f"[graph_store] {len(tile_paths)} tile(s): "
+        logger.info(f"[graph_store] {len(export_paths)} tile(s): "
               f"{len(node_lonlat)} nodes, {len(edge_pairs)} edges loaded")
 
     def _compute_coverage_rings(self) -> list[list[list[float]]]:
@@ -968,7 +974,7 @@ class GraphStore:
         Two checks, cheapest first: outside the loaded data's bounding box
         is an easy no. Inside the box isn't automatically a yes, though —
         a point in the middle of the Gowanus Canal is "inside" the pilot
-        tile's bbox but nowhere near a real sidewalk, so the second check
+        fixture's bbox but nowhere near a real sidewalk, so the second check
         also requires a real edge within MAX_SNAP_DISTANCE_M. Nearest-EDGE
         distance is a strictly more permissive (and more accurate) signal
         than the old nearest-NODE distance — it can only be smaller, never
@@ -1065,7 +1071,7 @@ class GraphStore:
         each run's fixed cost grows with the graph, measured around 13ms
         on a 203k-node component (a straight-line distance thing, not a
         constant), so halving the run count matters more here than it did
-        at pilot-tile scale.
+        at pilot-fixture scale.
 
         When start and end land on the same edge, also try cutting
         straight between them along it — otherwise two nearby clicks on

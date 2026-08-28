@@ -2,9 +2,9 @@
 
 server/graph_store.py's load() used to prune everything but the largest
 connected component. As of the borough-boundary polygon work it keeps
-every component instead, trusting pipeline/graph/boundary.py's
-clip_to_nyc() to have already excluded non-NYC territory before data ever
-reaches data/tiles/ -- so a real disconnected place (Governors Island,
+every component instead, trusting the pipeline's borough-polygon clip
+(pipeline/graph/pedestrian.py) to have already excluded non-NYC territory
+before data ever reaches data/export/ -- so a real disconnected place (Governors Island,
 eventually Staten Island) is no longer collateral damage. These tests
 fabricate a two-component dataset (a small
 main network plus a genuinely disconnected "island", split over two tile
@@ -84,7 +84,7 @@ def _write_tile(path, nodes: dict, edges: list) -> None:
 
 @pytest.fixture()
 def multi_component_store(tmp_path, monkeypatch) -> GraphStore:
-    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    monkeypatch.setattr(config, "EXPORT_DIR", tmp_path)
     _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
     _write_tile(tmp_path / "island.json.gz", ISLAND_NODES, ISLAND_EDGES)
     store = GraphStore()
@@ -195,7 +195,7 @@ def test_route_still_refuses_a_cross_component_pair_directly(multi_component_sto
 
 @pytest.fixture()
 def store_with_a_disconnected_fragment_near_a_real_street(tmp_path, monkeypatch) -> GraphStore:
-    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    monkeypatch.setattr(config, "EXPORT_DIR", tmp_path)
     _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
     _write_tile(tmp_path / "junk.json.gz", JUNK_NODES, JUNK_EDGES)
     store = GraphStore()

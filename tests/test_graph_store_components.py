@@ -88,7 +88,7 @@ def _write_tile(path, nodes, edges):
 
 
 def _store(tmp_path, monkeypatch, fragment_edges=FRAGMENT_EDGES) -> GraphStore:
-    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    monkeypatch.setattr(config, "EXPORT_DIR", tmp_path)
     _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
     _write_tile(tmp_path / "fragment.json.gz", FRAGMENT_NODES, fragment_edges)
     store = GraphStore()
@@ -137,7 +137,7 @@ def test_the_only_component_is_visible_however_small(tmp_path, monkeypatch):
     """A toy dataset or a sliver tile must stay clickable."""
     tiny = [("m1", "m2", "Alpha Street", 170.0, 3),
             ("m2", "m3", "Beta Avenue", 220.0, 5)]
-    monkeypatch.setattr(config, "TILES_DIR", tmp_path)
+    monkeypatch.setattr(config, "EXPORT_DIR", tmp_path)
     _write_tile(tmp_path / "main.json.gz", MAIN_NODES, tiny)
     store = GraphStore()
     store.load()
@@ -156,6 +156,6 @@ def test_load_params_are_part_of_the_coverage_fingerprint(tmp_path, monkeypatch)
     """
     _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
     paths = sorted(tmp_path.glob("*.json.gz"))
-    before = graph_store._tiles_fingerprint(paths)
+    before = graph_store._export_fingerprint(paths)
     monkeypatch.setattr(graph_store, "LOAD_PARAMS", "load-vTEST|no-overrides")
-    assert graph_store._tiles_fingerprint(paths) != before
+    assert graph_store._export_fingerprint(paths) != before

@@ -17,8 +17,8 @@ tmp_path. This is for the browser tier alone.
 
 WHERE IT MUST LAND
 ------------------
-tests/fixtures/, and NEVER data/tiles/. The server globs *.json.gz in
-TILES_DIR and loads everything it finds, so a fixture sitting beside real
+tests/fixtures/, and NEVER data/export/. The server globs *.json.gz in
+EXPORT_DIR and loads everything it finds, so a fixture sitting beside real
 data once injected 559 duplicate edges into a citywide graph. The root
 CLAUDE.md carries that rule; this script hard-fails rather than trust it.
 
@@ -96,14 +96,14 @@ def nearest_edge_distance_m(edges, lat, lon):
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    source = config.TILES_DIR / f"{CITYWIDE_NAME}.json.gz"
+    source = config.EXPORT_DIR / f"{CITYWIDE_NAME}.json.gz"
     if not source.exists():
         logger.error(f"No citywide export at {source}. Run "
                      f"`uv run python -m pipeline.build` first.")
         return 1
 
-    if OUT_PATH.resolve().parent == config.TILES_DIR.resolve():
-        logger.error("Refusing to write a fixture into TILES_DIR -- the "
+    if OUT_PATH.resolve().parent == config.EXPORT_DIR.resolve():
+        logger.error("Refusing to write a fixture into EXPORT_DIR -- the "
                      "server loads every *.json.gz it finds there.")
         return 1
 
