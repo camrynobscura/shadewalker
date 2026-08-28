@@ -5,7 +5,9 @@ surface leads -- the technique that found the id-collision, Williamsburg,
 phantom-connector, and Queensboro bugs. Split deliberately in two:
 
 - REGRESSION pins (the objective half) live in test_route_regressions.py's
-  v19 anchor section and run in the default citywide tier with no network.
+  anchor-band section and run in the default citywide tier with no network
+  (resurrected 2026-08-28 with sidewalk-model numbers; the sites and the
+  band reasoning are the v19 batch's).
 - DISCOVERY (this file) hits live third-party servers, so it is opt-in
   twice over: marked `external` AND skipped unless --run-external is
   passed (see conftest.py) -- a stray `-m` expression can never trigger
