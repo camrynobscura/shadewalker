@@ -211,12 +211,29 @@ def _to_feature(route: dict, tree_weight: float) -> dict:
     }
 
 
+def _fmt_dist(metres: float) -> str:
+    return f"{metres / 1000:.1f} km" if metres >= 1000 else f"{metres:.0f} m"
+
+
 def _describe(segments: list[dict]) -> str:
-    """Street-by-street text directions — the accessible (screen-reader)
-    twin of the drawn polyline, per the plan's accessibility section."""
+    """Turn-by-turn text directions — the accessible (screen-reader) twin
+    of the drawn polyline. Same steps RouteStats.tsx renders as a list;
+    the phrasing here and there must tell the same story."""
     if not segments:
         return "You are already at your destination."
-    parts = [f"Head {s['length_m']:.0f} m along {s['name']}" if i == 0
-             else f"then {s['length_m']:.0f} m along {s['name']}"
-             for i, s in enumerate(segments)]
-    return ", ".join(parts) + "."
+    parts = []
+    for step in segments:
+        dist = _fmt_dist(step["length_m"])
+        side = f" ({step['side']} side)" if step["side"] else ""
+        if step["action"] == "depart":
+            parts.append(f"Head {step['heading']} on {step['name']}{side} "
+                         f"for {dist}")
+        elif step["action"] == "continue":
+            parts.append(f"continue onto {step['name']}{side} for {dist}")
+        elif step["action"] == "cross_side":
+            parts.append(f"cross to the {step['side']} side of "
+                         f"{step['name']} and continue for {dist}")
+        else:  # left / right / sharp_left / sharp_right
+            word = step["action"].replace("_", " ")
+            parts.append(f"turn {word} onto {step['name']}{side} for {dist}")
+    return ", then ".join(parts) + "."
