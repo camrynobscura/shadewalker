@@ -20,10 +20,19 @@ THE RULE
 --------
 1. A way's OWN name wins. OSM said so; we don't second-guess it, and that
    includes its typos -- `Brookyln Bridge Promenade` stays misspelled.
-2. Otherwise, the nearest NAMED street within PARENT_MAX_M, but only if
-   it is decisively nearer than the nearest DIFFERENTLY-named street.
-3. Ambiguous or nothing in range emits NO name. A wrong street name is
-   worse than none: it sends someone to the wrong corner confidently.
+2. Otherwise, the nearest named street the edge runs ALONGSIDE (within
+   PARENT_MAX_M and roughly parallel -- PARALLEL_MAX_DIFF_DEG), but only
+   if it is decisively nearer than the nearest DIFFERENTLY-named such
+   street. The parallelism half was added 2026-08-28 after the holdout
+   harness showed the dominant error was corner scraps taking the
+   PERPENDICULAR cross street's name; requiring "alongside" improved
+   right, wrong AND coverage at once (measurements at
+   PARALLEL_MAX_DIFF_DEG below).
+3. Ambiguous or nothing in range emits NO name -- but carries
+   `fold_names` (the plausible parents) so direction rendering can fold
+   nameless scraps into the street run they belong to on evidence
+   instead of a length threshold. A wrong street name is worse than
+   none: it sends someone to the wrong corner confidently.
 
 MEASURED, NOT ASSUMED
 ---------------------
@@ -63,8 +72,29 @@ AMBIGUOUS_RATIO = 0.6
 # Edges shorter than this are corner nubs, kerb ramps and crossing stubs.
 # They carry little route length and their nearest-street answer is noisy,
 # so they inherit from their neighbours at direction-rendering time rather
-# than guessing here.
+# than guessing here. (They still get fold_names below -- proximity only,
+# since a 2m nub has no measurable direction of its own.)
 MIN_NAMEABLE_LEN_M = 5.0
+
+# A street may only lend its name to a sidewalk that runs ALONGSIDE it:
+# median local bearing difference over the probes at most this. Derived
+# 2026-08-28 by tools/audit/measure_naming_precision.py (holdout over the
+# 12,159 own-named edges): adding this filter to the nearest-street rule
+# moved the street-achievable subset, by length walked, from
+# RIGHT 69.8 / none 24.8 / WRONG 5.4 to RIGHT 75.9 / none 20.6 / WRONG 3.5
+# -- better on every axis at once -- and named 27.5% MORE edges citywide
+# (249,931 vs 196,055), because a perpendicular cross street no longer
+# competes at corners (the dominant error class: corner scraps taking the
+# cross street's name). 30 degrees sits far from a cross street's 90 while
+# tolerating curved streets.
+PARALLEL_MAX_DIFF_DEG = 30.0
+
+# How many plausible parent names an UNNAMED edge carries out of this
+# module (edge["fold_names"]), nearest first. Direction rendering uses
+# them as folding evidence -- "does this nameless scrap belong to the
+# street run it interrupts?" -- which is what replaced a bare length
+# threshold. Named edges carry none; their name is their evidence.
+MAX_FOLD_NAMES = 3
 
 # Degrees -> metres, flat, at NYC's latitude. Deliberately the SAME
 # approximation tools/audit/measure_sidewalk_parent_street.py used, so the
@@ -94,6 +124,17 @@ def _probe_points(line: LineString) -> list:
             for i in range(count)]
 
 
+def _local_bearing(line: LineString, s: float) -> float:
+    """The line's direction around distance s along it, degrees mod 180
+    (undirected -- a street and a sidewalk running opposite ways are
+    still parallel), from a 4m chord centred there."""
+    a = line.interpolate(max(s - 2.0, 0.0))
+    b = line.interpolate(min(s + 2.0, line.length))
+    if a.x == b.x and a.y == b.y:
+        return 0.0
+    return math.degrees(math.atan2(b.x - a.x, b.y - a.y)) % 180.0
+
+
 def _street_index(streets) -> tuple[STRtree, list, list]:
     """An STRtree over street geometries in metres, plus their names."""
     geometries, names = [], []
@@ -106,11 +147,48 @@ def _street_index(streets) -> tuple[STRtree, list, list]:
     return STRtree(geometries), geometries, names
 
 
+def _candidate_names(line, probes, probe_bearings, index, geometries,
+                     names) -> list:
+    """Nearby streets that could plausibly own this edge, as
+    [(name, median_m)] nearest first. Distance is PER STREET NAME: two
+    ways both called "Court Street" are one candidate, not two.
+
+    probe_bearings=None skips the parallelism filter -- used for
+    sub-MIN_NAMEABLE nubs, whose own direction is noise.
+    """
+    by_name: dict[str, float] = {}
+    for position in index.query(line.buffer(PARENT_MAX_M)):
+        street = geometries[position]
+        if probe_bearings is not None:
+            differences = []
+            for probe, edge_bearing in zip(probes, probe_bearings):
+                street_bearing = _local_bearing(street, street.project(probe))
+                d = abs(edge_bearing - street_bearing)
+                differences.append(min(d, 180.0 - d))
+            differences.sort()
+            if differences[len(differences) // 2] > PARALLEL_MAX_DIFF_DEG:
+                continue
+        distances = sorted(probe.distance(street) for probe in probes)
+        median = distances[len(distances) // 2]
+        if median > PARENT_MAX_M:
+            continue
+        name = names[position]
+        if name not in by_name or median < by_name[name]:
+            by_name[name] = median
+    return sorted(by_name.items(), key=lambda item: item[1])
+
+
 def assign_parent_names(edges: list[dict], streets) -> dict:
     """Fill in `name` on every edge that hasn't got one. Mutates `edges`.
 
+    Edges that end up WITHOUT a name get `fold_names` instead (up to
+    MAX_FOLD_NAMES plausible parents, nearest first) so direction
+    rendering can decide "does this nameless piece belong to the street
+    run around it?" from evidence rather than a length threshold.
+
     Returns a tally of what happened, for the caller to log and for the
-    audit to compare against the 94.0% measured on ways.
+    audit to compare against the measured baselines
+    (tools/audit/measure_naming_precision.py).
     """
     index, geometries, names = _street_index(streets)
     logger.info(f"  [naming] {len(geometries):,} named street ways indexed")
@@ -124,29 +202,25 @@ def assign_parent_names(edges: list[dict], streets) -> dict:
             continue
 
         line = LineString([_to_m(lon, lat) for lon, lat in edge["coords"]])
+        probes = _probe_points(line)
+
         if line.length < MIN_NAMEABLE_LEN_M:
             tally["too_short"] += 1
+            ranked = _candidate_names(line, probes, None, index, geometries,
+                                      names)
+            if ranked:
+                edge["fold_names"] = [n for n, _ in ranked[:MAX_FOLD_NAMES]]
             continue
 
-        probes = _probe_points(line)
-        # Distance PER STREET NAME: two ways both called "Court Street"
-        # are one candidate, not two, since either gives the same answer.
-        by_name: dict[str, float] = {}
-        for position in index.query(line.buffer(PARENT_MAX_M)):
-            name = names[position]
-            street = geometries[position]
-            distances = sorted(probe.distance(street) for probe in probes)
-            median = distances[len(distances) // 2]
-            if median > PARENT_MAX_M:
-                continue
-            if name not in by_name or median < by_name[name]:
-                by_name[name] = median
+        probe_bearings = [_local_bearing(line, line.project(probe))
+                          for probe in probes]
+        ranked = _candidate_names(line, probes, probe_bearings, index,
+                                  geometries, names)
 
-        if not by_name:
+        if not ranked:
             tally["no_parent"] += 1
             continue
 
-        ranked = sorted(by_name.items(), key=lambda item: item[1])
         if len(ranked) == 1:
             edge["name"] = ranked[0][0]
             tally["derived"] += 1
@@ -161,6 +235,7 @@ def assign_parent_names(edges: list[dict], streets) -> dict:
             tally["derived"] += 1
         else:
             tally["ambiguous"] += 1
+            edge["fold_names"] = [n for n, _ in ranked[:MAX_FOLD_NAMES]]
 
     total = len(edges)
     named = tally["own"] + tally["derived"]

@@ -36,7 +36,9 @@ from pipeline.graph.naming import (
     _K,
     _LAT_M,
     AMBIGUOUS_RATIO,
+    MAX_FOLD_NAMES,
     MIN_NAMEABLE_LEN_M,
+    PARALLEL_MAX_DIFF_DEG,
     PARENT_MAX_M,
     _probe_points,
     _to_m,
@@ -477,3 +479,93 @@ def test_the_degrees_to_metres_scale_matches_the_audit_instrument():
     assert _K == 111320.0 * math.cos(math.radians(40.7))
     assert _LAT_M == 110540.0
     assert _to_m(1.0, 1.0) == (_K, _LAT_M)
+
+
+# ── The parallelism filter (2026-08-28) and fold_names ───────────────────
+
+def test_a_perpendicular_street_cannot_lend_its_name():
+    """THE class the filter was added for: a short corner scrap running
+    along Court but sitting nearer to the cross street. By distance alone
+    Union wins decisively (median 5m vs 9m, ratio 0.556 <= 0.6) -- the
+    measured dominant error, a corner scrap taking the PERPENDICULAR
+    street's name. Union runs north, the scrap runs east: 90 degrees
+    apart, so the filter removes Union and Court wins alone.
+    """
+    edge = _sidewalk(length_m=8.0)
+    streets = [_parallel_street("Court Street", offset_m=9.0, osm_id=1),
+               _cross_street("Union Street", at_m=-1.0, osm_id=9)]
+    tally = assign_parent_names([edge], streets)
+    assert edge["name"] == "Court Street"
+    assert tally["derived"] == 1
+
+
+def test_a_perpendicular_street_no_longer_causes_ambiguity():
+    """The coverage half of the measured win (+27.5% named edges): a cross
+    street inside the radius used to make the real parent look contested
+    (median 10m vs 9m, ratio 0.9 -> ambiguous, no name). Perpendicular
+    candidates no longer compete, so the parent is decisive.
+    """
+    edge = _sidewalk(length_m=12.0)
+    streets = [_parallel_street("Court Street", offset_m=9.0, osm_id=1),
+               _cross_street("Union Street", at_m=-4.0, osm_id=9)]
+    tally = assign_parent_names([edge], streets)
+    assert edge["name"] == "Court Street"
+    assert tally["derived"] == 1
+    assert tally["ambiguous"] == 0
+
+
+def test_an_ambiguous_edge_carries_fold_names_nearest_first():
+    """No name, but not no information: direction rendering folds a
+    nameless piece into an adjacent street run only when that run's name
+    is among the piece's plausible parents."""
+    edge = _sidewalk(length_m=60.0)
+    streets = [_parallel_street("Court Street", offset_m=8.0, osm_id=1),
+               _parallel_street("Smith Street", offset_m=-10.0, osm_id=5)]
+    tally = assign_parent_names([edge], streets)
+    assert edge["name"] == ""
+    assert tally["ambiguous"] == 1
+    assert edge["fold_names"] == ["Court Street", "Smith Street"]
+
+
+def test_a_too_short_nub_gets_proximity_only_fold_names():
+    """A 3m corner nub has no measurable direction, so it gets no name --
+    but it still knows which streets could own it, cross street included,
+    which is what lets a kerb ramp at Court & Union fold into either
+    neighbouring run."""
+    edge = _sidewalk(length_m=3.0)
+    streets = [_parallel_street("Court Street", offset_m=8.0, osm_id=1),
+               _cross_street("Union Street", at_m=-2.0, osm_id=9)]
+    tally = assign_parent_names([edge], streets)
+    assert edge["name"] == ""
+    assert tally["too_short"] == 1
+    assert edge["fold_names"] == ["Union Street", "Court Street"]
+
+
+def test_an_edge_with_nothing_in_range_has_no_fold_names():
+    """A real park path is not foldable into anything: no candidates, no
+    key at all -- the export stays small and the server's .get() default
+    covers it."""
+    edge = _sidewalk(length_m=60.0)
+    tally = assign_parent_names([edge], [])
+    assert edge["name"] == ""
+    assert tally["no_parent"] == 1
+    assert "fold_names" not in edge
+
+
+def test_fold_names_are_capped():
+    edge = _sidewalk(length_m=60.0)
+    streets = [_parallel_street("A Street", offset_m=8.0, osm_id=1),
+               _parallel_street("B Street", offset_m=-10.0, osm_id=3),
+               _parallel_street("C Street", offset_m=12.0, osm_id=5),
+               _parallel_street("D Street", offset_m=-14.0, osm_id=7)]
+    assign_parent_names([edge], streets)
+    assert edge["fold_names"] == ["A Street", "B Street", "C Street"]
+
+
+def test_the_parallelism_constant_matches_its_derivation():
+    """PARALLEL_MAX_DIFF_DEG = 30 is what measure_naming_precision.py
+    measured the P5 win with (RIGHT 75.9 / WRONG 3.5 by length on the
+    street-achievable subset, 2026-08-28). Changing it invalidates those
+    numbers -- deliberate act, re-measurement required."""
+    assert PARALLEL_MAX_DIFF_DEG == 30.0
+    assert MAX_FOLD_NAMES == 3
