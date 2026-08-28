@@ -110,11 +110,22 @@ def write_citywide(nodes: dict, edges: list[dict]) -> Path:
 
     edge_records = []
     for edge in edges:
-        edge_records.append({
+        record = {
             "u": edge["u"],
             "v": edge["v"],
             "key": int(edge["key"]),
+            # COMPASS side of the parent street ("N"/"S"/"E"/"W"), "" when
+            # none is honest or the edge has no street (crossings, park
+            # paths). Was CSCL L/R until 2026-08-28 -- see
+            # BlockFaceIndex.compass_side for why that could never survive
+            # a block boundary.
             "side": edge["side"],
+            # OSM's own classification ("footway/sidewalk",
+            # "footway/crossing", "steps"...). Exported since 2026-08-28:
+            # direction rendering folds crossings into the street run they
+            # interrupt, which no length heuristic can do (crossings run
+            # 15-31m and wider on avenues).
+            "kind": edge.get("kind", ""),
             "length_m": edge["length_m"],
             "name": edge["name"],
             "tree_deciduous": edge.get("tree_deciduous", 0.0),
@@ -132,7 +143,15 @@ def write_citywide(nodes: dict, edges: list[dict]) -> Path:
             "tree_park_canopy": round(float(edge.get("tree_park_canopy", 0.0)), 3),
             # lat/lon degrees, [lon, lat] order — see the module docstring.
             "coords": edge["coords"],
-        })
+        }
+        # Only on UNNAMED edges, and only when naming found plausible
+        # parents (pipeline/graph/naming.py): the folding evidence that
+        # replaced a length threshold. Omitted otherwise -- 488k edges pay
+        # for every key.
+        fold_names = edge.get("fold_names")
+        if fold_names:
+            record["fold_names"] = fold_names
+        edge_records.append(record)
 
     payload = {
         "meta": {
