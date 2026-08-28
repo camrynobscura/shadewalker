@@ -318,6 +318,33 @@ TREE_ATTACH_MAX_M = 8.0
 # citywide sidewalk network is ~7.1M lookups, about 9.5 minutes.
 BLOCK_FACE_SAMPLE_STEP_M = 2.0
 
+# Compass-side language ("the north side of Court Street") declines rather
+# than stretches: no side word is emitted when the pavement's mean
+# away-from-kerb bearing sits within this margin of a 90-degree bin
+# boundary (a true diagonal -- neither "north" nor "east" is honest), per
+# the user's 2026-08-28 call: four plain words with generous rounding,
+# silence on the rest.
+#
+# MEASURED 2026-08-28 (20k-edge seeded sample, 965 km): street tilt
+# citywide is essentially UNIFORM over 0-45 degrees (every 5-degree band
+# holds 10-13% of length -- the boroughs' many rotated grids average flat),
+# so there is NO natural gap to put this boundary in: each degree of
+# margin silences ~2% of sidewalk length. 5 keeps the plain word through
+# every real grid (Manhattan's 29-degree tilt included, words up to
+# 40 degrees) and silences only the truly-diagonal ~7% of length.
+SIDE_DECLINE_MARGIN_DEG = 5.0
+
+# ...and no side word when the direction genuinely WANDERS along the edge
+# (an L wrapping a corner faces two ways; naming either is wrong for half
+# the walk). Resultant of the per-probe unit vectors after
+# BlockFaceIndex.compass_side's corner-arc outlier rejection: 1.0 =
+# perfectly consistent; the half-N-half-W L reads ~0.71. Measured
+# 2026-08-28: 72% of edges sit above 0.9 outright and the mass below 0.4
+# is the corner-arc ARTIFACT the rejection repairs, so after rejection
+# 0.8 separates real curves from straight pavement with room on both
+# sides.
+SIDE_MIN_RESULTANT = 0.8
+
 # Pavement Edge `feat_code` for a ROAD EDGE -- the kerb along a street, which
 # is the only class that has sidewalks beside it. The layer also carries
 # 2270 ALLEY (7,613 lines, 581 km) and 2230 AIRPORT RUNWAY (349 lines, 15 km),

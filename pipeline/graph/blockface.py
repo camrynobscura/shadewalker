@@ -60,6 +60,12 @@ from pipeline.graph.naming import _probe_points, _to_m
 logger = logging.getLogger(__name__)
 
 
+def _angular_distance(a: float, b: float) -> float:
+    """Smallest separation between two bearings, degrees, 0-180."""
+    d = abs(a - b) % 360.0
+    return min(d, 360.0 - d)
+
+
 class Face:
     """One side of one block, with the CSCL attributes for THAT side."""
 
@@ -171,6 +177,13 @@ class BlockFaceIndex:
         self._index, self._kerbs, self._face_of_kerb, self._conflated = (
             build_kerb_index(pave_rows))
         self._faces = build_face_lookup(cscl_rows)
+        # face id -> positions of its (conflated) kerb lines, for
+        # compass_side. Built once: 171k rows, trivial next to the STRtree.
+        self._kerb_positions_of_face: dict[str, list[int]] = {}
+        for position, face_id in enumerate(self._face_of_kerb):
+            if self._conflated[position] and face_id:
+                self._kerb_positions_of_face.setdefault(
+                    str(face_id), []).append(position)
         logger.info(f"  [blockface] {len(self._kerbs):,} kerb lines, "
                     f"{len(self._faces):,} resolvable block faces")
 
@@ -179,6 +192,88 @@ class BlockFaceIndex:
 
     def face(self, face_id):
         return self._faces.get(face_id)
+
+    def compass_side(self, coords, face_id) -> str:
+        """Which compass side of its street this pavement is on -- "N",
+        "S", "E" or "W" -- or "" when no single plain word is honest.
+
+        WHY GEOMETRY AND NOT CSCL's L/R: the L/R is relative to each
+        segment's arbitrary digitization direction, and it does not
+        survive a block boundary -- measured 2026-08-28, same-name
+        sidewalk pairs continuing across a side street disagree 53.3% of
+        the time (a coin flip), so a direction keyed on it would announce
+        phantom "cross to the other side" steps. The kerb, by contrast,
+        physically separates this pavement from its roadway: the
+        direction from the pavement TO its kerb points at the street, so
+        its opposite names the side the pavement is on. Kerb-referenced,
+        no centerline geometry -- the module rule holds.
+
+        FOUR PLAIN WORDS ONLY (user, 2026-08-28): generous 90-degree
+        bins match how the city talks -- Manhattan's grid is ~29 degrees
+        off true and everyone still says "the north side of 23rd
+        Street". Where the mean side direction sits within
+        config.SIDE_DECLINE_MARGIN_DEG of a bin boundary (a true
+        diagonal), or wanders along the edge (a curve -- resultant below
+        config.SIDE_MIN_RESULTANT), the answer is "" and directions
+        simply omit the side, the same philosophy as naming: no word
+        beats a confusing word.
+        """
+        positions = self._kerb_positions_of_face.get(str(face_id))
+        if not positions:
+            return ""
+        line = LineString([_to_m(lon, lat) for lon, lat in coords])
+        if line.length <= 0:
+            return ""
+        vectors = []  # per-probe unit vector pointing AWAY from the roadway
+        for probe in _probe_points(line):
+            nearest = None
+            for position in positions:
+                kerb = self._kerbs[position]
+                point = kerb.interpolate(kerb.project(probe))
+                d = probe.distance(point)
+                if nearest is None or d < nearest[0]:
+                    nearest = (d, point)
+            dx, dy = nearest[1].x - probe.x, nearest[1].y - probe.y
+            norm = math.hypot(dx, dy)
+            if norm < 0.01:
+                continue  # probe sits ON the kerb; no direction to read
+            vectors.append((-dx / norm, -dy / norm))
+        if not vectors:
+            return ""
+
+        def mean_of(vs):
+            x = sum(v[0] for v in vs)
+            y = sum(v[1] for v in vs)
+            return x, y, math.hypot(x, y) / len(vs)
+
+        x_sum, y_sum, resultant = mean_of(vectors)
+        if resultant < config.SIDE_MIN_RESULTANT:
+            # A kerb line wraps its block's corner, so a probe near the
+            # edge's end can attach to the wrapped RETURN and read the
+            # roadway direction backwards -- one flipped probe in three
+            # collapses the resultant to ~0.33 (measured as a spike at
+            # exactly that value, 17% of a 20k sample, 2026-08-28). Drop
+            # the minority pointing >90 degrees from the first-pass mean
+            # and retry once. A genuine curve (an L wrapping a corner)
+            # spreads smoothly instead, keeps its majority, and still
+            # fails the resultant test below.
+            mean_bearing = math.degrees(math.atan2(x_sum, y_sum)) % 360.0
+            kept = [v for v in vectors
+                    if _angular_distance(
+                        math.degrees(math.atan2(v[0], v[1])) % 360.0,
+                        mean_bearing) <= 90.0]
+            if len(kept) * 2 <= len(vectors):
+                return ""
+            x_sum, y_sum, resultant = mean_of(kept)
+            if resultant < config.SIDE_MIN_RESULTANT:
+                return ""
+        bearing = math.degrees(math.atan2(x_sum, y_sum)) % 360.0
+        centers = {"N": 0.0, "E": 90.0, "S": 180.0, "W": 270.0}
+        word, center = min(centers.items(),
+                           key=lambda item: _angular_distance(bearing, item[1]))
+        if _angular_distance(bearing, center) > 45.0 - config.SIDE_DECLINE_MARGIN_DEG:
+            return ""
+        return word
 
     def _resolve(self, search_area, distance_of, max_m):
         """Shared core. `distance_of(kerb_geometry) -> metres`.

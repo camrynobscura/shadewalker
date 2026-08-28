@@ -377,11 +377,11 @@ def build_graph(ways: list[Way]) -> tuple[dict, list[dict]]:
             "u": u,
             "v": v,
             "key": key,
-            # "C" is a placeholder the spine does not use. Every edge here
-            # is already one real pavement, so the field's future meaning
-            # is which side of the parent street it is ("north side of
-            # Court Street") -- assigned by the per-side scoring step.
-            "side": "C",
+            # Placeholder; the block-face scoring step fills in the COMPASS
+            # side of the parent street ("N"/"S"/"E"/"W") for sidewalks
+            # with a face. Everything else -- crossings, park paths -- has
+            # no street side and stays "".
+            "side": "",
             "length_m": round(float(length_m), 1),
             "name": name,
             # OSM's own classification, carried through so scoring can tell

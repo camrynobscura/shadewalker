@@ -207,3 +207,84 @@ def test_the_tree_cap_is_wider_than_the_line_cap():
     lon, lat = at(50.0, 9.0)
     assert index.match_point(lon, lat,
                              max_m=config.TREE_ATTACH_MAX_M) is None
+
+
+# --- compass_side: which side of the street is this pavement on --------
+
+def test_pavement_north_of_an_east_west_kerb_is_the_north_side():
+    """The kerb separates pavement from roadway, so away-from-kerb names
+    the side: sidewalk 2m north of the kerb -> the street is south of it
+    -> it is the street's north side."""
+    index = index_of([kerb("F1", 0, 100)], [cscl("F1")])
+    assert index.compass_side(sidewalk(0, 100, offset_m=2.0), "F1") == "N"
+    assert index.compass_side(sidewalk(0, 100, offset_m=-2.0), "F1") == "S"
+
+
+def test_pavement_beside_a_north_south_kerb_reads_east_or_west():
+    vertical_kerb = {
+        "blockf_id": "F1", "conflated": "1", "feat_code": "2260",
+        "the_geom": {"type": "LineString",
+                     "coordinates": [at(0.0, 0.0), at(0.0, 100.0)]},
+    }
+    index = index_of([vertical_kerb], [cscl("F1")])
+    east_walk = [at(2.0, 0.0), at(2.0, 100.0)]
+    west_walk = [at(-2.0, 0.0), at(-2.0, 100.0)]
+    assert index.compass_side(east_walk, "F1") == "E"
+    assert index.compass_side(west_walk, "F1") == "W"
+
+
+def test_a_manhattan_tilted_grid_still_gets_the_plain_word():
+    """Manhattan's cross streets run ~29 degrees off true east-west and
+    everyone still says "the north side of 23rd Street" -- the generous
+    90-degree bins are what make the plain word land (29 < 45 - margin)."""
+    import math as m
+    ux, uy = m.cos(m.radians(29.0)), m.sin(m.radians(29.0))
+    nx, ny = -uy, ux  # left-perpendicular: mostly north
+    tilted_kerb = {
+        "blockf_id": "F1", "conflated": "1", "feat_code": "2260",
+        "the_geom": {"type": "LineString",
+                     "coordinates": [at(0.0, 0.0),
+                                     at(100.0 * ux, 100.0 * uy)]},
+    }
+    index = index_of([tilted_kerb], [cscl("F1")])
+    walk = [at(2.0 * nx, 2.0 * ny),
+            at(100.0 * ux + 2.0 * nx, 100.0 * uy + 2.0 * ny)]
+    assert index.compass_side(walk, "F1") == "N"
+
+
+def test_a_true_diagonal_declines_rather_than_stretches():
+    """At 45 degrees neither "north" nor "west" is honest, so the answer
+    is no word at all -- same philosophy as naming's ambiguity rule."""
+    import math as m
+    ux = uy = m.cos(m.radians(45.0))
+    nx, ny = -uy, ux
+    diagonal_kerb = {
+        "blockf_id": "F1", "conflated": "1", "feat_code": "2260",
+        "the_geom": {"type": "LineString",
+                     "coordinates": [at(0.0, 0.0),
+                                     at(100.0 * ux, 100.0 * uy)]},
+    }
+    index = index_of([diagonal_kerb], [cscl("F1")])
+    walk = [at(2.0 * nx, 2.0 * ny),
+            at(100.0 * ux + 2.0 * nx, 100.0 * uy + 2.0 * ny)]
+    assert index.compass_side(walk, "F1") == ""
+
+
+def test_a_corner_wrapping_edge_declines():
+    """An L-shaped edge faces north along one leg and west along the
+    other; naming either side would be wrong for half the walk. The
+    resultant test catches the wander and declines."""
+    l_kerb = {
+        "blockf_id": "F1", "conflated": "1", "feat_code": "2260",
+        "the_geom": {"type": "LineString",
+                     "coordinates": [at(0.0, 0.0), at(50.0, 0.0),
+                                     at(50.0, 50.0)]},
+    }
+    index = index_of([l_kerb], [cscl("F1")])
+    l_walk = [at(0.0, 2.0), at(46.0, 2.0), at(46.0, 48.0)]
+    assert index.compass_side(l_walk, "F1") == ""
+
+
+def test_compass_side_of_an_unknown_face_is_empty():
+    index = index_of([kerb("F1", 0, 100)], [cscl("F1")])
+    assert index.compass_side(sidewalk(0, 100), "NOPE") == ""
