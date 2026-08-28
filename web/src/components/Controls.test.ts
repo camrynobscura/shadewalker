@@ -17,9 +17,11 @@ describe('compareRoutes', () => {
 
     expect(compareRoutes(selected, baseline)).toEqual({
       extraMinutes: 1, // 20.2 - 19.5 = 0.7, rounds to 1
-      // (0.95 - 0.745) * 100 = 20.499999999999996 in IEEE754 floating point,
-      // not exactly 20.5 -- rounds down to 20, not up to 21.
-      extraShadePct: 20,
+      // On the DISPLAYED scale (shade.ts, k=1.2): displayShade(0.95) =
+      // 0.9725, displayShade(0.745) = 0.8060 -- delta 16.65, rounds to
+      // 17. Smaller than the raw 20-point spread because the curve
+      // compresses toward the top; matches what the two presets show.
+      extraShadePct: 17,
       extraLengthM: 58.9,
     })
   })
@@ -38,7 +40,10 @@ describe('compareRoutes', () => {
     const selected = feature(150, 2, 5, 0.3)
     expect(compareRoutes(selected, baseline)).toEqual({
       extraMinutes: -1,
-      extraShadePct: -20,
+      // displayShade(0.3) = 0.3482, displayShade(0.5) = 0.5647 -- the
+      // curve widens the mid-range, so the displayed delta (-21.65,
+      // rounds to -22) is larger than the raw -20.
+      extraShadePct: -22,
       extraLengthM: -50,
     })
   })
