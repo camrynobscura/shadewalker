@@ -90,7 +90,9 @@
 }
 
 .panel {
-  width: 460px;
+  /* 480px, was 460 until 2026-08-28: the directions list was wrapping a
+     good share of its lines by only a couple of characters. */
+  width: 480px;
   overflow-y: auto;
   padding: var(--space-xl) var(--space-2xl);
   background: var(--panel);

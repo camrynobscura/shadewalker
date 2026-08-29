@@ -56,6 +56,8 @@ import math
 from shapely.geometry import LineString
 from shapely.strtree import STRtree
 
+from pipeline import config
+
 logger = logging.getLogger(__name__)
 
 # How far from a sidewalk to look for its parent street. A NYC sidewalk
@@ -178,8 +180,22 @@ def _candidate_names(line, probes, probe_bearings, index, geometries,
     return sorted(by_name.items(), key=lambda item: item[1])
 
 
+def _is_connector_kind(kind: str) -> bool:
+    """Same rule as server/graph_store.py's _is_connector_kind, over the
+    shared config vocabulary — the two must agree: the server folds these
+    legs into the street runs around them and never renders their name,
+    which is what makes skipping them here safe."""
+    return any(marker in kind for marker in config.CONNECTOR_KIND_MARKERS)
+
+
 def assign_parent_names(edges: list[dict], streets) -> dict:
     """Fill in `name` on every edge that hasn't got one. Mutates `edges`.
+
+    Connector kinds (crossings, traffic islands) are skipped outright:
+    the server never renders a name or reads fold_names for them, so
+    deriving either is build time spent on output nobody can see. An OSM
+    name of the connector's OWN is kept — the skip avoids work, it does
+    not delete data.
 
     Edges that end up WITHOUT a name get `fold_names` instead (up to
     MAX_FOLD_NAMES plausible parents, nearest first) so direction
@@ -194,11 +210,20 @@ def assign_parent_names(edges: list[dict], streets) -> dict:
     logger.info(f"  [naming] {len(geometries):,} named street ways indexed")
 
     tally = {"own": 0, "derived": 0, "ambiguous": 0, "no_parent": 0,
-             "too_short": 0}
+             "too_short": 0, "connector": 0}
 
     for edge in edges:
         if edge["name"]:
             tally["own"] += 1
+            continue
+
+        if _is_connector_kind(edge["kind"]):
+            # Pure cost before this skip: ~105k crossing/traffic-island
+            # edges went through probes and the street index for names
+            # the server folds away unseen (graph_store._foldable_into
+            # short-circuits on kind; _display_name blanks it; fold_names
+            # is never consulted for connector legs).
+            tally["connector"] += 1
             continue
 
         line = LineString([_to_m(lon, lat) for lon, lat in edge["coords"]])
@@ -243,6 +268,7 @@ def assign_parent_names(edges: list[dict], streets) -> dict:
         f"  [naming] {named:,}/{total:,} edges named ({named / total * 100:.1f}%) "
         f"-- {tally['own']:,} own, {tally['derived']:,} derived; "
         f"unnamed: {tally['ambiguous']:,} ambiguous, "
-        f"{tally['no_parent']:,} no parent, {tally['too_short']:,} too short"
+        f"{tally['no_parent']:,} no parent, {tally['too_short']:,} too short, "
+        f"{tally['connector']:,} connectors skipped (names never render)"
     )
     return tally

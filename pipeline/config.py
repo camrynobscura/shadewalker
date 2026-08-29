@@ -299,6 +299,16 @@ MAX_TREE_WEIGHT = 40.0
 # than weakening it; don't raise it without re-measuring the tail.
 MAX_TREE_WEIGHTS_PER_REQUEST = 8
 
+# Edge kinds that are CONNECTORS — pavement you pass over, not a street
+# walked along with an identity. Matched as substrings of an edge's `kind`
+# ("footway/crossing", "footway/traffic_island"). One vocabulary, two
+# consumers that must agree: the server folds these legs into the street
+# runs around them and never renders their name
+# (server/graph_store.py:_is_connector_kind), and naming skips deriving
+# names for them because that work could never be seen — ~105k edges of
+# the citywide build (pipeline/graph/naming.py, skip added 2026-08-28).
+CONNECTOR_KIND_MARKERS = ("crossing", "traffic_island")
+
 # DENSITY_LENGTH_FLOOR_M IS DELETED, NOT UNSET. Do not reintroduce it.
 #
 # It was 20.0 in the centerline model, where it stopped 2m intersection stubs

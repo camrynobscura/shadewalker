@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCoords, formatDistance, formatDistanceParts } from './format'
+import { formatCoords, formatDistance, formatDistanceParts, formatEtaParts } from './format'
 
 describe('formatDistance', () => {
   it('rounds a short distance to whole feet', () => {
@@ -36,6 +36,40 @@ describe('formatDistanceParts', () => {
       const { value, unit } = formatDistanceParts(meters)
       expect(`${value} ${unit}`).toBe(formatDistance(meters))
     }
+  })
+})
+
+describe('formatEtaParts', () => {
+  it('stays in minutes under an hour', () => {
+    expect(formatEtaParts(42)).toEqual([{ value: '42', unit: 'min' }])
+  })
+
+  it('splits an hour-plus eta into hr and min', () => {
+    expect(formatEtaParts(150)).toEqual([
+      { value: '2', unit: 'hr' },
+      { value: '30', unit: 'min' },
+    ])
+  })
+
+  it('drops a zero-minute remainder rather than showing "0 min"', () => {
+    expect(formatEtaParts(120)).toEqual([{ value: '2', unit: 'hr' }])
+  })
+
+  it('rolls 59.6 over into "1 hr", never "60 min"', () => {
+    // Rounding must happen BEFORE the hour split: round(59.6) = 60.
+    expect(formatEtaParts(59.6)).toEqual([{ value: '1', unit: 'hr' }])
+  })
+
+  it('rounds before splitting so 119.7 reads "2 hr"', () => {
+    expect(formatEtaParts(119.7)).toEqual([{ value: '2', unit: 'hr' }])
+  })
+
+  it('keeps a sub-minute eta at "0 min"', () => {
+    expect(formatEtaParts(0.3)).toEqual([{ value: '0', unit: 'min' }])
+  })
+
+  it('stays in minutes just under the hour', () => {
+    expect(formatEtaParts(59.4)).toEqual([{ value: '59', unit: 'min' }])
   })
 })
 

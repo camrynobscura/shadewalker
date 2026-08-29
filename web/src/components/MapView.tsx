@@ -17,6 +17,18 @@ import styles from './MapView.module.css'
 
 const PILOT_CENTER: [number, number] = [40.677, -73.993]
 
+/* CARTO started watermarking keyless raster tile requests in 2026-08
+   ("API KEY REQUIRED" repeated across the map). The key is a build-time
+   input (VITE_CARTO_KEY in web/.env.local, gitignored) and is public by
+   nature — it rides in every tile URL a visitor's browser requests, so
+   keeping it out of git is rotation hygiene, not secrecy. Keyless builds
+   still render, just watermarked, which keeps dev and e2e working with
+   no local setup. Key mechanics: docs.carto.com/faqs/carto-basemaps. */
+const CARTO_KEY = import.meta.env.VITE_CARTO_KEY
+const TILE_URL =
+  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png' +
+  (CARTO_KEY ? `?key=${CARTO_KEY}` : '')
+
 /* Markers as labeled divIcons: start and end are told apart by their letter,
    not color -- both render the same magenta (see MapView.module.css), so
    color-blind users aren't relying on hue alone (WCAG 1.4.1 "use of
@@ -266,7 +278,7 @@ export function MapView({ start, end, selected, baseline, coverage, position, on
       <MapContainer center={PILOT_CENTER} zoom={15} className={styles.map}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          url={TILE_URL}
           subdomains={['a', 'b']} /* only the two hosts we preconnect in index.html */
           // detectRetina is DELIBERATELY OFF, and maxNativeZoom is why.
           //

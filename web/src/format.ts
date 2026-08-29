@@ -29,3 +29,22 @@ export function formatDistance(meters: number): string {
   const { value, unit } = formatDistanceParts(meters)
   return `${value} ${unit}`
 }
+
+/** ETA as value/unit pairs, for the same <small>-styled markup as
+ * formatDistanceParts. Under an hour it reads "42 min"; from an hour up,
+ * "2 hr 19 min", with a zero remainder dropped ("2 hr", never
+ * "2 hr 0 min"). These units only fit on one stat-box line because the
+ * stat values render in a PROPORTIONAL face (RouteStats.module.css's
+ * .statVal) — in the app's monospace they were a third spaces and
+ * wrapped; short "2h 19m" units were tried in between (2026-08-28).
+ * Rounds the raw minutes ONCE, up front, then splits — so 59.6 rolls
+ * over to "1 hr" and can never render as "60 min". */
+export function formatEtaParts(minutes: number): Array<{ value: string; unit: string }> {
+  const total = Math.round(minutes)
+  if (total < 60) return [{ value: `${total}`, unit: 'min' }]
+  const hours = Math.floor(total / 60)
+  const rest = total % 60
+  const parts = [{ value: `${hours}`, unit: 'hr' }]
+  if (rest > 0) parts.push({ value: `${rest}`, unit: 'min' })
+  return parts
+}
