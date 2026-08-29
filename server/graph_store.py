@@ -107,7 +107,9 @@ _COMPASS8 = ["north", "northeast", "east", "southeast",
 
 
 def _is_connector_kind(kind: str) -> bool:
-    return "crossing" in kind or "traffic_island" in kind
+    # Vocabulary shared with naming's connector skip: what folds here as a
+    # connector is exactly what naming declines to derive a name for.
+    return any(marker in kind for marker in config.CONNECTOR_KIND_MARKERS)
 
 
 def _bearing(a, b) -> float:

@@ -54,9 +54,10 @@ def _origin(index=0):
     return (BASE_LON, BASE_LAT + 0.01 * index)
 
 
-def _edge(coords, name=""):
-    """One export-shaped edge. Only `name` and `coords` matter to naming."""
-    return {"u": "1", "v": "2", "key": 0, "side": "C",
+def _edge(coords, name="", kind="footway/sidewalk"):
+    """One export-shaped edge. `name`, `coords` and `kind` are what naming
+    reads — `kind` since the connector skip (crossings are never named)."""
+    return {"u": "1", "v": "2", "key": 0, "side": "C", "kind": kind,
             "length_m": 0.0, "name": name, "coords": coords}
 
 
@@ -416,12 +417,15 @@ def test_every_edge_lands_in_exactly_one_bucket():
     """The tally is what gets compared against the measured 94.0%. If the
     buckets don't partition the edges, that comparison is meaningless.
     """
+    lon5, lat5 = _origin(5)
     edges = [
         _sidewalk(name="Joralemon Street", origin=_origin(0)),   # own
         _sidewalk(origin=_origin(1)),                            # derived
         _sidewalk(length_m=1.0, origin=_origin(2)),              # too_short
         _sidewalk(origin=_origin(3)),                            # no_parent
         _sidewalk(origin=_origin(4)),                            # ambiguous
+        _edge([[lon5, lat5], [lon5 + 20.0 / _K, lat5]],
+              kind="footway/crossing"),                          # connector
     ]
     streets = [
         _parallel_street("Court Street", 8.0, osm_id=1, origin=_origin(1)),
@@ -431,7 +435,7 @@ def test_every_edge_lands_in_exactly_one_bucket():
     tally = assign_parent_names(edges, streets)
 
     assert tally == {"own": 1, "derived": 1, "ambiguous": 1,
-                     "no_parent": 1, "too_short": 1}
+                     "no_parent": 1, "too_short": 1, "connector": 1}
     assert sum(tally.values()) == len(edges)
 
 
@@ -569,3 +573,43 @@ def test_the_parallelism_constant_matches_its_derivation():
     numbers -- deliberate act, re-measurement required."""
     assert PARALLEL_MAX_DIFF_DEG == 30.0
     assert MAX_FOLD_NAMES == 3
+
+
+def test_a_connector_is_never_named_even_with_a_parent_right_beside_it():
+    """The skip is by KIND, not by geometry: identical coords get named as
+    a sidewalk and skipped as a crossing/traffic island. Names on
+    connector kinds never render -- the server folds them into the street
+    runs around them and never reads their fold_names either -- so
+    deriving them was pure build cost (~105k edges citywide, removed
+    2026-08-28)."""
+    origin = _origin(90)
+    street = _parallel_street("Court Street", offset_m=8.0, origin=origin)
+    lon, lat = origin
+    coords = [[lon, lat], [lon + 60.0 / _K, lat]]
+    sidewalk = _edge(coords)
+    crossing = _edge(coords, kind="footway/crossing")
+    island = _edge(coords, kind="footway/traffic_island")
+
+    tally = assign_parent_names([sidewalk, crossing, island], [street])
+
+    assert sidewalk["name"] == "Court Street"  # the control: geometry names it
+    assert crossing["name"] == ""
+    assert island["name"] == ""
+    assert "fold_names" not in crossing
+    assert "fold_names" not in island
+    assert tally["connector"] == 2
+    assert tally["derived"] == 1
+
+
+def test_a_connector_keeps_its_own_osm_name():
+    """OSM's own name on a crossing is DATA and survives -- only the
+    DERIVATION is skipped. The own-name branch runs before the kind
+    check, so a named crossing tallies as `own`, not `connector`."""
+    origin = _origin(91)
+    lon, lat = origin
+    crossing = _edge([[lon, lat], [lon + 20.0 / _K, lat]],
+                     name="Squibb Park Bridge", kind="footway/crossing")
+    tally = assign_parent_names([crossing], [])
+    assert crossing["name"] == "Squibb Park Bridge"
+    assert tally["own"] == 1
+    assert tally["connector"] == 0
