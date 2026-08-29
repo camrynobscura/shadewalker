@@ -1,5 +1,6 @@
+import { Fragment } from 'react'
 import type { RouteFeature, RouteStep } from '../api'
-import { formatDistance, formatDistanceParts } from '../format'
+import { formatDistance, formatDistanceParts, formatEtaParts } from '../format'
 import { displayShade } from '../shade'
 import styles from './RouteStats.module.css'
 
@@ -22,6 +23,87 @@ function stepText(step: RouteStep): string {
     default:
       return `Turn ${step.action} onto ${step.name}${side}`
   }
+}
+
+/* Stroke paths for the turn glyphs, 16x16. Drawn from axis-aligned and
+   45° segments only, with square caps and miter joins — the same
+   zero-radius language as the rest of the theme. Arrowheads are open
+   strokes, not filled triangles, to stay wireframe. */
+const GLYPH_PATHS: Record<Exclude<RouteStep['action'], 'depart'>, string> = {
+  /* Three rules hold across every path below, all settled against the
+     rendered 18px (one viewBox unit = 1.125px):
+
+     1. WHATEVER RUNS INTO AN ARROWHEAD STOPS ONE UNIT SHORT OF THE APEX.
+        Run it all the way in and the 1.8-wide stroke's square cap
+        projects past the head's outline as two small corners flanking
+        the point — measured 0.42px on the elbows and sharps, 0.18px on
+        continue's shaft. Ending a unit early tucks the cap inside the
+        head's own stroke. cross_side never showed it because its bar
+        already stopped short, which is what first identified the cause.
+
+     2. EVERY glyph's x-extent centers on 8, so a column of them lines
+        up. Four were exceptions — the elbows sat at 9 and 7, the sharps
+        at 8.75 and 7.25, i.e. left-vs-right differing by 2.25px and
+        1.7px in a vertical rail. Each pair is now an exact mirror about
+        x=8. (Ink centers still differ by ~0.2px, because a miter point
+        reaches 1.27 units past an apex while a square cap reaches 0.9 —
+        not worth off-scale coordinates to chase.)
+
+     3. EVERY TAIL SHOWS 3 UNITS BELOW ITS HEAD, ending at y=11, not the
+        y=14 they were first drawn at. An arrow's visual mass sits in its
+        upper half, so a longer tail was a lone stroke hanging past the
+        step text's baseline — it read as a descender and made the arrow
+        look uncentered. At y=11 the inked bottom (plus the cap's 0.9)
+        lands on the baseline; y=14 hung below it and y=10 floated above,
+        both tried. This is why continue's shaft is 5.5 units rather than
+        3: it starts up inside the head at y=5.5 and only the run from
+        the head's own y=8 downward is visible, so it shows the same 3
+        units as an elbow's stub and every glyph bottoms out together. */
+  continue: 'M8 11 V5.5 M4.5 8 L8 4.5 L11.5 8',
+  /* Elbow wings reach y=5.25/10.75, not the 4.5/11.5 they were first
+     drawn at (still exact 45deg; tip reach 2.75 units, was 3.5). At full
+     height the HEAD was the descender: a square cap on a 45deg tip
+     corners out 1.27 units past the endpoint (not the 0.9 of a flat
+     cap), so the lower wing inked ~1px below the text baseline even
+     with the stub sitting on it (user call: the pointer fits inside the
+     text's height). At 2.75 the head bottoms out level with the stub,
+     and its reach matches cross_side's heads, already at 5.25/10.75. */
+  left: 'M12 11 V8 H5 M6.75 5.25 L4 8 L6.75 10.75',
+  right: 'M4 11 V8 H11 M9.25 5.25 L12 8 L9.25 10.75',
+  sharp_left: 'M10.25 13 V7 L6.25 11 M9.25 11.5 H5.75 V8',
+  sharp_right: 'M5.75 13 V7 L9.75 11 M6.75 11.5 H10.25 V8',
+  /* Heads kept shallow so the wings don't crowd the middle — a clear
+     stretch of shaft must stay visible between them (user call). */
+  cross_side: 'M4 8 H12 M5.5 5.25 L3 8 L5.5 10.75 M10.5 5.25 L13 8 L10.5 10.75',
+}
+
+/** Turn glyph for one step — a visual double of stepText's verb, so the
+ * svg is aria-hidden and the text stays the accessible instruction.
+ * depart is a solid square (a block cursor: "you are here, start"); the
+ * rest are stroke arrows from GLYPH_PATHS. currentColor throughout, so
+ * .stepGlyph's CSS color is the single ink knob. */
+function StepGlyph({ action }: { action: RouteStep['action'] }) {
+  return (
+    <svg
+      className={styles.stepGlyph}
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {action === 'depart' ? (
+        <rect x="5.5" y="5.5" width="5" height="5" fill="currentColor" />
+      ) : (
+        <path
+          d={GLYPH_PATHS[action]}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="square"
+          strokeLinejoin="miter"
+        />
+      )}
+    </svg>
+  )
 }
 
 /** Below this shade_fraction, the route is objectively exposed — say so
@@ -162,33 +244,41 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
           margin-bottom already gets. */}
       <h2 className={styles.sectionTitle}>My_route</h2>
       <div className={styles.section}>
+        {/* Label above value (user call 2026-08-28), eta leading — the
+            question a walker asks first. DOM order matches visual order,
+            so screen readers also announce label-then-value. */}
         <div className={styles.statRow}>
+          <div className={styles.stat}>
+            <span className={styles.statLabel}>eta</span>
+            <span className={styles.statVal}>
+              {formatEtaParts(stats.minutes).map((part, i) => (
+                <Fragment key={part.unit}>
+                  {i > 0 ? ' ' : null}
+                  {part.value}
+                  <small> {part.unit}</small>
+                </Fragment>
+              ))}
+            </span>
+          </div>
           <div className={styles.stat}>
             {/* Unit in the same lighter <small> the eta box's "min" gets --
                 the value is the datum, the unit is context. */}
+            <span className={styles.statLabel}>dist</span>
             <span className={styles.statVal}>
               {dist.value}
               <small> {dist.unit}</small>
             </span>
-            <span className={styles.statLabel}>dist</span>
           </div>
           <div className={styles.stat}>
-            <span className={styles.statVal}>
-              {Math.round(stats.minutes)}
-              <small> min</small>
-            </span>
-            <span className={styles.statLabel}>eta</span>
+            <span className={styles.statLabel}>shaded</span>
+            <span className={styles.statVal}>{shownShadePct}%</span>
           </div>
           {stats.park_canopy_share < CANOPY_SHARE_HIDES_TREE_COUNT && (
             <div className={styles.stat}>
-              <span className={styles.statVal}>{stats.tree_count}</span>
               <span className={styles.statLabel}>trees</span>
+              <span className={styles.statVal}>{stats.tree_count}</span>
             </div>
           )}
-          <div className={styles.stat}>
-            <span className={styles.statVal}>{shownShadePct}%</span>
-            <span className={styles.statLabel}>shaded</span>
-          </div>
         </div>
 
         {isLowShade && (
@@ -204,8 +294,8 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
             uncertainty about street names is disclosed structurally,
             per-step, as "unnamed path", not by a blanket note. */}
         <p className={styles.disclaimer}>
-          // CAUTION: routes follow map data — conditions on the ground may
-          differ
+          <strong>// CAUTION:</strong> walking routes may not always reflect
+          real-world conditions
         </p>
 
         {stats.segments.length > 0 ? (
@@ -223,7 +313,10 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
           <ol className={styles.directionsList} role="list">
             {stats.segments.map((step, i) => (
               <li key={i}>
-                {stepText(step)} — {formatDistance(step.length_m)}
+                <StepGlyph action={step.action} />
+                <span>
+                  {stepText(step)} — {formatDistance(step.length_m)}
+                </span>
               </li>
             ))}
           </ol>

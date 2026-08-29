@@ -148,7 +148,11 @@ export const TREE_PRESETS = [
   { value: 0, label: 'NONE', hint: 'fastest route, no detours for shade' },
   { value: 5, label: 'LOW', hint: 'shadier only when it’s nearly free' },
   { value: 15, label: 'MED', hint: 'short detours for shadier blocks' },
-  { value: 40, label: 'MAX', hint: 'shadiest route, even if it takes longer' },
+  // "longest detours for the most shade": completes NONE→LOW→MED's
+  // detour-size gradient, and — unlike the older "shadiest route, even if
+  // it takes longer" — keeps the whole "> mode:" line under the ~52
+  // monospace cells that fit one line in the panel (user call 2026-08-28).
+  { value: 40, label: 'MAX', hint: 'longest detours for the most shade' },
 ] as const
 
 // Looked up by label rather than array position — a moderate middle

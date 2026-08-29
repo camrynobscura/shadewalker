@@ -1,12 +1,16 @@
 /* The div below (StatsBody) spaces every direct child with `gap` — so
    each of those children declares `margin: 0` explicitly here rather
-   than leaning on a tag's default margin. Tighter tier (--space-md, not
-   --space-lg) since these are compact readout lines rather than whole
-   form fields. */
+   than leaning on a tag's default margin. --space-lg (was --space-md
+   until 2026-08-28, "still looks a little cramped" — user): the stat
+   row, the caution stamp and the directions list are distinct groups,
+   which is the lg token's own definition, not related lines within one
+   block. */
 .section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  /* --space-lg, settled by eye (user, 2026-08-28): md read cramped, and
+     a 20px off-scale trial was walked back to the token. */
+  gap: var(--space-lg);
 }
 
 /* Same style as Controls.module.css's .addressField label and its
@@ -18,7 +22,7 @@
    .section flex container's gap, sets the tight title-to-content
    spacing -- see the comment in RouteStats.tsx for why. */
 .sectionTitle {
-  margin: 0 0 var(--space-xs);
+  margin: 0 0 var(--space-sm);
   font-size: var(--label-font-size);
   font-weight: normal;
   text-transform: uppercase;
@@ -44,8 +48,14 @@
 }
 
 .stat {
+  /* Equal boxes (flex-basis 0), by design — content-sized boxes were
+     tried 2026-08-28 and rejected: uneven widths read worse than the
+     problem they solved. What actually made hour-scale ETAs fit was
+     shortening the units ("2h 19m", format.ts). min-width deliberately
+     stays at its `auto` default: a stat that somehow outgrows its equal
+     share widens its box instead of clipping, since the value below
+     never wraps. */
   flex: 1;
-  min-width: 0;
   padding: var(--space-sm) 10px;
   /* A soft green wash so these read as data readouts, distinct from the
      panel background — a translucent tint over --green, not the solid
@@ -57,6 +67,14 @@
 
 .statVal {
   display: block;
+  /* The one deliberate break from the app's all-mono type (user call
+     2026-08-28): stat values are instrument READOUTS, not terminal
+     voice. In a monospace, "9.6" gives the decimal point a full
+     character cell and the number reads gappy; a proportional face
+     fixes that, and tabular-nums below keeps digits fixed-width so the
+     boxes still don't jiggle between routes. Labels, buttons, copy and
+     directions all stay mono — the split follows function. */
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 1.1875rem; /* 19px */
   font-weight: 600;
   /* Keeps digits the same width as they change, so the three cells don't
@@ -65,6 +83,10 @@
   /* --green-dim, not --green: jade is only ~3:1 on the light panel — fine
      for thick route lines, too faint for text. The deep jade passes AA. */
   color: var(--green-dim);
+  /* One line, always — a wrapped stat reads as a layout bug. The short
+     ETA units ("2h 19m") are what keep the widest stat inside its equal
+     share; this is the guarantee it never wraps regardless. */
+  white-space: nowrap;
 }
 
 .statVal small {
@@ -75,7 +97,9 @@
 
 .statLabel {
   display: block;
-  margin-top: 2px;
+  /* Sits ABOVE the value since 2026-08-28 (was below) — margin on the
+     bottom edge accordingly. */
+  margin-bottom: 2px;
   font-size: 0.65625rem; /* 10.5px */
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -89,36 +113,52 @@
   line-height: 1.55;
 }
 
-/* Browser list markers hang OUTSIDE the content box, so any padding that
-   makes room for them indents the numbers off the panel's left edge (the
-   old padding-left: 20px). Custom counters in a per-item grid instead:
-   the number column starts at x=0, flush with the rest of the panel, and
-   wrapped instruction lines keep a hanging indent under the text column.
-   list-style: none strips list semantics in Safari/VoiceOver, so the <ol>
-   carries an explicit role="list" -- do not remove one without the other. */
+/* Steps render with turn glyphs and NO visible numbers: zero-padded jade
+   counters were tried alongside the glyphs and removed the same day —
+   two rails read cluttered (user call 2026-08-28). The <ol> still
+   carries the order for assistive tech, which announces each item's
+   position. list-style: none strips list semantics in Safari/VoiceOver,
+   so the <ol> carries an explicit role="list" -- do not remove one
+   without the other. */
 .directionsList {
   font-size: var(--font-size-sm);
-  color: var(--muted);
+  /* Full ink, not --muted (user call 2026-08-28): these are the
+     instructions someone follows mid-walk, not a caption — rendering
+     the whole list in caption gray was the real reason it read badly,
+     and it's why zebra striping was considered and set aside. */
+  color: var(--text);
   margin: 0;
   padding-left: 0;
   list-style: none;
-  counter-reset: step;
   line-height: 1.6;
 }
 
 .directionsList li {
-  counter-increment: step;
   display: grid;
-  /* 3ch fits a two-digit step ("13.") exactly in the mono face; single
-     digits sit flush left with a trailing space, which is the alignment
-     the eye wants. */
-  grid-template-columns: 3ch 1fr;
-  column-gap: 4px;
-  margin-bottom: 2px;
+  /* Glyph rail + instruction; wrapped lines keep a hanging indent under
+     the text column. */
+  grid-template-columns: max-content 1fr;
+  column-gap: 6px;
+  /* Air between steps, so a wrapped two-line step reads as one unit and
+     its neighbor as another. 10px since the glyphs went to 18px — at
+     6px the arrows crowded the step below. */
+  margin-bottom: 10px;
 }
 
-.directionsList li::before {
-  content: counter(step) '.';
+.directionsList li:last-child {
+  /* The section's own gap handles the space after the list. */
+  margin-bottom: 0;
+}
+
+.stepGlyph {
+  width: 18px;
+  height: 18px;
+  /* Centers the 18px glyph on the first 13px/1.6 text line (~21px), so
+     the arrow rail stays aligned even when an instruction wraps. The
+     stroke thickens with the scale-up too (16-unit viewBox), which is
+     half of what makes the bigger size more legible. */
+  margin-top: 1px;
+  color: var(--green-dim);
 }
 
 .sparseNote {
@@ -139,12 +179,20 @@
   margin: 0;
 }
 
-/* The standing route caution. Quieter than .sparseNote on purpose: that
-   one is a per-route WARNING (this route is sunny), this is ambient
-   context that must not compete with it — muted text, no box, no accent
-   stripe. The parent .section's gap provides the spacing. */
+/* The standing route caution, as a stamped notice (user calls,
+   2026-08-28 — it used to be muted fine print that read as "step zero"
+   of the directions list). Three deliberate choices:
+   - DASHED border, so it can't be mistaken for the stat boxes' solid
+     hairlines or the mode-note's tinted box (those mean "readout",
+     this means "notice"). A faint magenta wash was tried and removed —
+     no background, so .sparseNote (solid raised panel + 3px magenta
+     rail, the per-route warning) clearly outranks this ambient notice;
+   - full-ink text with only the "// CAUTION:" prefix bold, so it gets
+     read without the whole sentence shouting. */
 .disclaimer {
-  color: var(--muted);
+  color: var(--text);
   font-size: var(--font-size-sm);
   margin: 0;
+  padding: var(--space-sm) 10px;
+  border: 1px dashed var(--muted);
 }
