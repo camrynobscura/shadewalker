@@ -8,13 +8,14 @@ import { mockGeocode, POINT_A, POINT_B, routeUrl } from './fixtures'
 const PRESETS = [0, 5, 15, 40]
 
 /** Reads the "shaded" stat as a whole number, anchored on its LABEL rather
- * than on a class or DOM position — RouteStats renders `<span>NN%</span>`
- * followed by `<span>shaded</span>`, and the label is the part that carries
- * meaning if the markup is refactored. */
+ * than on a class or DOM position — RouteStats renders `<span>shaded</span>`
+ * followed by `<span>NN%</span>` (label ABOVE value since the 2026-08-28
+ * panel redesign; it was value-then-label before), and the label is the
+ * part that carries meaning if the markup is refactored. */
 async function readShadePercent(page: Page): Promise<number> {
   const label = page.getByText('shaded', { exact: true })
   await expect(label).toBeVisible()
-  const text = await label.locator('xpath=preceding-sibling::span[1]').innerText()
+  const text = await label.locator('xpath=following-sibling::span[1]').innerText()
   const value = Number(text.replace('%', '').trim())
   expect(Number.isFinite(value)).toBe(true)
   return value

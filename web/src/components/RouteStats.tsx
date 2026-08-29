@@ -70,8 +70,25 @@ const GLYPH_PATHS: Record<Exclude<RouteStep['action'], 'depart'>, string> = {
      and its reach matches cross_side's heads, already at 5.25/10.75. */
   left: 'M12 11 V8 H5 M6.75 5.25 L4 8 L6.75 10.75',
   right: 'M4 11 V8 H11 M9.25 5.25 L12 8 L9.25 10.75',
-  sharp_left: 'M10.25 13 V7 L6.25 11 M9.25 11.5 H5.75 V8',
-  sharp_right: 'M5.75 13 V7 L9.75 11 M6.75 11.5 H10.25 V8',
+  /* Sharps redrawn 2026-08-29 (user call, judged against live routes:
+     Prospect Park's West Dr -> East Dr wishbone). The old drawing had
+     three measured defects: the head's arm overlapped the shaft's stroke
+     by 0.8u ("touching"), the tail inked 2u below every other glyph's
+     shared 11.9u bottom, and the 45deg bend mitered into a 2.35u spike.
+     Now: shaft at x=11.25 bottoming on the family line; a 45deg return
+     sweeping the full width to an L-head whose corner IS the point
+     (wings right+up = pointing down-left); 1.7u of daylight between the
+     wing end and the shaft. The bend is a REAL JOIN, kept sane by the
+     path's strokeMiterlimit={2}: a 45deg miter would spike 2.35u past
+     the corner, and abutting two capped subpaths instead was tried and
+     visibly misfit (the diagonal's edge peeled off the stub's flank
+     ~2px below its top -- user caught it). The limit turns joins
+     tighter than 60deg into a flat chamfer; the sharps' bend is the
+     ONLY join under 60deg in all six glyphs, so nothing else changes.
+     Ink extents center on 8 exactly and top out level with the
+     elbows. */
+  sharp_left: 'M11.25 11 V4.5 L5.5 10.25 M7.75 11 H4.75 V8',
+  sharp_right: 'M4.75 11 V4.5 L10.5 10.25 M8.25 11 H11.25 V8',
   /* Heads kept shallow so the wings don't crowd the middle — a clear
      stretch of shaft must stay visible between them (user call). */
   cross_side: 'M4 8 H12 M5.5 5.25 L3 8 L5.5 10.75 M10.5 5.25 L13 8 L10.5 10.75',
@@ -100,6 +117,9 @@ function StepGlyph({ action }: { action: RouteStep['action'] }) {
           strokeWidth="1.8"
           strokeLinecap="square"
           strokeLinejoin="miter"
+          /* Bevels only the sharps' 45deg bend (see GLYPH_PATHS); every
+             other join is >=90deg and keeps its miter point. */
+          strokeMiterlimit={2}
         />
       )}
     </svg>
