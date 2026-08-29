@@ -76,18 +76,26 @@ const LOW_SHADE_FRACTION = 0.15
 /** When at least this share of the route's tree score is park-canopy AREA
  * credit (not countable trees), hide the "trees: N" stat -- the count
  * can't see area credit, so it undersells exactly the routes with the
- * most real cover ("83% shaded, 3 trees", FIXES item 4). Measured
- * 2026-08-17: park loops (Central/Prospect/Riverside) read 0.40-0.51,
- * ordinary street routes 0.000, a park-adjacent street 0.297 -- 1/3
- * hides the count only where canopy genuinely dominates.
+ * most real cover ("83% shaded, 3 trees", FIXES item 4).
  *
- * LIVE as of 2026-08-26: the park-canopy pipeline step fills
- * tree_park_canopy on 57,507 kerb-less edges, so this threshold fires for
- * the first time (a walk across Central Park reads canopy share 0.96 and
- * correctly hides its near-meaningless tree count). The 1/3 value itself
- * is still the 2026-08-17 guess, never derived against the live signal —
- * calibrating it deliberately is in PLAN's Unresolved list. */
-const CANOPY_SHARE_HIDES_TREE_COUNT = 1 / 3
+ * 0.25, user decision 2026-08-28: the count is flavor, so it should be
+ * accurate or absent. Because canopy credit shares units with per-tree
+ * credit, the share IS the fraction of shade the count can't see -- so
+ * a shown count always covers at least 75% of the route's shade story.
+ * Calibrated against 250 seeded citywide routes at the default preset
+ * (seed 20260829, weight 15, July; method in history/quick-fixes.md):
+ *   - hides the stat on 20.0% of sampled routes (the 2026-08-17 guess
+ *     of 1/3 hid 13.2%);
+ *   - a 60/40 street/park route (share ~0.4) HIDES: the walker can SEE
+ *     the park trees the number ignores, and that visible contradiction
+ *     -- not any internal score ratio -- is the harm model here;
+ *   - 0.5 ("hide only when the count stops being the majority of the
+ *     score") was derived first and REJECTED: score-majority is
+ *     invisible to a walker, uncounted trees in plain view are not.
+ *     Don't re-raise it without evidence about perception, not scores;
+ *   - share 0.75+ is the absurd case either way (count 3 vs ~117
+ *     unseen tree-equivalents; pure-canopy routes counting 0). */
+const CANOPY_SHARE_HIDES_TREE_COUNT = 0.25
 
 interface RouteStatsProps {
   /** The currently selected Shade_priority preset's route -- /route
