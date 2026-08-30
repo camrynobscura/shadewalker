@@ -5,8 +5,14 @@ test('searching two addresses draws a route with stats and directions', async ({
   await mockGeocode(page)
   await page.goto('/')
 
+  // Escape after each fill: fill() counts as typing, so the autocomplete
+  // dropdown opens after its debounce and would float over the next
+  // control this test needs to reach (the listbox deliberately overlays
+  // rather than pushes). Dismissing it is exactly what a person does too.
   await page.getByLabel('Start_point').fill('250 Court St')
+  await page.keyboard.press('Escape')
   await page.getByLabel('End_point').fill('3rd St & 3rd Ave')
+  await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'FIND_ROUTE' }).click()
 
   await expect(page.getByText('dist', { exact: true })).toBeVisible()

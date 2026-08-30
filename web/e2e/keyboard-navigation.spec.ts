@@ -58,3 +58,58 @@ test('reaches and operates every control in order via keyboard alone', async ({ 
   await page.keyboard.press('Enter')
   await expect(page.getByRole('button', { name: 'CLEAR_ROUTE' })).toHaveCount(0)
 })
+
+// The autocomplete combobox never moves DOM focus into its listbox --
+// arrows drive aria-activedescendant while the caret stays in the input
+// (the ARIA combobox pattern). axe can check the attributes exist; only
+// actually pressing the keys proves they do anything.
+test('address autocomplete is fully keyboard operable', async ({ page }) => {
+  await mockGeocode(page)
+  await page.goto('/')
+
+  // getByRole('combobox'), not getByLabel: while the dropdown is open,
+  // the listbox's own accessible name ("Start_point suggestions")
+  // substring-matches the label text too, and strict mode rightly
+  // refuses the ambiguity. The role pins the input.
+  const start = page.getByRole('combobox', { name: 'Start_point' })
+  await start.click()
+  // pressSequentially, not fill: suggestions react to typing, and fill()
+  // collapses it into one synthetic event -- fine for the smoke test,
+  // wrong for a test ABOUT typing.
+  await start.pressSequentially('court', { delay: 30 })
+
+  const listbox = page.getByRole('listbox', { name: 'Start_point suggestions' })
+  await expect(listbox).toBeVisible()
+  const options = listbox.getByRole('option')
+  await expect(options).toHaveCount(2) // '250 Court St' + 'Court St & Baltic St'
+
+  // Nothing highlighted until the keyboard asks -- Enter here would
+  // submit the form, not grab an option the user never chose.
+  await expect(start).not.toHaveAttribute('aria-activedescendant', /.+/)
+
+  await page.keyboard.press('ArrowDown')
+  await expect(options.nth(0)).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('ArrowDown')
+  await expect(options.nth(1)).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('ArrowUp')
+  await expect(options.nth(0)).toHaveAttribute('aria-selected', 'true')
+  await expect(start).toHaveAttribute('aria-activedescendant', /.+/)
+
+  // Enter picks the highlighted option: label lands in the field, list
+  // closes, and no form submit happened (no FINDING… flash to wait out).
+  await page.keyboard.press('Enter')
+  await expect(listbox).toBeHidden()
+  await expect(start).toHaveValue('250 Court St, Brooklyn')
+
+  // Escape dismisses without touching the text; ArrowDown reopens.
+  const end = page.getByRole('combobox', { name: 'End_point' })
+  await end.click()
+  await end.pressSequentially('baltic', { delay: 30 })
+  const endListbox = page.getByRole('listbox', { name: 'End_point suggestions' })
+  await expect(endListbox).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(endListbox).toBeHidden()
+  await expect(end).toHaveValue('baltic')
+  await page.keyboard.press('ArrowDown')
+  await expect(endListbox).toBeVisible()
+})

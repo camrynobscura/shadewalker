@@ -17,9 +17,15 @@ export const POINT_B = '40.6720,-73.9880'
 // 422 rejection and RouteStats's error branch.
 export const POINT_OUTSIDE_COVERAGE = '40.7580,-73.9855'
 
+// Substring-matched (case-insensitive) so the SAME table serves both the
+// submit-time resolve (full typed text finds itself) and autocomplete
+// (typing "court" mid-word finds two of these). The third entry exists
+// only to give "court" a second match — arrow-key navigation between
+// options can't be tested on a list of one.
 const GEOCODE_RESULTS: Record<string, { lat: number; lon: number }> = {
   '250 Court St': { lat: 40.68, lon: -73.998 },
   '3rd St & 3rd Ave': { lat: 40.672, lon: -73.988 },
+  'Court St & Baltic St': { lat: 40.6865, lon: -73.9922 },
 }
 
 // api.ts's reverseGeocode() sends `String(point.lat)` -- e.g. `40.68`, not
@@ -64,9 +70,12 @@ export async function mockGeocode(page: Page): Promise<void> {
   })
   await page.route('**/geocode?*', (route) => {
     const url = new URL(route.request().url())
-    const query = url.searchParams.get('q') ?? ''
-    const hit = GEOCODE_RESULTS[query]
-    const body = { results: hit ? [{ ...hit, label: `${query}, Brooklyn` }] : [] }
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+    const query = (url.searchParams.get('q') ?? '').toLowerCase()
+    const limit = Number(url.searchParams.get('limit') ?? '1')
+    const results = Object.entries(GEOCODE_RESULTS)
+      .filter(([key]) => key.toLowerCase().includes(query))
+      .slice(0, limit)
+      .map(([key, point]) => ({ ...point, label: `${key}, Brooklyn` }))
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results }) })
   })
 }

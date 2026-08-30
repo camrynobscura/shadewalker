@@ -67,6 +67,61 @@
   color: var(--muted);
 }
 
+/* Anchors the suggestion listbox to the input's exact box. A dedicated
+   wrapper, not .addressField, because the field also contains the label
+   and status line -- absolute positioning against those would slide the
+   dropdown under the wrong element. */
+.suggestWrap {
+  position: relative;
+}
+
+/* The autocomplete listbox. Floats over whatever sits below the field
+   (the other address field, Find_route) instead of pushing it down -- an
+   open dropdown is transient, and layout jumping on every keystroke
+   reads as broken. Same raised-white + border language as the input it
+   extends, border-top dropped so input and list read as one continuous
+   control. */
+.suggestList {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0;
+  max-height: 240px; /* ~5 rows; taller lists scroll inside the box */
+  overflow-y: auto;
+}
+
+/* 44px rows: the same touch-target floor as every button and input in
+   this panel. */
+.suggestOption {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: var(--space-sm) 10px;
+  font-size: var(--font-size-sm);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.suggestOption + .suggestOption {
+  border-top: 1px solid var(--line);
+}
+
+/* One highlight serves hover AND the keyboard-active option -- mousemove
+   drives the same activeIndex the arrow keys do, so pointer and keyboard
+   can never show two competing selections. Same green wash as
+   .comparisonHint. */
+.suggestActive {
+  background: rgba(0, 168, 107, 0.12);
+}
+
 /* No min-height: an AddressField's status paragraph is empty almost all
    of the time now (no more "// LOCKED" message, and "searching" moved to
    the button), so reserving space for text that's usually absent just

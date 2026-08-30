@@ -1,8 +1,9 @@
-import { useEffect, useId, useRef, useState } from 'react'
-import { geocode, reverseGeocode, type Point, type RouteFeature } from '../api'
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { geocode, reverseGeocode, type GeocodeResult, type Point, type RouteFeature } from '../api'
 import { formatCoords, formatDistance } from '../format'
 import { displayShade } from '../shade'
 import type { GeoPosition } from '../hooks/useGeolocation'
+import { useGeocodeSuggestions } from '../hooks/useGeocodeSuggestions'
 import styles from './Controls.module.css'
 
 /** Splits a formatted distance ("0.2 mi", "524 ft") into its leading
@@ -42,18 +43,56 @@ type FieldStatus = 'idle' | 'searching' | 'notfound' | 'found'
 function useAddressField(onResolve: (p: Point) => void, externalPoint: Point | null) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<FieldStatus>('idle')
+  // Suggestions are wanted only while the current text is something the
+  // user TYPED -- a suggestion pick, a submit, or a programmatic fill
+  // (map click, reverse geocode) all turn this off, so the dropdown never
+  // reopens over text this code wrote itself.
+  const [suggestOn, setSuggestOn] = useState(false)
+  const [activeIndex, setActiveIndex] = useState(-1)
   const shownPointRef = useRef<Point | null>(null)
+
+  const suggestions = useGeocodeSuggestions(query, suggestOn)
+
+  // A fresh suggestion list starts with nothing highlighted -- keeping an
+  // old index would silently point Enter at whatever happens to occupy
+  // that position now.
+  useEffect(() => {
+    setActiveIndex(-1)
+  }, [suggestions])
 
   function onChange(value: string) {
     setQuery(value)
     setStatus('idle')
+    setSuggestOn(true)
     shownPointRef.current = null // free-typed text no longer matches any known point
+  }
+
+  /** A picked suggestion already carries its point -- no second geocode
+   * round trip on submit; the field behaves exactly as if resolve() had
+   * just succeeded with this result. */
+  function selectSuggestion(suggestion: GeocodeResult) {
+    setSuggestOn(false)
+    setQuery(suggestion.label)
+    setStatus('found')
+    shownPointRef.current = { lat: suggestion.lat, lon: suggestion.lon }
+    onResolve({ lat: suggestion.lat, lon: suggestion.lon })
+  }
+
+  function closeSuggestions() {
+    setSuggestOn(false)
+  }
+
+  /** ArrowDown on a closed field re-opens it (ARIA combobox convention) --
+   * the hook refetches for the unchanged text after its debounce. */
+  function openSuggestions() {
+    setSuggestOn(true)
   }
 
   // `status !== 'idle'` blocks a repeat: onChange resets status back to
   // 'idle' on every keystroke, so this only re-fires once there's actually
   // new text to resolve — not every time "find route" is pressed again.
   async function resolve() {
+    setSuggestOn(false) // submitting is the end of the suggestion phase
     if (!query.trim() || status !== 'idle') return
     setStatus('searching')
     const result = await geocode(query)
@@ -72,11 +111,12 @@ function useAddressField(onResolve: (p: Point) => void, externalPoint: Point | n
     if (shown && shown.lat === externalPoint.lat && shown.lon === externalPoint.lon) return
 
     shownPointRef.current = externalPoint
+    setSuggestOn(false) // the text below is generated, not typed
     // Coordinates first, instantly -- reverse-geocoding is a real network
     // round trip (measured ~70-100ms once warm, up to ~1s on a session's
     // first call), and the field showing nothing while a marker's already
     // on the map would look broken. Also doubles as the fallback if the
-    // lookup below fails outright (open water, Nominatim down).
+    // lookup below fails outright (open water, the geocoder down).
     setQuery(formatCoords(externalPoint))
     setStatus('found')
     reverseGeocode(externalPoint).then((label) => {
@@ -88,48 +128,119 @@ function useAddressField(onResolve: (p: Point) => void, externalPoint: Point | n
     })
   }, [externalPoint])
 
-  return { query, status, onChange, resolve }
+  return {
+    query,
+    status,
+    suggestions,
+    activeIndex,
+    /** Whether the listbox is rendered: suggestions exist AND the text is
+     * still in its typed phase. */
+    open: suggestOn && suggestions.length > 0,
+    onChange,
+    resolve,
+    selectSuggestion,
+    setActiveIndex,
+    closeSuggestions,
+    openSuggestions,
+  }
 }
 
-/** One labeled address field. Purely presentational — Controls owns the
- * query/status/resolve logic (via useAddressField) so one submit button
- * can resolve both fields together. No status message once found: the
- * address is already sitting right there in the input, restating it back
- * as text would just be duplicating what's on screen. */
+/** One labeled address field, now an ARIA combobox: the input plus a
+ * suggestion listbox driven by aria-activedescendant (focus never leaves
+ * the input; arrows move a highlight instead). Presentational — Controls
+ * owns the state through useAddressField, passed whole as `field`
+ * because a combobox needs eight pieces of it and threading each as its
+ * own prop obscured which field a given prop belonged to. No status
+ * message once found: the address is already sitting right there in the
+ * input, restating it back as text would just be duplicating what's on
+ * screen. */
 function AddressField({
   label,
   placeholder,
-  query,
-  status,
-  onChange,
+  field,
 }: {
   label: string
   placeholder: string
-  query: string
-  status: FieldStatus
-  onChange: (value: string) => void
+  field: ReturnType<typeof useAddressField>
 }) {
   // useId generates a unique, SSR-safe id so <label htmlFor> can point at
   // the input even when the component appears twice on the page.
   const id = useId()
+  const listboxId = `${id}-listbox`
+  const { suggestions, activeIndex, open } = field
+
+  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (!open) {
+      if (e.key === 'ArrowDown') field.openSuggestions()
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault() // keep the caret still; the arrow moves the highlight
+      field.setActiveIndex((activeIndex + 1) % suggestions.length)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      field.setActiveIndex(activeIndex <= 0 ? suggestions.length - 1 : activeIndex - 1)
+    } else if (e.key === 'Enter' && activeIndex >= 0) {
+      e.preventDefault() // pick the highlighted option instead of submitting the form
+      field.selectSuggestion(suggestions[activeIndex])
+    } else if (e.key === 'Escape') {
+      field.closeSuggestions()
+    }
+  }
+
   return (
     <div className={styles.addressField}>
       <label htmlFor={id}>{label}</label>
-      <input
-        id={id}
-        className={styles.addressInput}
-        type="text"
-        value={query}
-        placeholder={placeholder}
-        autoComplete="street-address"
-        onChange={(e) => onChange(e.target.value)}
-      />
+      <div className={styles.suggestWrap}>
+        <input
+          id={id}
+          className={styles.addressInput}
+          type="text"
+          value={field.query}
+          placeholder={placeholder}
+          // Off, not "street-address": the browser's own autofill dropdown
+          // would paint directly over our listbox, and the ARIA combobox
+          // pattern expects native autocomplete disabled.
+          autoComplete="off"
+          role="combobox"
+          aria-expanded={open}
+          aria-autocomplete="list"
+          // Both only while open: axe flags aria-controls/-activedescendant
+          // ids that don't resolve to a rendered element.
+          aria-controls={open ? listboxId : undefined}
+          aria-activedescendant={open && activeIndex >= 0 ? `${id}-opt-${activeIndex}` : undefined}
+          onChange={(e) => field.onChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          onBlur={field.closeSuggestions}
+        />
+        {open && (
+          <ul className={styles.suggestList} role="listbox" id={listboxId} aria-label={`${label} suggestions`}>
+            {suggestions.map((suggestion, i) => (
+              <li
+                key={`${suggestion.label}-${i}`}
+                id={`${id}-opt-${i}`}
+                role="option"
+                aria-selected={i === activeIndex}
+                className={i === activeIndex ? `${styles.suggestOption} ${styles.suggestActive}` : styles.suggestOption}
+                // mousedown fires before the input's blur — preventing it
+                // keeps focus in the field, so blur can't close the list
+                // out from under the click that's about to land.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => field.selectSuggestion(suggestion)}
+                onMouseMove={() => field.setActiveIndex(i)}
+              >
+                {suggestion.label}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       {/* role="status" = a polite live region: screen readers announce the
           result without stealing focus. Nothing shown for 'searching' —
           the Find_route button's own "FINDING…" label already covers that,
           and showing it here too just flickered on and off per field. */}
       <p className={styles.addressStatus} role="status">
-        {status === 'notfound' && '// NOT_FOUND: try adding a borough'}
+        {field.status === 'notfound' && '// NOT_FOUND: try adding a borough'}
       </p>
     </div>
   )
@@ -286,20 +397,8 @@ export function Controls({
             end.resolve()
           }}
         >
-          <AddressField
-            label="Start_point"
-            placeholder="e.g. 250 Court St"
-            query={start.query}
-            status={start.status}
-            onChange={start.onChange}
-          />
-          <AddressField
-            label="End_point"
-            placeholder="e.g. 3rd St & 3rd Ave"
-            query={end.query}
-            status={end.status}
-            onChange={end.onChange}
-          />
+          <AddressField label="Start_point" placeholder="e.g. 250 Court St" field={start} />
+          <AddressField label="End_point" placeholder="e.g. 3rd St & 3rd Ave" field={end} />
           <button type="submit" className={styles.primaryButton} disabled={isSearching}>
             {isSearching ? 'FINDING…' : 'FIND_ROUTE'}
           </button>
