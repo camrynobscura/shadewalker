@@ -1,4 +1,4 @@
-/** Typed client for the routing server + Nominatim geocoding.
+/** Typed client for the routing server, geocoding included.
  *
  * These interfaces mirror server/app.py's response shape exactly. That makes
  * this file the single source of truth for "what the API returns" — if the
@@ -140,55 +140,31 @@ export interface GeocodeResult extends Point {
   label: string
 }
 
-/** Nominatim = OpenStreetMap's free geocoder. The viewbox + bounded params
- * confine matches to NYC so "Court St" finds Brooklyn, not Buffalo. */
+/** Forward geocoding through our own server (`/geocode`, a proxy in
+ * front of Photon — server/geocode.py carries the whole why). Same
+ * relative-URL pattern as /route: no CORS, no third-party call from the
+ * visitor's browser, and the NYC bounding + label building live
+ * server-side, so this stays a thin fetch. limit=1: an address field's
+ * submit resolves to its single best match. */
 export async function geocode(query: string): Promise<GeocodeResult | null> {
-  const params = new URLSearchParams({
-    q: query,
-    format: 'jsonv2',
-    limit: '1',
-    viewbox: '-74.26,40.49,-73.68,40.92',
-    bounded: '1',
-  })
-  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`)
+  const params = new URLSearchParams({ q: query, limit: '1' })
+  const res = await fetch(`/geocode?${params}`)
   if (!res.ok) return null
-  const results: { lat: string; lon: string; display_name: string }[] = await res.json()
-  if (results.length === 0) return null
-  return {
-    lat: parseFloat(results[0].lat),
-    lon: parseFloat(results[0].lon),
-    label: results[0].display_name.split(',').slice(0, 2).join(','),
-  }
+  const body: { results: GeocodeResult[] } = await res.json()
+  return body.results[0] ?? null
 }
 
 /** The reverse of geocode(): a point the user picked (a map click, a
- * geolocation fix) back to a short human-readable label, so an address
- * field can show real text instead of the point that filled it.
- *
- * Built from the structured `address.house_number`/`address.road` fields,
- * not `display_name` -- Nominatim's reverse lookup happily matches the
- * nearest tagged POI (a restaurant, a brewery, a numbered sports pitch),
- * and `display_name` puts that POI's own name first: reverse-geocoding a
- * point right outside a restaurant returned "Lucali, 575, Henry Street,
- * ..." there, a business name where an address field needs an address.
- * `address.house_number`/`address.road` stay separate from whatever POI
- * tag matched (confirmed against several categories -- amenity, craft,
- * leisure -- each keys its own name under its own category, never under
- * `house_number`/`road`), so reading those two fields directly sidesteps
- * the problem instead of trying to filter business names out after the
- * fact. Falls back to just `road` with no house number (e.g. a path
- * inside a park), or null (→ the caller's own coordinate fallback) if
- * Nominatim has no address-shaped answer at all. */
+ * geolocation fix) back to a short address label, so an address field
+ * can show real text instead of the point that filled it. Null when
+ * nothing address-shaped is nearby OR the lookup failed — either way
+ * the caller keeps its own coordinate fallback. The address-not-POI
+ * rule (an address field must never read "Lucali") moved server-side
+ * with the proxy: server/geocode.py's _reverse_label. */
 export async function reverseGeocode(point: Point): Promise<string | null> {
-  const params = new URLSearchParams({
-    lat: String(point.lat),
-    lon: String(point.lon),
-    format: 'jsonv2',
-  })
-  const res = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`)
+  const params = new URLSearchParams({ lat: String(point.lat), lon: String(point.lon) })
+  const res = await fetch(`/geocode/reverse?${params}`)
   if (!res.ok) return null
-  const result: { address?: { house_number?: string; road?: string } } = await res.json()
-  const road = result.address?.road
-  if (!road) return null
-  return result.address?.house_number ? `${result.address.house_number}, ${road}` : road
+  const body: { label: string | null } = await res.json()
+  return body.label
 }

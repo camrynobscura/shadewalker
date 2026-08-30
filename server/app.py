@@ -12,6 +12,8 @@ Endpoints:
     GET /health
     GET /coverage
     GET /route?from_lat=..&from_lon=..&to_lat=..&to_lon=..[&tree_weights=..&tree_weights=..][&month=..]
+    GET /geocode?q=..[&limit=..]
+    GET /geocode/reverse?lat=..&lon=..
 
 /route computes a route for EVERY requested tree_weight in one call, not
 just one — the frontend's Shade_priority control has four fixed presets
@@ -40,6 +42,7 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException, Query
 
 from pipeline import config
+from server import geocode as geocoder
 from server.graph_store import GraphStore, clamp_shade_monotonic
 
 # Route graph_store's loggers somewhere visible under uvicorn, which
@@ -102,6 +105,42 @@ def coverage() -> dict:
             "frame_feather_800": frame.get("feather_800", []),
         },
     }
+
+
+@app.get("/geocode")
+def geocode_search(
+    q: str = Query(min_length=1, max_length=config.MAX_GEOCODE_QUERY_CHARS),
+    limit: int = Query(default=1, ge=1, le=config.MAX_GEOCODE_RESULTS),
+) -> dict:
+    """Forward geocoding via the Photon proxy (server/geocode.py — the
+    whole why lives on that module's docstring). limit=1 is the address
+    field's submit-time resolve; higher limits are the autocomplete
+    dropdown's. NYC bbox and language are pinned server-side."""
+    q = " ".join(q.split())  # normalize whitespace so cache keys collapse
+    if not q:
+        raise HTTPException(status_code=422, detail="q must not be blank")
+    try:
+        results = geocoder.search(q, limit)
+    except geocoder.UpstreamError:
+        # Deliberately does NOT echo q back: query text is location data
+        # and this detail string is the only thing we'd ever emit it in.
+        raise HTTPException(status_code=502, detail="Geocoding is temporarily unavailable")
+    return {"results": list(results)}
+
+
+@app.get("/geocode/reverse")
+def geocode_reverse(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+) -> dict:
+    """Point → short address label, or null when nothing address-shaped
+    is nearby (the frontend then keeps showing coordinates). Rounded to
+    5dp (~1m) so a re-click of the same spot is a cache hit."""
+    try:
+        label = geocoder.reverse(round(lat, 5), round(lon, 5))
+    except geocoder.UpstreamError:
+        raise HTTPException(status_code=502, detail="Geocoding is temporarily unavailable")
+    return {"label": label}
 
 
 @app.get("/route")

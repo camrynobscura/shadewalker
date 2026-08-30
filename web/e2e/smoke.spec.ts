@@ -29,6 +29,6 @@ test('loading a shared route URL fills in the address fields via reverse geocodi
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
 
-  await expect(page.getByLabel('Start_point')).toHaveValue('250, Court St')
+  await expect(page.getByLabel('Start_point')).toHaveValue('250 Court St')
   await expect(page.getByLabel('End_point')).toHaveValue('3rd Ave')
 })

@@ -26,6 +26,7 @@ export default defineConfig({
       '/route': API_TARGET,
       '/health': API_TARGET,
       '/coverage': API_TARGET,
+      '/geocode': API_TARGET, // prefix match — also covers /geocode/reverse
     },
   },
 })

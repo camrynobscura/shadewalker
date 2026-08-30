@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { reverseGeocode } from './api'
+import { geocode, reverseGeocode } from './api'
+
+// Both functions are thin fetches against our own /geocode proxy since
+// 2026-08-30 — label building (including the address-not-POI reverse
+// rule, the Lucali story) lives server-side now and is pinned in
+// tests/test_server_geocode.py. What's left to test here is exactly what
+// this file owns: the response shapes and the null paths.
 
 function mockFetchOnce(body: unknown, ok = true) {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok, json: () => Promise.resolve(body) }))
@@ -9,44 +15,39 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+describe('geocode', () => {
+  it('returns the first proxy result', async () => {
+    mockFetchOnce({ results: [{ lat: 40.6818, lon: -74.0004, label: '575 Henry Street, Brooklyn' }] })
+    const result = await geocode('575 Henry St')
+    expect(result).toEqual({ lat: 40.6818, lon: -74.0004, label: '575 Henry Street, Brooklyn' })
+  })
+
+  it('returns null when the proxy has no matches', async () => {
+    mockFetchOnce({ results: [] })
+    expect(await geocode('zzzzzz')).toBeNull()
+  })
+
+  it('returns null when the request fails (proxy down, upstream 502)', async () => {
+    mockFetchOnce({}, false)
+    expect(await geocode('Court St')).toBeNull()
+  })
+})
+
 describe('reverseGeocode', () => {
-  it('uses house_number + road, not the matched POI name', async () => {
-    // The real response for a point right outside Lucali (a Carroll
-    // Gardens restaurant) -- display_name on this same response reads
-    // "Lucali, 575, Henry Street, ...", business name first. Building the
-    // label from `address` directly, not `display_name`, is the fix.
-    mockFetchOnce({
-      name: 'Lucali',
-      display_name:
-        'Lucali, 575, Henry Street, Columbia Street Waterfront District, Brooklyn, Kings County, New York, 11231, United States',
-      address: { amenity: 'Lucali', house_number: '575', road: 'Henry Street' },
-    })
-    const label = await reverseGeocode({ lat: 40.6818319, lon: -74.0003712 })
-    expect(label).toBe('575, Henry Street')
+  it('returns the proxy label', async () => {
+    mockFetchOnce({ label: '575 Henry Street' })
+    expect(await reverseGeocode({ lat: 40.6818319, lon: -74.0003712 })).toBe('575 Henry Street')
   })
 
-  it('falls back to just the road when there is no house number', async () => {
-    // e.g. a point inside a park, matched to a numbered sports pitch --
-    // the real response had `address.leisure: "2"` alongside `road`, no
-    // house_number. The "2" must never leak into the label either.
-    mockFetchOnce({
-      name: '2',
-      display_name: '2, West Drive, Brooklyn, Kings County, New York, 11215, United States',
-      address: { leisure: '2', road: 'West Drive' },
-    })
-    const label = await reverseGeocode({ lat: 40.662, lon: -73.975 })
-    expect(label).toBe('West Drive')
-  })
-
-  it('returns null when Nominatim has no address-shaped answer at all', async () => {
-    mockFetchOnce({ error: 'Unable to geocode' })
-    const label = await reverseGeocode({ lat: 40.5, lon: -74.5 })
-    expect(label).toBeNull()
+  it('returns null when nothing address-shaped is nearby', async () => {
+    // e.g. a click inside a park polygon — the caller keeps showing
+    // coordinates, which is the honest label there.
+    mockFetchOnce({ label: null })
+    expect(await reverseGeocode({ lat: 40.662, lon: -73.975 })).toBeNull()
   })
 
   it('returns null when the request itself fails', async () => {
     mockFetchOnce({}, false)
-    const label = await reverseGeocode({ lat: 40.68, lon: -73.99 })
-    expect(label).toBeNull()
+    expect(await reverseGeocode({ lat: 40.68, lon: -73.99 })).toBeNull()
   })
 })
