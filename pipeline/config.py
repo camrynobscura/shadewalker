@@ -51,6 +51,14 @@ OSM_EXTRACT_PATH = ORACLE_DIR / "new-york-latest.osm.pbf"
 # over what a live server is serving.
 EXPORT_DIR = Path(os.environ.get("SHADEWALKER_EXPORT_DIR", DATA_DIR / "export"))
 
+# The built frontend (web/dist) the server hands out alongside the API --
+# the "serving shape" decided 2026-08-30: one self-sufficient process, a
+# Caddy layer added in front at hosting time (history/geocoding-photon.md
+# era of the deploy plan; see PLAN.md). Overridable for deploys where the
+# build lands elsewhere. When the directory doesn't exist (dev with vite,
+# CI, fresh checkout) the server simply serves API-only.
+WEB_DIST_DIR = Path(os.environ.get("SHADEWALKER_WEB_DIST", REPO_ROOT / "web" / "dist"))
+
 
 # ── Geography ─────────────────────────────────────────────────────────────────
 
