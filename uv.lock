@@ -910,14 +910,10 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
-    { name = "geopandas" },
     { name = "numpy" },
-    { name = "osmium" },
-    { name = "osmnx" },
+    { name = "pyproj" },
     { name = "python-igraph" },
-    { name = "rasterio" },
     { name = "requests" },
-    { name = "scipy" },
     { name = "shapely" },
     { name = "uvicorn" },
 ]
@@ -928,18 +924,21 @@ dev = [
     { name = "httpx2" },
     { name = "pytest" },
 ]
+pipeline = [
+    { name = "geopandas" },
+    { name = "osmium" },
+    { name = "osmnx" },
+    { name = "rasterio" },
+    { name = "scipy" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.139.0" },
-    { name = "geopandas", specifier = ">=1.1.4" },
     { name = "numpy", specifier = ">=2.5.1" },
-    { name = "osmium", specifier = ">=4.3.1" },
-    { name = "osmnx", specifier = ">=2.1.0" },
+    { name = "pyproj", specifier = ">=3.7.2" },
     { name = "python-igraph", specifier = ">=1.0.0" },
-    { name = "rasterio", specifier = ">=1.5.0" },
     { name = "requests", specifier = ">=2.34.2" },
-    { name = "scipy", specifier = ">=1.18.0" },
     { name = "shapely", specifier = ">=2.1.2" },
     { name = "uvicorn", specifier = ">=0.51.0" },
 ]
@@ -949,6 +948,13 @@ dev = [
     { name = "folium", specifier = ">=0.20.0" },
     { name = "httpx2", specifier = ">=2.5.0" },
     { name = "pytest", specifier = ">=9.1.1" },
+]
+pipeline = [
+    { name = "geopandas", specifier = ">=1.1.4" },
+    { name = "osmium", specifier = ">=4.3.1" },
+    { name = "osmnx", specifier = ">=2.1.0" },
+    { name = "rasterio", specifier = ">=1.5.0" },
+    { name = "scipy", specifier = ">=1.18.0" },
 ]
 
 [[package]]

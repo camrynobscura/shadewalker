@@ -2,29 +2,49 @@
 name = "shadewalker"
 version = "0.1.0"
 requires-python = ">=3.12"
+# Runtime deps for the SERVER -- exactly what `import server.app` pulls in
+# (verified 2026-08-31: none of the pipeline group below loads). The
+# production box installs ONLY these, via `uv sync --no-default-groups`.
 dependencies = [
     "fastapi>=0.139.0",
-    "geopandas>=1.1.4",
     "numpy>=2.5.1",
-    # Reads the pinned .pbf in pipeline/graph/pedestrian.py -- a runtime
-    # dependency of the pipeline, not just of the tools/audit/ scripts it
-    # started out serving.
-    "osmium>=4.3.1",
-    "osmnx>=2.1.0",
+    # Used directly by server/coverage_frame.py. It used to arrive
+    # transitively via geopandas; the box no longer installs geopandas, so
+    # pyproj must be named here explicitly or the server won't import.
+    "pyproj>=3.7.2",
     "python-igraph>=1.0.0",
-    "rasterio>=1.5.0",
     "requests>=2.34.2",
-    "scipy>=1.18.0",
     "shapely>=2.1.2",
     "uvicorn>=0.51.0",
 ]
 
 [dependency-groups]
+# Build-only: the monthly pipeline (OSM read, tree scoring, land-cover
+# raster, export) runs on the laptop, never on the server. Nothing under
+# server/ imports any of these -- kept off the production box by
+# `uv sync --no-default-groups`.
+pipeline = [
+    "geopandas>=1.1.4",
+    # Reads the pinned .pbf in pipeline/graph/pedestrian.py -- a runtime
+    # dependency of the pipeline, not just of the tools/audit/ scripts it
+    # started out serving.
+    "osmium>=4.3.1",
+    "osmnx>=2.1.0",
+    "rasterio>=1.5.0",
+    "scipy>=1.18.0",
+]
 dev = [
     "folium>=0.20.0",
     "httpx2>=2.5.0",
     "pytest>=9.1.1",
 ]
+
+[tool.uv]
+# The laptop and CI need the whole thing (the build, and pytest's
+# test_pipeline_*.py, both pull in the pipeline group), so it's a default
+# group: a plain `uv sync` still installs everything everywhere EXCEPT the
+# box, which opts out with --no-default-groups.
+default-groups = ["dev", "pipeline"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
