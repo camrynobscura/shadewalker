@@ -392,8 +392,8 @@ export function Controls({
             end.resolve()
           }}
         >
-          <AddressField label="Start_point" example="250 Court St" field={start} />
-          <AddressField label="End_point" example="3rd St & 3rd Ave" field={end} />
+          <AddressField label="Start_point" example="768 5th Ave" field={start} />
+          <AddressField label="End_point" example="Broadway & W 42nd St" field={end} />
           <button
             type="submit"
             className={styles.primaryButton}

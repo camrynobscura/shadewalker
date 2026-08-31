@@ -212,3 +212,40 @@
   padding: var(--space-sm) var(--control-pad-x);
   border: 1px dashed var(--muted);
 }
+
+/* Share row: the button plus its "link copied" confirmation. Lives at the
+   end of the results, after the directions -- the last thing you reach
+   once the route is in front of you. Button mirrors Controls'
+   .secondaryButton (per-file CSS Modules, so duplicated, not shared). */
+.share {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+/* Full-width, and identical to Controls' .secondaryButton (USE_LOCATION /
+   CLEAR_ROUTE) -- per-file CSS Modules, so duplicated, keep in sync.
+   Quarter-width looked stranded in this section (user call 2026-08-31). */
+.shareButton {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--panel-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  font-size: var(--font-size-md);
+  cursor: pointer;
+}
+
+.shareButton:hover {
+  background: var(--line);
+}
+
+/* Sits below the full-width button; collapses to nothing when empty. */
+.shareStatus {
+  font-size: var(--font-size-sm);
+  color: var(--green-dim);
+}

@@ -93,14 +93,19 @@ export default function App() {
       </a>
 
       <header className={styles.header}>
-        {/* aria-label: VoiceOver reads "Shade_walker" as one mushed word;
-            the label speaks it as two while the screen keeps the underscore
-            (visible text still contained in the name, so voice control
-            users saying "Shade Walker" still match). */}
-        <h1 className={styles.title} aria-label="Shade Walker">
-          Shade_walker
-          {/* Decorative terminal cursor — never announced. */}
-          <span className={styles.cursor} aria-hidden="true" />
+        <h1 className={styles.title}>
+          {/* The wordmark is a home link -- clicking it navigates to "/"
+              (no query params), the app's default state, which clears any
+              route (user call 2026-08-31). A full navigation, not an
+              in-place clear, so it also resets the map center and zoom to
+              default -- a true reset. aria-label: VoiceOver reads
+              "Shade_walker" as one mushed word; the label speaks it as two
+              while the screen keeps the underscore. */}
+          <a href="/" className={styles.homeLink} aria-label="Shade Walker, home">
+            Shade_walker
+            {/* Decorative terminal cursor — never announced. */}
+            <span className={styles.cursor} aria-hidden="true" />
+          </a>
         </h1>
         {/* Tagline + instructions ride BESIDE the wordmark (user call
             2026-08-30: the header was spending three stacked lines of

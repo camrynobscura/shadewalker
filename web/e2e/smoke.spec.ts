@@ -31,6 +31,23 @@ test('searching two addresses draws a route with stats and directions', async ({
   await expect(page.getByLabel('End point')).toHaveValue('3rd St & 3rd Ave')
 })
 
+test('the share button copies the route URL to the clipboard', async ({ page }) => {
+  // Headless Chromium has no navigator.share, so the button falls to the
+  // clipboard path -- grant it and assert both the confirmation and the
+  // actual clipboard contents (the shareable URL App keeps in sync).
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await mockGeocode(page)
+  await page.goto(routeUrl(POINT_A, POINT_B))
+  await expect(page.getByText('distance', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Share route' }).click()
+  await expect(page.getByText('link copied', { exact: true })).toBeVisible()
+
+  const clip = await page.evaluate(() => navigator.clipboard.readText())
+  expect(clip).toContain('from=')
+  expect(clip).toContain('to=')
+})
+
 test('loading a shared route URL fills in the address fields via reverse geocoding', async ({ page }) => {
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))

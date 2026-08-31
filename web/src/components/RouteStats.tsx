@@ -205,6 +205,53 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
   )
 }
 
+/** Shares the current route. The whole request already lives in the URL
+ * (App.tsx mirrors start/end/weight to the query string), so "share" is
+ * just handing that URL along -- the native share sheet where the browser
+ * has one (mobile/Safari), a clipboard copy with confirmation everywhere
+ * else. */
+function ShareButton() {
+  const [copied, setCopied] = useState(false)
+
+  async function onShare() {
+    const url = window.location.href
+    if (navigator.share) {
+      // Native sheet: canceling is a normal outcome, not an error, and
+      // needs no clipboard fallback on a device that has share.
+      try {
+        await navigator.share({ title: 'Shade Walker route', url })
+      } catch {
+        /* dismissed */
+      }
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2500)
+    } catch {
+      /* clipboard blocked (insecure context, denied) -- no graceful action */
+    }
+  }
+
+  return (
+    <div className={styles.share}>
+      <button
+        type="button"
+        className={styles.shareButton}
+        onClick={onShare}
+        aria-label="Share route"
+      >
+        SHARE_ROUTE
+      </button>
+      {/* Polite live region so the copy is announced without stealing focus. */}
+      <span className={styles.shareStatus} role="status">
+        {copied ? 'link copied' : ''}
+      </span>
+    </div>
+  )
+}
+
 function StatsBody({ route, description }: { route: RouteFeature; description: string }) {
   const stats = route.properties
   // Computed once and used by BOTH the stat and the warning below --
@@ -358,6 +405,8 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
             {description}
           </p>
         )}
+
+        <ShareButton />
       </div>
     </>
   )
