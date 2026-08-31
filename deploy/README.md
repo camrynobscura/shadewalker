@@ -76,6 +76,11 @@ echo '<deploy-user> ALL=(root) NOPASSWD: /usr/bin/systemctl restart shadewalker'
 # Build the frontend WITH the CARTO key (it bakes into the bundle)
 (cd web && VITE_CARTO_KEY=<key> npm run build)
 
+# Prove the deployable works locally before shipping it: one uvicorn
+# process serving the real dist + API + rate limiter + headers, exactly
+# as the box runs it. (Needs a local data/export/ + the build above.)
+./deploy/smoke_test.sh
+
 # Ship code + dist + export, sync the slim venv, restart
 HOST=<deploy-user>@<droplet-ip> ./deploy/deploy.sh
 ```
@@ -85,6 +90,7 @@ packages only. Then start everything:
 
 ```bash
 sudo systemctl enable --now shadewalker      # the app
+sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile  # catch Caddyfile syntax errors BEFORE reloading
 sudo systemctl reload caddy                   # picks up the Caddyfile; TLS auto-issues
 ```
 

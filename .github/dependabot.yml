@@ -1,0 +1,19 @@
+# Automated dependency + security-update PRs. Dependabot reads uv.lock and
+# web/package-lock.json natively: it opens a PR when a dependency is outdated
+# or has a known CVE, and CI (.github/workflows/ci.yml) runs on each one, so
+# you just review and merge. Security updates are fast-tracked; routine
+# version bumps wait a few days first, so a bad release can be flagged.
+version: 2
+updates:
+  - package-ecosystem: "uv" # Python: pyproject.toml + uv.lock
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "npm" # frontend: web/package.json + package-lock.json
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "github-actions" # keep the CI actions patched too
+    directory: "/"
+    schedule:
+      interval: "weekly"
