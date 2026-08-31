@@ -21,9 +21,26 @@
 }
 
 .header {
-  padding: var(--space-xl) var(--space-2xl);
+  /* One row: wordmark left, the two text lines beside it (user call
+     2026-08-30 — stacked, the header spent ~130px on what one row says
+     in ~70). Vertical padding stepped down xl -> lg with the height win.
+     flex-wrap so a viewport too narrow for the pair drops the text
+     block below the wordmark instead of clipping. */
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-2xl);
+  padding: var(--space-lg) var(--space-2xl);
   background: var(--panel);
   border-bottom: 1px solid var(--border);
+}
+
+/* The tagline + instructions pair, stacked flush beside the wordmark —
+   no gap at all (user call 2026-08-30): line-height alone separates
+   them, reading as one tight terminal block. */
+.headerText {
+  display: flex;
+  flex-direction: column;
 }
 
 .title {
@@ -68,8 +85,8 @@
   /* A <p> beside the h1 since 2026-08-30, not a span inside it -- the
      accessible heading is just the wordmark now, instead of the whole
      "Shade_walker > find the shadiest..." sentence a screen reader's
-     heading navigation used to read out. Same rendered layout. */
-  margin: var(--space-md) 0 0;
+     heading navigation used to read out. */
+  margin: 0;
   font-weight: 400;
   font-style: italic;
   font-size: var(--font-size-sm);
@@ -100,7 +117,7 @@
 }
 
 .instructions {
-  margin: var(--space-xs) 0 0;
+  margin: 0;
   font-size: var(--font-size-sm);
   color: var(--green-dim);
   font-style: italic;

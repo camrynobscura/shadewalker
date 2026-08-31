@@ -98,25 +98,21 @@ export default function App() {
           {/* Decorative terminal cursor — never announced. */}
           <span className={styles.cursor} aria-hidden="true" />
         </h1>
-        {/* Sibling of the h1, not inside it (2026-08-30): the accessible
-            heading is just the wordmark, not this whole sentence. */}
-        <p className={styles.tagline}>&#62; find the shadiest walking route in NYC</p>
-        {/* The one piece of visible instruction guaranteed to be on screen
-            before any scrolling, on every viewport size -- it's rendered
-            before the map in DOM order, so it survives the mobile layout's
-            stack-map-above-panel reflow (the old copy of this text lived at
-            the bottom of the control panel, past the address fields and
-            Shade_priority slider, invisible without scrolling on mobile).
-            Always rendered, never conditionally hidden -- it was originally
-            tied to "no route yet" and toggled off once a route existed, but
-            that meant re-picking a point on an existing route (e.g. a new
-            start while the old route is still showing) made it flicker back
-            in and out, visibly shifting the whole layout on every click.
-            Always-on trades a little permanent header height for a header
-            that never jumps around mid-interaction. */}
-        <p className={styles.instructions}>
-          &#62; tap the map to set a start and end point, or search two addresses below
-        </p>
+        {/* Tagline + instructions ride BESIDE the wordmark (user call
+            2026-08-30: the header was spending three stacked lines of
+            height on text that earns one row). Siblings of the h1, not
+            inside it: the accessible heading stays just the wordmark. */}
+        <div className={styles.headerText}>
+          <p className={styles.tagline}>&#62; find the shadiest walking route in NYC</p>
+          {/* Always rendered, never toggled on route state -- it once
+              hid itself when a route existed, and re-picking a point made
+              it flicker in and out, shifting the layout on every click.
+              Living in the header (before the map in DOM order) also keeps
+              it on screen without scrolling in the mobile stack. */}
+          <p className={styles.instructions}>
+            &#62; tap the map to set a start and end point, or search two addresses below
+          </p>
+        </div>
       </header>
 
       <div className={styles.layout}>
