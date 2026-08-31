@@ -15,6 +15,7 @@ dependencies = [
     "python-igraph>=1.0.0",
     "requests>=2.34.2",
     "shapely>=2.1.2",
+    "slowapi>=0.1.10",
     "uvicorn>=0.51.0",
 ]
 

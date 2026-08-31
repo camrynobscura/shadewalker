@@ -42,8 +42,13 @@ shadewalker.nyc {
 		Content-Security-Policy "default-src 'self'; img-src 'self' data: https://*.basemaps.cartocdn.com; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://cloudflareinsights.com; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
 
 		# Defense in depth — the app sets these too, but so does the edge.
-		Referrer-Policy "no-referrer"
+		Referrer-Policy "strict-origin-when-cross-origin"
 		X-Content-Type-Options "nosniff"
+
+		# Lock down browser features: the app uses geolocation ("use my
+		# location"), so allow that for our own origin; deny the rest, so
+		# nothing on the page can ever reach camera/mic/payment/USB.
+		Permissions-Policy "geolocation=(self), camera=(), microphone=(), payment=(), usb=()"
 
 		# Don't advertise the server software/version.
 		-Server

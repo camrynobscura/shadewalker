@@ -39,6 +39,15 @@ curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/
 sudo ufw allow OpenSSH
 sudo ufw allow 80,443/tcp
 sudo ufw --force enable
+
+# Harden SSH — a public box gets brute-forced within minutes of going live.
+#   In /etc/ssh/sshd_config set (key-only auth, no root login):
+#     PasswordAuthentication no
+#     PermitRootLogin no
+#   then: sudo systemctl restart ssh   (confirm your key still logs you in!)
+sudo apt install -y fail2ban              # auto-bans IPs after repeated failures
+sudo apt install -y unattended-upgrades  # automatic OS security patches
+sudo dpkg-reconfigure -plow unattended-upgrades
 ```
 
 Put the config in place:

@@ -326,6 +326,17 @@ MAX_GEOCODE_RESULTS = 10
 # the point, not saving our own milliseconds.
 GEOCODE_CACHE_MAX_ENTRIES = 10_000
 
+# Per-client rate limits (slowapi, app-level; decided 2026-08-31). Keyed
+# by the real client IP — X-Real-IP behind Caddy, socket peer in dev.
+# /route runs four Dijkstras per call, but a human comparing presets makes
+# ONE call, so 30/min is generous for real use and caps a flood of the
+# single worker. /geocode relays to Photon's fair-use upstream, so its
+# budget is POOLED across forward + reverse (one "geocode" scope) to bound
+# what a single client can push upstream; 60/min covers active autocomplete
+# typing with headroom.
+ROUTE_RATE_LIMIT = "30/minute"
+GEOCODE_RATE_LIMIT = "60/minute"
+
 # Edge kinds that are CONNECTORS — pavement you pass over, not a street
 # walked along with an identity. Matched as substrings of an edge's `kind`
 # ("footway/crossing", "footway/traffic_island"). One vocabulary, two
