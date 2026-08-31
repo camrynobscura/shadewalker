@@ -319,7 +319,12 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
             per-step, as "unnamed path", not by a blanket note. */}
         <p className={styles.disclaimer}>
           <strong>// CAUTION:</strong> walking routes may not always reflect
-          real-world conditions
+          real-world conditions —{' '}
+          {/* The moment a user doubts the data is the moment they'll take
+              the explanation (user call 2026-08-30). */}
+          <a className={styles.cautionLink} href="/about.html#caution">
+            learn why
+          </a>
         </p>
 
         {stats.segments.length > 0 ? (

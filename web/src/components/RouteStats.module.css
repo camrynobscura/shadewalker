@@ -175,6 +175,14 @@
   border-left: 3px solid var(--magenta);
 }
 
+/* Same ink as the notice it sits in -- underline alone marks it, so the
+   caution reads as one sentence with an exit, not a callout with a
+   button. */
+.cautionLink {
+  color: inherit;
+  text-underline-offset: 2px;
+}
+
 .quiet {
   color: var(--muted);
   font-size: var(--font-size-sm);

@@ -43,6 +43,19 @@ test('an open autocomplete listbox has no violations', async ({ page }) => {
   expect(results.violations).toEqual([])
 })
 
+test('the About page has no violations and links back', async ({ page }) => {
+  // A static second page (no React) served from the same build -- easy
+  // for regressions to hide on since no component test ever renders it.
+  await page.goto('/about.html')
+  await expect(page.getByRole('heading', { name: 'About Shadewalker' })).toBeVisible()
+
+  const results = await new AxeBuilder({ page }).analyze()
+  expect(results.violations).toEqual([])
+
+  await page.getByRole('link', { name: '> back to the map' }).first().click()
+  await expect(page).toHaveURL(/\/$|\/\?/)
+})
+
 test('address search with no match has no violations', async ({ page }) => {
   await mockGeocode(page)
   await page.goto('/')

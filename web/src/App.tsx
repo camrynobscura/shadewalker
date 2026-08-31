@@ -113,6 +113,14 @@ export default function App() {
             &#62; tap the map to set a start and end point, or search two addresses below
           </p>
         </div>
+        {/* A real navigation, not a bare link: a full page of its own
+            deserves the landmark. margin-left auto rides the header's
+            flex row to the right edge. */}
+        <nav className={styles.headerNav} aria-label="Site">
+          <a className={styles.aboutLink} href="/about.html">
+            ABOUT
+          </a>
+        </nav>
       </header>
 
       <div className={styles.layout}>

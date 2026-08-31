@@ -43,6 +43,25 @@
   flex-direction: column;
 }
 
+.headerNav {
+  margin-left: auto;
+}
+
+/* Terminal-chrome link, sized as a real target (padding brings it past
+   the 24px AA floor) without adding header height. */
+.aboutLink {
+  display: inline-block;
+  padding: var(--space-sm);
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.1em;
+  color: var(--green-dim);
+  text-underline-offset: 3px;
+}
+
+.aboutLink:hover {
+  color: var(--text);
+}
+
 .title {
   margin: 0;
   /* Masthead scale, not body-text scale — at the old 16px the h1 read as
