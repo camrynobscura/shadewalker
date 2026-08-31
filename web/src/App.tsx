@@ -93,7 +93,11 @@ export default function App() {
       </a>
 
       <header className={styles.header}>
-        <h1 className={styles.title}>
+        {/* aria-label: VoiceOver reads "Shade_walker" as one mushed word;
+            the label speaks it as two while the screen keeps the underscore
+            (visible text still contained in the name, so voice control
+            users saying "Shade Walker" still match). */}
+        <h1 className={styles.title} aria-label="Shade Walker">
           Shade_walker
           {/* Decorative terminal cursor — never announced. */}
           <span className={styles.cursor} aria-hidden="true" />
@@ -103,14 +107,18 @@ export default function App() {
             height on text that earns one row). Siblings of the h1, not
             inside it: the accessible heading stays just the wordmark. */}
         <div className={styles.headerText}>
-          <p className={styles.tagline}>&#62; find the shadiest walking route in NYC</p>
+          <p className={styles.tagline}>
+            {/* The prompt glyph is decoration -- unspoken, or every read
+                starts with "greater than" (VoiceOver pass, 2026-08-31). */}
+            <span aria-hidden="true">&#62; </span>find the shadiest walking route in NYC
+          </p>
           {/* Always rendered, never toggled on route state -- it once
               hid itself when a route existed, and re-picking a point made
               it flicker in and out, shifting the layout on every click.
               Living in the header (before the map in DOM order) also keeps
               it on screen without scrolling in the mobile stack. */}
           <p className={styles.instructions}>
-            &#62; tap the map to set a start and end point, or search two addresses below
+            <span aria-hidden="true">&#62; </span>tap the map to set a start and end point, or search two addresses below
           </p>
         </div>
         {/* A real navigation, not a bare link: a full page of its own

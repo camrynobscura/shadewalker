@@ -47,12 +47,12 @@ test('the About page has no violations and links back', async ({ page }) => {
   // A static second page (no React) served from the same build -- easy
   // for regressions to hide on since no component test ever renders it.
   await page.goto('/about.html')
-  await expect(page.getByRole('heading', { name: 'About Shadewalker' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'About Shade Walker' })).toBeVisible()
 
   const results = await new AxeBuilder({ page }).analyze()
   expect(results.violations).toEqual([])
 
-  await page.getByRole('link', { name: '> back to the map' }).first().click()
+  await page.getByRole('link', { name: 'back to the map' }).first().click()
   await expect(page).toHaveURL(/\/$|\/\?/)
 })
 

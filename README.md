@@ -1,4 +1,4 @@
-# Shadewalker
+# Shade Walker
 
 **Tree-shaded walking routes for New York City.** Pick two points and a
 shade priority; get the walk that keeps you under the tree canopy — with the

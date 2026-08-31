@@ -405,12 +405,12 @@ export function Controls({
               together visually. */}
           <div className={styles.comparisonHint} aria-live="polite" aria-atomic="true">
             <p className={styles.modeLine}>
-              <span className={styles.promptSymbol}>&gt;</span> mode: {selectedPreset?.label.toLowerCase()} //{' '}
+              <span className={styles.promptSymbol} aria-hidden="true">&gt;</span> mode: {selectedPreset?.label.toLowerCase()} //{' '}
               {selectedPreset?.hint}
             </p>
             {comparison && (
               <p className={styles.comparisonLine}>
-                <span className={styles.promptSymbol}>&gt;</span> +
+                <span className={styles.promptSymbol} aria-hidden="true">&gt;</span> +
                 <span className={styles.numberHighlight}>{comparison.extraShadePct}</span>% shade · +
                 <span className={styles.numberHighlight}>{comparison.extraMinutes}</span>{' '}
                 min · +{highlightNumber(formatDistance(comparison.extraLengthM))}

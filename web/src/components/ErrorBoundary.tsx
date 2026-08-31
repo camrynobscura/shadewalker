@@ -20,7 +20,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Shadewalker crashed:', error, info.componentStack)
+    console.error('Shade Walker crashed:', error, info.componentStack)
   }
 
   render() {
@@ -35,7 +35,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               crashed page would have none at all -- the one screen where
               a screen reader user most needs something to orient on. */}
           <h1 className={styles.heading}>// APP_CRASHED</h1>
-          <p className={styles.message}>Something went wrong and Shadewalker can't recover on its own.</p>
+          <p className={styles.message}>Something went wrong and Shade Walker can't recover on its own.</p>
           <button type="button" className={styles.reloadButton} onClick={() => window.location.reload()}>
             RELOAD
           </button>

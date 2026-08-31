@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
 # documented try-it-out endpoint. Don't volunteer that (decided
 # 2026-08-30, same spirit as --no-server-header). We never use /docs in
 # dev either -- curl is the house tool; re-enabling is this one line.
-app = FastAPI(title="Shadewalker", lifespan=lifespan,
+app = FastAPI(title="Shade Walker", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 

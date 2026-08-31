@@ -352,7 +352,10 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
         ) : (
           // Empty segments means start == end, so the server's generic
           // "already there" text is accurate.
-          <p className={styles.description}>&gt; {description}</p>
+          <p className={styles.description}>
+            <span aria-hidden="true">&gt; </span>
+            {description}
+          </p>
         )}
       </div>
     </>
