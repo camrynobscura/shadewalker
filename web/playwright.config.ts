@@ -49,7 +49,7 @@ export default defineConfig({
     {
       command:
         'mkdir -p data/e2e_export && cp tests/fixtures/pilot.json.gz data/e2e_export/ && ' +
-        `SHADEWALKER_EXPORT_DIR="$(pwd)/data/e2e_export" uv run uvicorn server.app:app --port ${API_PORT}`,
+        `SHADEWALKER_EXPORT_DIR="$(pwd)/data/e2e_export" SHADEWALKER_DISABLE_RATE_LIMIT=1 uv run uvicorn server.app:app --port ${API_PORT}`,
       cwd: '..',
       url: `http://localhost:${API_PORT}/health`,
       reuseExistingServer: false,

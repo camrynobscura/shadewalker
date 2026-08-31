@@ -27,6 +27,18 @@ from pipeline import config
 from server.graph_store import GraphStore
 
 
+@pytest.fixture(autouse=True)
+def _rate_limiter_off_by_default():
+    """The slowapi limiter's counters are per-process and in-memory, so
+    cumulative endpoint calls across unrelated tests could otherwise trip a
+    429 and fail a test that has nothing to do with rate limiting. Off by
+    default for the whole suite; test_server_ratelimit.py opts back in
+    (with its own fresh per-IP buckets) for its own assertions."""
+    from server.app import app
+    app.state.limiter.enabled = False
+    yield
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--run-external", action="store_true", default=False,

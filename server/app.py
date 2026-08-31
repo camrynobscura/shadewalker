@@ -45,11 +45,15 @@ painful or the refresh cadence tightens dramatically.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from pipeline import config
 from server import geocode as geocoder
@@ -88,18 +92,52 @@ app = FastAPI(title="Shade Walker", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
+# Per-client rate limiting (slowapi, app-level; decided 2026-08-31,
+# `hosting`). App-level rather than at the Caddy edge because the edge
+# plugin needs a custom Caddy binary with no clean update path -- and a
+# 429 here still short-circuits BEFORE the view body runs (no Dijkstra, no
+# upstream hop), so it protects the single worker just the same, while
+# being testable in-process. Keyed by the real client IP: Caddy passes it
+# as X-Real-IP (header_up, so a client can't spoof it); with no proxy in
+# front (dev) we fall back to the socket peer. Limits live as decorators on
+# the endpoints below -- /health, /coverage and the static mount stay
+# unlimited, since monitoring and page loads must never be throttled.
+def _client_ip(request: Request) -> str:
+    return request.headers.get("X-Real-IP") or get_remote_address(request)
+
+
+# No headers_enabled: that makes slowapi inject X-RateLimit-* headers into
+# each response, which requires the endpoint to return a Response object
+# (ours return plain dicts) -- and a private API with one client has no use
+# for advertising its remaining quota. The 429 (with Retry-After) still
+# fires from the exception handler regardless.
+limiter = Limiter(key_func=_client_ip)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# The Playwright tier (web/playwright.config.ts) drives many /route calls
+# from a single localhost IP in seconds, which would trip the production
+# limit and make the suite flaky. It sets this env var to turn limiting off,
+# the same isolation the pytest conftest does. NEVER set in production.
+if os.environ.get("SHADEWALKER_DISABLE_RATE_LIMIT"):
+    limiter.enabled = False
+
+
 # Applies to every response, static files included (middleware wraps the
 # mount too). Only the two headers that belong to the APP no matter where
-# it runs: Referrer-Policy because route URLs carry coordinates in the
-# query string and must never ride an outbound Referer to a tile host or
-# any link target; nosniff because we serve user-adjacent JSON and static
+# it runs: Referrer-Policy (strict-origin-when-cross-origin) because route
+# URLs carry coordinates in the query string -- this keeps the path+query
+# off every outbound Referer (only the bare origin is ever sent), while
+# still letting the CARTO basemap key be locked to our domain, which needs
+# SOME referer to verify against (decided 2026-08-31, `hosting`); nosniff
+# because we serve user-adjacent JSON and static
 # files from one origin. The rest of the header story (CSP, HSTS) is
 # deliberately NOT here -- it depends on final asset origins and TLS, so
 # it lives in the Caddy layer at hosting time (PLAN.md, `hosting`).
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
-    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
@@ -141,7 +179,9 @@ def coverage() -> dict:
 
 
 @app.get("/geocode")
+@limiter.shared_limit(config.GEOCODE_RATE_LIMIT, scope="geocode")
 def geocode_search(
+    request: Request,
     q: str = Query(min_length=1, max_length=config.MAX_GEOCODE_QUERY_CHARS),
     limit: int = Query(default=1, ge=1, le=config.MAX_GEOCODE_RESULTS),
 ) -> dict:
@@ -162,7 +202,9 @@ def geocode_search(
 
 
 @app.get("/geocode/reverse")
+@limiter.shared_limit(config.GEOCODE_RATE_LIMIT, scope="geocode")
 def geocode_reverse(
+    request: Request,
     lat: float = Query(ge=-90, le=90),
     lon: float = Query(ge=-180, le=180),
 ) -> dict:
@@ -177,7 +219,9 @@ def geocode_reverse(
 
 
 @app.get("/route")
+@limiter.limit(config.ROUTE_RATE_LIMIT)
 def route(
+    request: Request,
     from_lat: float,
     from_lon: float,
     to_lat: float,
