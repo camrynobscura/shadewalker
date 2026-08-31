@@ -10,7 +10,7 @@ jobs:
     name: Server tests (pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -24,7 +24,7 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
@@ -39,7 +39,7 @@ jobs:
     name: Frontend e2e (Playwright)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Playwright's webServer boots `uv run uvicorn` itself (see
       # web/playwright.config.ts), so this job needs the Python side set
       # up too, not just Node.
