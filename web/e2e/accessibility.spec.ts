@@ -20,7 +20,7 @@ test('a drawn route has no violations', async ({ page }) => {
   // into the address fields on load -- mock it or this hits live Nominatim.
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
-  await expect(page.getByText('dist', { exact: true })).toBeVisible()
+  await expect(page.getByText('distance', { exact: true })).toBeVisible()
 
   const results = await new AxeBuilder({ page }).analyze()
   expect(results.violations).toEqual([])
@@ -33,10 +33,10 @@ test('an open autocomplete listbox has no violations', async ({ page }) => {
   // axe never sees the pattern at all.
   await mockGeocode(page)
   await page.goto('/')
-  const start = page.getByLabel('Start_point')
+  const start = page.getByLabel('Start point')
   await start.click()
   await start.pressSequentially('court', { delay: 30 })
-  await expect(page.getByRole('listbox', { name: 'Start_point suggestions' })).toBeVisible()
+  await expect(page.getByRole('listbox', { name: 'Start point suggestions' })).toBeVisible()
   await page.keyboard.press('ArrowDown') // active option: aria-activedescendant set
 
   const results = await new AxeBuilder({ page }).analyze()
@@ -59,8 +59,8 @@ test('the About page has no violations and links back', async ({ page }) => {
 test('address search with no match has no violations', async ({ page }) => {
   await mockGeocode(page)
   await page.goto('/')
-  await page.getByLabel('Start_point').fill('Nowhere, USA')
-  await page.getByRole('button', { name: 'FIND_ROUTE' }).click()
+  await page.getByLabel('Start point').fill('Nowhere, USA')
+  await page.getByRole('button', { name: 'FIND ROUTE' }).click()
   await expect(page.getByText('NOT_FOUND', { exact: false })).toBeVisible()
 
   const results = await new AxeBuilder({ page }).analyze()

@@ -40,3 +40,56 @@ export const DISPLAY_SHADE_EXPONENT = 1.2
 export function displayShade(fraction: number): number {
   return 1 - (1 - fraction) ** DISPLAY_SHADE_EXPONENT
 }
+
+/** (Moved here from RouteStats.tsx 2026-08-31, when the warning
+ * itself moved into the Shade_priority box -- the threshold belongs
+ * beside the display curve it is calibrated against.)
+ *
+ * Below this shade_fraction, the route is objectively exposed — say so
+ * instead of overselling (honest stats). Reads the same continuous stat
+ * displayed as "% shaded" right above it, so the warning and the number
+ * can never disagree (the old rule read tree_count/length instead, a
+ * different signal entirely — a Central Park route could show "83%
+ * shaded" AND this warning).
+ *
+ * RE-DERIVED 2026-08-26 for the coverage scale, 0.20 -> 0.15. The 0.20
+ * bar was chosen against the display that saturated at density 0.02 —
+ * which the leaf-cover exchange rate later revealed to be ~65% real
+ * coverage, i.e. an inflated scale. When shade_fraction became measured
+ * coverage (DENSITY_AT_FULL_COVERAGE, 2026-08-26) every displayed number
+ * dropped ~12-15 points and 0.20 began firing on 29% of default-preset
+ * April routes and 59% of April no-priority ones — worse than the 0.25
+ * value the previous derivation explicitly REJECTED for firing on 26%
+ * and 57%. Same failure, so same treatment: re-measure, don't re-tune.
+ *
+ * Measured on 188 routable random pairs (the routing harness's seeded
+ * draw; the 2026-08-24 derivation found borough reweighting moved every
+ * figure <1pt, so unweighted, with ±2-3pt sampling noise per cell).
+ * Share of routes warned on the COVERAGE scale:
+ *
+ *             July MED  July NONE  April MED  April NONE
+ *     0.125       1.1%       5.3%       9.6%      21.3%
+ *     0.15        2.7%       8.5%      12.8%      35.1%   <- chosen
+ *     0.20        4.8%      21.3%      29.3%      58.5%
+ *
+ * 0.15 reproduces the firing profile 0.20 was originally PICKED to
+ * deliver (July MED ~5%/NONE ~15%, April MED ~15%/NONE ~38%) — the same
+ * editorial judgment about when exposure deserves saying, re-expressed on
+ * the truthful scale. And on this scale the words finally mean exactly
+ * what they say: below 15% covered, 85% of the walk is in open sun. The
+ * one high figure, 35%, is on April NONE ("fastest route, no detours for
+ * shade") where the user has already said shade is not a priority.
+ *
+ * Seasonal variation is deliberate, not drift: April really is less shaded
+ * than July (CANOPY_BY_MONTH), so the same bar firing more in spring is
+ * the honest geography.
+ *
+ * The 2026-08-27 display curve (shade.ts) does NOT move this bar: the
+ * comparison stays on the raw measured fraction, and because
+ * displayShade is strictly monotone, exactly the same routes fire as
+ * before -- the firing profile above is preserved without re-derivation.
+ * Only the PRINTED numbers go through the curve (both of them, stat and
+ * warning, so they can never disagree); at this bar the warning shows
+ * itself at ~18% displayed rather than 15% measured, and its words stay
+ * true either way. */
+export const LOW_SHADE_FRACTION = 0.15

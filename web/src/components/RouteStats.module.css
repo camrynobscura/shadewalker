@@ -5,6 +5,21 @@
    row, the caution stamp and the directions list are distinct groups,
    which is the lg token's own definition, not related lines within one
    block. */
+/* Same visually-hidden technique as MapView.module.css's copy (CSS
+   Modules are per-file). Carries the spoken twins of the compact stat
+   units. */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .section {
   display: flex;
   flex-direction: column;
@@ -166,14 +181,6 @@
   color: var(--green-dim);
 }
 
-.sparseNote {
-  font-size: var(--font-size-sm);
-  padding: var(--control-pad-x) var(--space-md);
-  margin: 0;
-  background: var(--panel-raised);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--magenta);
-}
 
 /* Same ink as the notice it sits in -- underline alone marks it, so the
    caution reads as one sentence with an exit, not a callout with a
@@ -192,16 +199,12 @@
   margin: 0;
 }
 
-/* The standing route caution, as a stamped notice (user calls,
-   2026-08-28 — it used to be muted fine print that read as "step zero"
-   of the directions list). Three deliberate choices:
-   - DASHED border, so it can't be mistaken for the stat boxes' solid
-     hairlines or the mode-note's tinted box (those mean "readout",
-     this means "notice"). A faint magenta wash was tried and removed —
-     no background, so .sparseNote (solid raised panel + 3px magenta
-     rail, the per-route warning) clearly outranks this ambient notice;
-   - full-ink text with only the "// CAUTION:" prefix bold, so it gets
-     read without the whole sentence shouting. */
+/* The standing route caution, as a stamped notice (2026-08-28). The
+   dashed border is the panel's "notice" dialect -- shared with Controls'
+   .lowShadeNote since 2026-08-31 (two visual dialects total: green wash
+   = readout, dashed = notice; keep the two rules in sync). Full-ink text
+   with only the "// CAUTION:" prefix bold, so it gets read without the
+   whole sentence shouting. */
 .disclaimer {
   color: var(--text);
   font-size: var(--font-size-sm);

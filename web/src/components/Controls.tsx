@@ -1,9 +1,10 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { geocode, reverseGeocode, type GeocodeResult, type Point, type RouteFeature } from '../api'
-import { formatCoords, formatDistance } from '../format'
+import { formatCoords, formatDistance, spokenDistance } from '../format'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import { useGeocodeSuggestions } from '../hooks/useGeocodeSuggestions'
 import { compareRoutes, TREE_PRESETS } from '../presets'
+import { displayShade, LOW_SHADE_FRACTION } from '../shade'
 import styles from './Controls.module.css'
 
 /** Splits a formatted distance ("0.2 mi", "524 ft") into its leading
@@ -40,7 +41,7 @@ type FieldStatus = 'idle' | 'searching' | 'notfound' | 'found'
  * a new object with the same lat/lon -- reference equality would treat
  * that as "a new point," and redundantly reverse-geocode text that's
  * already better than anything reverse-geocoding would produce. */
-function useAddressField(onResolve: (p: Point) => void, externalPoint: Point | null) {
+function useAddressField(onResolve: (p: Point | null) => void, externalPoint: Point | null) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<FieldStatus>('idle')
   // Suggestions are wanted only while the current text is something the
@@ -50,6 +51,10 @@ function useAddressField(onResolve: (p: Point) => void, externalPoint: Point | n
   const [suggestOn, setSuggestOn] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
   const shownPointRef = useRef<Point | null>(null)
+  // Previous externalPoint, so the effect below can tell a point being
+  // CLEARED (value -> null) from the steady "no point yet" state while
+  // someone types a fresh address.
+  const prevExternalRef = useRef<Point | null>(externalPoint)
 
   const suggestions = useGeocodeSuggestions(query, suggestOn)
 
@@ -82,6 +87,19 @@ function useAddressField(onResolve: (p: Point) => void, externalPoint: Point | n
     setSuggestOn(false)
   }
 
+  /** Leaving an emptied field drops the point it stood for -- the marker
+   * shouldn't outlive the text (user report 2026-08-31). Only on blur,
+   * never per-keystroke, so retyping an address doesn't nuke the marker
+   * mid-edit. Guarded on externalPoint so tabbing through an
+   * already-empty field does nothing. */
+  function onBlur() {
+    setSuggestOn(false)
+    if (query.trim() === '' && externalPoint) {
+      shownPointRef.current = null
+      onResolve(null)
+    }
+  }
+
   /** ArrowDown on a closed field re-opens it (ARIA combobox convention) --
    * the hook refetches for the unchanged text after its debounce. */
   function openSuggestions() {
@@ -106,7 +124,23 @@ function useAddressField(onResolve: (p: Point) => void, externalPoint: Point | n
   }
 
   useEffect(() => {
-    if (!externalPoint) return
+    const prev = prevExternalRef.current
+    prevExternalRef.current = externalPoint
+
+    if (!externalPoint) {
+      // Point cleared from outside (CLEAR_ROUTE, or this field emptied and
+      // blurred) -- empty the text so field and map never disagree (user
+      // report 2026-08-31: CLEAR_ROUTE left the addresses behind). Guarded
+      // on `prev` so it fires only on the value->null transition, never on
+      // the steady no-point state while a fresh address is being typed.
+      if (prev) {
+        setQuery('')
+        setStatus('idle')
+        setSuggestOn(false)
+        shownPointRef.current = null
+      }
+      return
+    }
     const shown = shownPointRef.current
     if (shown && shown.lat === externalPoint.lat && shown.lon === externalPoint.lon) return
 
@@ -142,6 +176,7 @@ function useAddressField(onResolve: (p: Point) => void, externalPoint: Point | n
     setActiveIndex,
     closeSuggestions,
     openSuggestions,
+    onBlur,
   }
 }
 
@@ -156,11 +191,11 @@ function useAddressField(onResolve: (p: Point) => void, externalPoint: Point | n
  * screen. */
 function AddressField({
   label,
-  placeholder,
+  example,
   field,
 }: {
   label: string
-  placeholder: string
+  example: string
   field: ReturnType<typeof useAddressField>
 }) {
   // useId generates a unique, SSR-safe id so <label htmlFor> can point at
@@ -196,8 +231,12 @@ function AddressField({
           id={id}
           className={styles.addressInput}
           type="text"
+          /* Spoken name drops the underscore ("Start point", not "Start
+             underscore point") -- the terminal voice is visual chrome,
+             not pronunciation (VoiceOver pass, 2026-08-31). Same split
+             as the Shade_walker wordmark. */
+          aria-label={label.replace(/_/g, ' ')}
           value={field.query}
-          placeholder={placeholder}
           // Off, not "street-address": the browser's own autofill dropdown
           // would paint directly over our listbox, and the ARIA combobox
           // pattern expects native autocomplete disabled.
@@ -211,10 +250,22 @@ function AddressField({
           aria-activedescendant={open && activeIndex >= 0 ? `${id}-opt-${activeIndex}` : undefined}
           onChange={(e) => field.onChange(e.target.value)}
           onKeyDown={onKeyDown}
-          onBlur={field.closeSuggestions}
+          onBlur={field.onBlur}
         />
+        {/* A FAKE placeholder: a real one is announced in the value slot
+            before the label (skipping into the panel said "e.g. 250 Court
+            St" instead of "Start_point"), and the user wants the example
+            visible but entirely unspoken (VoiceOver pass, 2026-08-31).
+            aria-hidden + pointer-events:none makes it pure decoration;
+            rendered only while the field is empty, same as the real
+            thing. */}
+        {field.query === '' && (
+          <span className={styles.fakePlaceholder} aria-hidden="true">
+            e.g. {example}
+          </span>
+        )}
         {open && (
-          <ul className={styles.suggestList} role="listbox" id={listboxId} aria-label={`${label} suggestions`}>
+          <ul className={styles.suggestList} role="listbox" id={listboxId} aria-label={`${label.replace(/_/g, ' ')} suggestions`}>
             {suggestions.map((suggestion, i) => (
               <li
                 key={`${suggestion.label}-${i}`}
@@ -240,7 +291,13 @@ function AddressField({
           the Find_route button's own "FINDING…" label already covers that,
           and showing it here too just flickered on and off per field. */}
       <p className={styles.addressStatus} role="status">
-        {field.status === 'notfound' && '// NOT_FOUND: try adding a borough'}
+        {field.status === 'notfound' && (
+          <>
+            <span aria-hidden="true">// NOT_FOUND:</span>
+            <span className={styles.visuallyHidden}>NOT FOUND:</span>
+            {' '}try adding a borough
+          </>
+        )}
       </p>
     </div>
   )
@@ -255,13 +312,13 @@ interface ControlsProps {
    * this component's own state. */
   start: Point | null
   end: Point | null
-  onSetStart: (p: Point) => void
-  onSetEnd: (p: Point) => void
+  onSetStart: (p: Point | null) => void
+  onSetEnd: (p: Point | null) => void
   onClear: () => void
   position: GeoPosition | null
   locationEnabled: boolean
   onEnableLocation: () => void
-  hasRoute: boolean
+  canClear: boolean
   /** The currently selected Shade_priority preset's route. */
   selected: RouteFeature | null
   /** The NONE (tree_weight=0) route -- the baseline `selected` is compared
@@ -286,7 +343,7 @@ export function Controls({
   position,
   locationEnabled,
   onEnableLocation,
-  hasRoute,
+  canClear,
   selected,
   baseline,
   error,
@@ -297,6 +354,10 @@ export function Controls({
   const groupName = useId()
   const selectedPreset = TREE_PRESETS.find((preset) => preset.value === treeWeight)
   const comparison = selected && baseline ? compareRoutes(selected, baseline) : null
+  // The low-shade warning lives HERE, not with the route stats, since
+  // 2026-08-31 (user call): Shade_priority is where the remedy is -- turn
+  // the dial up and watch whether the warning goes away.
+  const lowShade = selected !== null && selected.properties.shade_fraction < LOW_SHADE_FRACTION
 
   const start = useAddressField(onSetStart, startPoint)
   const end = useAddressField(onSetEnd, endPoint)
@@ -308,11 +369,17 @@ export function Controls({
           it (nothing to divide from but the panel's own top edge), unlike
           the two below. */}
       <div className={styles.addressGroup}>
-        {error && (
-          <p className={styles.error} role="alert">
-            {error}
-          </p>
-        )}
+        {/* The alert REGION stays mounted; only its text is conditional.
+            role="alert" (assertive) only announces content appearing in a
+            live region that already existed -- mounting the whole <p> on
+            error, as this used to, meant VoiceOver never caught it,
+            worst on a URL-loaded out-of-coverage route (the region was
+            inserted already-populated, so there was no observed change
+            to announce). Same fix + reasoning as RouteStats' wrapper.
+            The empty <p> collapses to zero height, so no dead space. */}
+        <p className={error ? styles.error : styles.errorEmpty} role="alert">
+          {error}
+        </p>
         {/* One form for both fields, so Enter in either one — or the button —
             resolves whichever isn't already resolved. Each field's own
             resolve() no-ops on an empty or already-resolved query, so this
@@ -325,9 +392,14 @@ export function Controls({
             end.resolve()
           }}
         >
-          <AddressField label="Start_point" placeholder="e.g. 250 Court St" field={start} />
-          <AddressField label="End_point" placeholder="e.g. 3rd St & 3rd Ave" field={end} />
-          <button type="submit" className={styles.primaryButton} disabled={isSearching}>
+          <AddressField label="Start_point" example="250 Court St" field={start} />
+          <AddressField label="End_point" example="3rd St & 3rd Ave" field={end} />
+          <button
+            type="submit"
+            className={styles.primaryButton}
+            disabled={isSearching}
+            aria-label={isSearching ? 'FINDING' : 'FIND ROUTE'}
+          >
             {isSearching ? 'FINDING…' : 'FIND_ROUTE'}
           </button>
         </form>
@@ -340,11 +412,11 @@ export function Controls({
             "use it" once a fix arrives. */}
         <div className={styles.buttonRow}>
           {!locationEnabled ? (
-            <button type="button" className={styles.secondaryButton} onClick={onEnableLocation}>
+            <button type="button" className={styles.secondaryButton} onClick={onEnableLocation} aria-label="USE LOCATION">
               USE_LOCATION
             </button>
           ) : position ? (
-            <button type="button" className={styles.secondaryButton} onClick={() => onSetStart(position)}>
+            <button type="button" className={styles.secondaryButton} onClick={() => onSetStart(position)} aria-label="SET START POINT">
               SET_START_POINT
             </button>
           ) : (
@@ -353,8 +425,8 @@ export function Controls({
             </p>
           )}
 
-          {hasRoute && (
-            <button type="button" className={styles.secondaryButton} onClick={onClear}>
+          {canClear && (
+            <button type="button" className={styles.secondaryButton} onClick={onClear} aria-label="CLEAR ROUTE">
               CLEAR_ROUTE
             </button>
           )}
@@ -373,19 +445,26 @@ export function Controls({
             a slightly odd screen-reader pronunciation). No ARIA needed — the
             built-in semantics do it. */}
         <fieldset className={styles.presetGroup}>
-          <legend>Shade_priority</legend>
+          <legend>
+            <span aria-hidden="true">Shade_priority</span>
+            <span className={styles.visuallyHidden}>Shade priority</span>
+          </legend>
           <div className={styles.segmented}>
             {TREE_PRESETS.map((preset) => (
               <label key={preset.value} className={styles.segment}>
                 <input
                   type="radio"
                   name={groupName}
+                  aria-label={preset.spoken}
                   value={preset.value}
                   checked={treeWeight === preset.value}
                   onChange={() => onTreeWeightChange(preset.value)}
                   className={styles.segmentInput}
                 />
-                <span className={styles.segmentText}>{preset.label}</span>
+                {/* aria-hidden: the radio's aria-label ("Medium") is the one
+                    spoken name -- without this, VoiceOver ALSO read the
+                    visible caps text, spelling L-O-W and doubling MED. */}
+                <span className={styles.segmentText} aria-hidden="true">{preset.label}</span>
               </label>
             ))}
           </div>
@@ -404,19 +483,56 @@ export function Controls({
               read together as one unit, same as they're meant to be read
               together visually. */}
           <div className={styles.comparisonHint} aria-live="polite" aria-atomic="true">
+            {/* Spoken-only prefix: aria-atomic re-reads this whole box on
+                every route arrival and preset change, and without a name
+                the stream arrived as context-free "mode medium..."
+                (VoiceOver pass, 2026-08-31). Every announcement now opens
+                with which section is talking. */}
+            <span className={styles.visuallyHidden}>Shade priority: </span>
             <p className={styles.modeLine}>
-              <span className={styles.promptSymbol} aria-hidden="true">&gt;</span> mode: {selectedPreset?.label.toLowerCase()} //{' '}
-              {selectedPreset?.hint}
+              <span className={styles.promptSymbol} aria-hidden="true">&gt;</span> mode:{' '}
+              <span aria-hidden="true">{selectedPreset?.label.toLowerCase()}</span>
+              <span className={styles.visuallyHidden}>{selectedPreset?.spoken.toLowerCase()}</span>{' '}
+              <span aria-hidden="true">//</span> {selectedPreset?.hint}
             </p>
             {comparison && (
               <p className={styles.comparisonLine}>
-                <span className={styles.promptSymbol} aria-hidden="true">&gt;</span> +
-                <span className={styles.numberHighlight}>{comparison.extraShadePct}</span>% shade · +
-                <span className={styles.numberHighlight}>{comparison.extraMinutes}</span>{' '}
-                min · +{highlightNumber(formatDistance(comparison.extraLengthM))}
+                <span aria-hidden="true">
+                  <span className={styles.promptSymbol}>&gt;</span> +
+                  <span className={styles.numberHighlight}>{comparison.extraShadePct}</span>% shade · +
+                  <span className={styles.numberHighlight}>{comparison.extraMinutes}</span>{' '}
+                  min · +{highlightNumber(formatDistance(comparison.extraLengthM))}
+                </span>
+                {/* Spoken twin: full words, no glyph soup (VoiceOver pass). */}
+                {/* One string, not adjacent nodes: a pluralizing "s" as its
+                    own text node gets read as the letter S ("minute, S") --
+                    user report 2026-08-31. */}
+                <span className={styles.visuallyHidden}>
+                  {`plus ${comparison.extraShadePct} percent shade, plus ` +
+                    `${comparison.extraMinutes} ${comparison.extraMinutes === 1 ? 'minute' : 'minutes'}, plus ` +
+                    spokenDistance(comparison.extraLengthM)}
+                </span>
               </p>
             )}
           </div>
+          {/* Always mounted so its aria-live can announce the first
+              appearance (same reasoning as RouteStats' wrapper); the
+              class swap keeps the empty slot at zero height. */}
+          <p
+            className={lowShade ? styles.lowShadeNote : styles.lowShadeEmpty}
+            aria-live="polite"
+          >
+            {lowShade && selected && (
+              <>
+                <strong>
+                  <span aria-hidden="true">// LOW_SHADE:</span>
+                  <span className={styles.visuallyHidden}>LOW SHADE:</span>
+                </strong>{' '}
+                {Math.round(displayShade(selected.properties.shade_fraction) * 100)}% shaded over{' '}
+                {formatDistance(selected.properties.length_m)} — expect mostly direct sun
+              </>
+            )}
+          </p>
         </fieldset>
       </div>
     </>

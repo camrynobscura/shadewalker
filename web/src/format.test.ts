@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCoords, formatDistance, formatDistanceParts, formatEtaParts } from './format'
+import { formatCoords, formatDistance, formatDistanceParts, formatEtaParts, spokenDistance, spokenEta } from './format'
 
 describe('formatDistance', () => {
   it('rounds a short distance to whole feet', () => {
@@ -84,5 +84,20 @@ describe('formatCoords', () => {
 
   it('rounds rather than truncates past the 4th decimal place', () => {
     expect(formatCoords({ lat: 40.67951, lon: -73.99615 })).toBe('40.6795, -73.9962')
+  })
+})
+
+describe('spoken twins', () => {
+  it('speaks hours and minutes as full plural words', () => {
+    expect(spokenEta(129.4)).toBe('2 hours 9 minutes')
+  })
+
+  it('keeps the singular for exactly one hour', () => {
+    expect(spokenEta(60)).toBe('1 hour')
+  })
+
+  it('speaks miles and feet as words', () => {
+    expect(spokenDistance(10783)).toBe('6.7 miles')
+    expect(spokenDistance(30)).toBe('98 feet')
   })
 })

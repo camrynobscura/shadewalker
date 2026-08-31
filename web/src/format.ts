@@ -48,3 +48,22 @@ export function formatEtaParts(minutes: number): Array<{ value: string; unit: st
   if (rest > 0) parts.push({ value: `${rest}`, unit: 'min' })
   return parts
 }
+
+/** Spoken twin of the eta stat box: the visible "2 hr 9 min" is compact
+ * for the eye, but read aloud "hr"/"mi" are cryptic (VoiceOver pass,
+ * 2026-08-31) -- RouteStats renders the visual aria-hidden and gives the
+ * screen reader this instead. */
+export function spokenEta(minutes: number): string {
+  return formatEtaParts(minutes)
+    .map((part) => {
+      const word = part.unit === 'hr' ? 'hour' : 'minute'
+      return `${part.value} ${word}${part.value === '1' ? '' : 's'}`
+    })
+    .join(' ')
+}
+
+/** Spoken twin of the distance stat box: "mi"/"ft" become real words. */
+export function spokenDistance(meters: number): string {
+  const { value, unit } = formatDistanceParts(meters)
+  return `${value} ${unit === 'mi' ? 'miles' : 'feet'}`
+}

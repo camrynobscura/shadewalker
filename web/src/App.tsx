@@ -156,7 +156,7 @@ export default function App() {
             position={position}
             locationEnabled={locationEnabled}
             onEnableLocation={() => setLocationEnabled(true)}
-            hasRoute={route !== null}
+            canClear={start !== null || end !== null}
             error={error}
             selected={selected}
             baseline={baseline}

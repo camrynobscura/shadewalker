@@ -17,15 +17,20 @@ import { displayShade } from './shade'
  * `as const` freezes the array into a readonly tuple of literal types —
  * TypeScript then knows each value is exactly 0 | 5 | 15 | 40, not just
  * `number`, and will reject a typo like TREE_PRESETS[0].value = 6. */
+/* `spoken` is what assistive tech announces; `label` is what the segment
+ * shows. They differ only for MED (VoiceOver pass 2026-08-31): on screen,
+ * NONE/LOW/MED/MAX reads as an obvious scale; aloud, with no visual
+ * context, "med" is cryptic -- so the radio carries aria-label "Medium".
+ * Compliant with label-in-name: "med" is the start of "medium". */
 export const TREE_PRESETS = [
-  { value: 0, label: 'NONE', hint: 'fastest route, no detours for shade' },
-  { value: 5, label: 'LOW', hint: 'shadier only when it’s nearly free' },
-  { value: 15, label: 'MED', hint: 'short detours for shadier blocks' },
+  { value: 0, label: 'NONE', spoken: 'None', hint: 'fastest route, no detours for shade' },
+  { value: 5, label: 'LOW', spoken: 'Low', hint: 'shadier only when it’s nearly free' },
+  { value: 15, label: 'MED', spoken: 'Medium', hint: 'short detours for shadier blocks' },
   // "longest detours for the most shade": completes NONE→LOW→MED's
   // detour-size gradient, and — unlike the older "shadiest route, even if
   // it takes longer" — keeps the whole "> mode:" line under the ~52
   // monospace cells that fit one line in the panel (user call 2026-08-28).
-  { value: 40, label: 'MAX', hint: 'longest detours for the most shade' },
+  { value: 40, label: 'MAX', spoken: 'Maximum', hint: 'longest detours for the most shade' },
 ] as const
 
 // Looked up by label rather than array position — a moderate middle

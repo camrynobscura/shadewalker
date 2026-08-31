@@ -27,13 +27,48 @@
    pattern rather than inventing a new one, and a left accent (not a full
    border box) avoids looking like an interactive control the way
    .segmented's boxed style would. */
-.error {
+/* Alert card: the routing error and the per-route low-shade warning share
+   ONE treatment (user call 2026-08-31 -- both are "pay attention"
+   messages). Raised white panel + hairline + a 3px magenta attention
+   rail + full-ink text. This is the app's long-standing "notice this"
+   pattern, and it's deliberately the loudest of the panel's three
+   message dialects: green wash = readout, dashed = ambient caution,
+   THIS = alert. Red is now reserved for genuine catastrophe (the
+   ErrorBoundary crash screen) -- an out-of-coverage point is a routine
+   rejection, not a failure. The two rules below are duplicated, not
+   shared, matching the .sectionDivider precedent -- keep them in sync;
+   only their margins differ (see each). */
+/* The empty alert slot: no box, no gap footprint until an error exists
+   (the region stays mounted for the live-region announcement -- see the
+   comment in Controls.tsx). */
+.errorEmpty {
   margin: 0;
-  padding: var(--space-md);
-  background: rgba(179, 38, 30, 0.1); /* --danger wash */
-  border-left: 3px solid var(--danger);
-  font-size: var(--font-size-sm); /* matches .addressStatus */
-  color: var(--danger);
+}
+
+.error {
+  /* A flex child of .addressGroup, whose gap handles the spacing. */
+  margin: 0;
+  padding: var(--space-sm) var(--control-pad-x);
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--magenta);
+  font-size: var(--font-size-sm);
+  color: var(--text);
+}
+
+/* Same visually-hidden technique as the MapView/RouteStats copies (CSS
+   Modules are per-file). Carries the spoken twins of the terminal-voice
+   strings: underscores and glyphs are visual chrome, not pronunciation. */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .addressField {
@@ -73,6 +108,19 @@
    dropdown under the wrong element. */
 .suggestWrap {
   position: relative;
+}
+
+/* The fake placeholder (see AddressField): sits where a real one would,
+   in the same muted grey, after the input in DOM order so it paints over
+   the input's opaque background. Click-through, unspoken. */
+.fakePlaceholder {
+  position: absolute;
+  left: var(--control-pad-x);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: var(--font-size-md);
+  pointer-events: none;
 }
 
 /* The autocomplete listbox. Floats over whatever sits below the field
@@ -272,6 +320,27 @@
 .numberHighlight {
   color: var(--green-dim);
   font-weight: 600;
+}
+
+/* Notice tier (user call 2026-08-31): the panel's boxes collapsed to two
+   visual dialects -- green wash = readout, dashed border = notice. Same
+   dress as RouteStats' .disclaimer (duplicated, not shared: CSS Modules
+   are per-file; keep the two in sync). */
+.lowShadeNote {
+  /* Flows after .comparisonHint (not a flex gap parent), so its own top
+     margin. Otherwise identical to .error above -- keep in sync. */
+  margin: var(--space-md) 0 0;
+  padding: var(--space-sm) var(--control-pad-x);
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--magenta);
+  font-size: var(--font-size-sm);
+  color: var(--text);
+}
+
+/* The empty live slot: zero footprint until a warning exists. */
+.lowShadeEmpty {
+  margin: 0;
 }
 
 /* The one button that actually produces a route — solid fill, same

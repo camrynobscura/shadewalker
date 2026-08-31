@@ -15,7 +15,7 @@ const PRESETS = [0, 5, 15, 40]
 async function readShadePercent(page: Page): Promise<number> {
   const label = page.getByText('shaded', { exact: true })
   await expect(label).toBeVisible()
-  const text = await label.locator('xpath=following-sibling::dd[1]').innerText()
+  const text = await label.locator('xpath=following-sibling::dd[1]/span[@aria-hidden="true"]').innerText()
   const value = Number(text.replace('%', '').trim())
   expect(Number.isFinite(value)).toBe(true)
   return value
