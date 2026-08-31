@@ -1,0 +1,88 @@
+# Caddyfile — Shade Walker (shadewalker.nyc)
+#
+# STANDARD Caddy build, no plugins. Rate limiting is app-level (slowapi),
+# decided 2026-08-31, so there is NO xcaddy/custom-binary step — install
+# Caddy from its official apt repo and it keeps updating cleanly.
+#
+# Caddy is the TLS terminator + reverse proxy in front of the uvicorn
+# process (systemd unit shadewalker.service, bound to 127.0.0.1:8000).
+# TLS is automatic (Let's Encrypt) the moment DNS for shadewalker.nyc
+# points at this box.
+
+# www -> apex, so both hostnames collapse to one canonical URL.
+www.shadewalker.nyc {
+	redir https://shadewalker.nyc{uri} permanent
+}
+
+shadewalker.nyc {
+	# The app. Caddy is the real edge, so {remote_host} is the visitor's
+	# actual IP — pass it as X-Real-IP for slowapi's per-client limits.
+	# header_up overwrites any client-supplied X-Real-IP, so a client
+	# can't spoof the header to dodge (or frame someone else for) a limit.
+	reverse_proxy 127.0.0.1:8000 {
+		header_up X-Real-IP {remote_host}
+	}
+
+	# Compress text responses (route JSON, HTML, JS, CSS).
+	encode zstd gzip
+
+	header {
+		# Force HTTPS for a year, subdomains included.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+		# CSP — exactly the origins the frontend uses (verified 2026-08-31
+		# against the built app):
+		#   default : self only
+		#   img     : self + data: URIs + CARTO basemap tiles
+		#   script  : self + Cloudflare Web Analytics beacon
+		#   style   : self + 'unsafe-inline' — Leaflet writes inline styles
+		#             onto tile/pane elements; without it the map breaks
+		#   connect : self (/route, /geocode) + Cloudflare beacon endpoint
+		# No external fonts (all system stacks), no frames, no plugins.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https://*.basemaps.cartocdn.com; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://cloudflareinsights.com; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
+
+		# Defense in depth — the app sets these too, but so does the edge.
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+
+		# Don't advertise the server software/version.
+		-Server
+	}
+
+	# Content-hashed bundles never change under a given name -> cache hard.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	# The HTML shell is tiny and must reflect a redeploy immediately.
+	@html path / /index.html /about.html
+	header @html Cache-Control "no-cache"
+
+	# Access log with the sensitive query params stripped: /route carries
+	# coordinates and /geocode carries searched text, neither of which may
+	# ever land in a log file. These keys ARE the Query() params in
+	# server/app.py — keep this list in sync if an endpoint gains one.
+	# (uvicorn's own access log is already off via --no-access-log; this is
+	# the edge log, kept for ops with the location data scrubbed out.)
+	log {
+		output file /var/log/caddy/shadewalker.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+		format filter {
+			fields {
+				request>uri query {
+					delete from_lat
+					delete from_lon
+					delete to_lat
+					delete to_lon
+					delete tree_weights
+					delete month
+					delete q
+					delete lat
+					delete lon
+					delete limit
+				}
+			}
+		}
+	}
+}

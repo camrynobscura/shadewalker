@@ -1,0 +1,51 @@
+# systemd unit — Shade Walker routing/app server (uvicorn).
+#
+# Install:
+#   sudo cp deploy/shadewalker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now shadewalker
+#
+# Runs uvicorn straight from the slim venv that `uv sync --no-default-groups`
+# builds — no `uv` needed at runtime. ONE worker on purpose: routes
+# serialize through igraph/the GIL anyway (measured 2026-08-30), and each
+# extra worker costs ~0.7GB RAM; a worker bump is a deliberate RAM
+# decision, not a default.
+
+[Unit]
+Description=Shade Walker routing + app server (uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=shadewalker
+Group=shadewalker
+WorkingDirectory=/opt/shadewalker
+
+# --no-access-log: uvicorn's access log ties a visitor's IP to their
+#   searched text (/geocode?q=) and route coordinates — privacy, decided
+#   2026-08-30. App-level logs (startup, warnings) still go to journald.
+# --no-server-header: don't advertise the stack.
+# Bind to localhost only — Caddy is the sole public entry point.
+ExecStart=/opt/shadewalker/.venv/bin/uvicorn server.app:app \
+    --host 127.0.0.1 --port 8000 \
+    --no-access-log --no-server-header
+
+Restart=always
+RestartSec=3
+
+# When you self-host Photon later, point the proxy at it here (default is
+# the public komoot instance) — nothing else moves:
+# Environment=SHADEWALKER_PHOTON_URL=http://127.0.0.1:2322
+
+# Hardening. The service only needs to read its own tree and to write ONE
+# file: the coverage cache at data/export/.coverage_cache.json
+# (graph_store.py:559). Everything else is read-only.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/shadewalker/data/export
+
+[Install]
+WantedBy=multi-user.target
