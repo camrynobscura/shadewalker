@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchCoverage, type CoverageFeature, type Point } from './api'
-import { Controls, DEFAULT_TREE_WEIGHT, snapToPreset } from './components/Controls'
+import { Controls } from './components/Controls'
+import { DEFAULT_TREE_WEIGHT, snapToPreset } from './presets'
 import { MapView } from './components/MapView'
 import { RouteStats } from './components/RouteStats'
 import { useGeolocation } from './hooks/useGeolocation'
