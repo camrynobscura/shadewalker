@@ -8,7 +8,7 @@
   position: absolute;
   left: -9999px;
   z-index: 2000;
-  padding: 10px 16px;
+  padding: var(--control-pad-x) var(--space-lg);
   background: var(--panel-raised);
   color: var(--text);
   border: 1px solid var(--border);
@@ -65,11 +65,11 @@
 }
 
 .tagline {
-  /* Its own line at every width: a masthead-sized wordmark can't share a
-     line with 12px italic text — and block keeps the whole "> find..."
-     phrase (greater-than sign included) wrapping as one unit. */
-  display: block;
-  margin-top: var(--space-md);
+  /* A <p> beside the h1 since 2026-08-30, not a span inside it -- the
+     accessible heading is just the wordmark now, instead of the whole
+     "Shade_walker > find the shadiest..." sentence a screen reader's
+     heading navigation used to read out. Same rendered layout. */
+  margin: var(--space-md) 0 0;
   font-weight: 400;
   font-style: italic;
   font-size: var(--font-size-sm);

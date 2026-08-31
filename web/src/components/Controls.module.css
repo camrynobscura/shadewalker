@@ -55,7 +55,7 @@
 .addressInput {
   width: 100%;
   min-height: 44px;
-  padding: var(--space-sm) 10px;
+  padding: var(--space-sm) var(--control-pad-x);
   background: var(--panel-raised);
   color: var(--text);
   border: 1px solid var(--border);
@@ -104,7 +104,7 @@
   display: flex;
   align-items: center;
   min-height: 44px;
-  padding: var(--space-sm) 10px;
+  padding: var(--space-sm) var(--control-pad-x);
   font-size: var(--font-size-sm);
   color: var(--text);
   cursor: pointer;
@@ -156,8 +156,11 @@
    its <legend> straddling that border line instead of sitting cleanly
    below it, which put this line right through "Shade_priority" instead of
    above it. Identical rule to RouteStats.module.css's .sectionDivider
-   (duplicated, not shared, since CSS Modules are per-file -- keep both in
-   sync if this changes). */
+   (duplicated, not shared, since CSS Modules are per-file). The two
+   diverge on margins on purpose: this one separates sections mid-panel
+   and needs its own vertical air; RouteStats' wraps the always-mounted
+   aria-live region and takes only the padding, its spacing hand-tuned
+   there. */
 .sectionDivider {
   margin-top: var(--space-xl);
   margin-bottom: var(--space-xl);
@@ -239,7 +242,7 @@
 .comparisonHint {
   margin: var(--space-md) 0 0;
   padding: 6px var(--space-sm);
-  background: rgba(0, 168, 107, 0.08);
+  background: var(--green-wash);
   border-left: 3px solid var(--green);
 }
 

@@ -97,8 +97,10 @@ export default function App() {
           Shade_walker
           {/* Decorative terminal cursor — never announced. */}
           <span className={styles.cursor} aria-hidden="true" />
-          <span className={styles.tagline}>&#62; find the shadiest walking route in NYC</span>
         </h1>
+        {/* Sibling of the h1, not inside it (2026-08-30): the accessible
+            heading is just the wordmark, not this whole sentence. */}
+        <p className={styles.tagline}>&#62; find the shadiest walking route in NYC</p>
         {/* The one piece of visible instruction guaranteed to be on screen
             before any scrolling, on every viewport size -- it's rendered
             before the map in DOM order, so it survives the mobile layout's

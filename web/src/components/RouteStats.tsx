@@ -266,11 +266,15 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
       <div className={styles.section}>
         {/* Label above value (user call 2026-08-28), eta leading — the
             question a walker asks first. DOM order matches visual order,
-            so screen readers also announce label-then-value. */}
-        <div className={styles.statRow}>
+            so screen readers also announce label-then-value. A real
+            <dl> since 2026-08-30: these are key-value pairs, and dt/dd
+            gives AT the term-to-value association the old spans only
+            implied by proximity (each pair wrapped in a div, which HTML
+            allows inside <dl> exactly for this styling shape). */}
+        <dl className={styles.statRow}>
           <div className={styles.stat}>
-            <span className={styles.statLabel}>eta</span>
-            <span className={styles.statVal}>
+            <dt className={styles.statLabel}>eta</dt>
+            <dd className={styles.statVal}>
               {formatEtaParts(stats.minutes).map((part, i) => (
                 <Fragment key={part.unit}>
                   {i > 0 ? ' ' : null}
@@ -278,28 +282,28 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
                   <small> {part.unit}</small>
                 </Fragment>
               ))}
-            </span>
+            </dd>
           </div>
           <div className={styles.stat}>
             {/* Unit in the same lighter <small> the eta box's "min" gets --
                 the value is the datum, the unit is context. */}
-            <span className={styles.statLabel}>dist</span>
-            <span className={styles.statVal}>
+            <dt className={styles.statLabel}>dist</dt>
+            <dd className={styles.statVal}>
               {dist.value}
               <small> {dist.unit}</small>
-            </span>
+            </dd>
           </div>
           <div className={styles.stat}>
-            <span className={styles.statLabel}>shaded</span>
-            <span className={styles.statVal}>{shownShadePct}%</span>
+            <dt className={styles.statLabel}>shaded</dt>
+            <dd className={styles.statVal}>{shownShadePct}%</dd>
           </div>
           {stats.park_canopy_share < CANOPY_SHARE_HIDES_TREE_COUNT && (
             <div className={styles.stat}>
-              <span className={styles.statLabel}>trees</span>
-              <span className={styles.statVal}>{stats.tree_count}</span>
+              <dt className={styles.statLabel}>trees</dt>
+              <dd className={styles.statVal}>{stats.tree_count}</dd>
             </div>
           )}
-        </div>
+        </dl>
 
         {isLowShade && (
           <p className={styles.sparseNote}>

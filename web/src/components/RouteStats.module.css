@@ -35,9 +35,10 @@
    jump in the panel: from settings you choose (Controls, above) to
    results the router gives back (this). */
 .sectionDivider {
-  /* margin-top: var(--space-xl); */
+  /* Deliberately padding-only, unlike Controls' margin-carrying twin --
+     this wraps the always-mounted aria-live region, whose spacing when
+     empty must be zero. */
   padding-top: var(--space-xl);
-  /* padding-bottom: var(--space-xl); */
   border-top: 1px solid var(--line);
 }
 
@@ -56,17 +57,18 @@
      share widens its box instead of clipping, since the value below
      never wraps. */
   flex: 1;
-  padding: var(--space-sm) 10px;
+  padding: var(--space-sm) var(--control-pad-x);
   /* A soft green wash so these read as data readouts, distinct from the
      panel background — a translucent tint over --green, not the solid
      --green-dim fill the actual buttons use, so it doesn't look clickable. */
-  background: rgba(0, 168, 107, 0.08);
+  background: var(--green-wash);
   border: 1px solid var(--line);
   line-height: 1.25;
 }
 
 .statVal {
   display: block;
+  margin: 0; /* it's a <dd> now -- zero the browser's inline-start indent */
   /* The one deliberate break from the app's all-mono type (user call
      2026-08-28): stat values are instrument READOUTS, not terminal
      voice. In a monospace, "9.6" gives the decimal point a full
@@ -100,7 +102,10 @@
   /* Sits ABOVE the value since 2026-08-28 (was below) — margin on the
      bottom edge accordingly. */
   margin-bottom: 2px;
-  font-size: 0.65625rem; /* 10.5px */
+  font-size: var(--label-font-size);
+  /* Tighter tracking than the other label sites' 0.1em, on purpose:
+     these sit directly over large numerals and the wider spacing read
+     detached from them. */
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
@@ -163,7 +168,7 @@
 
 .sparseNote {
   font-size: var(--font-size-sm);
-  padding: 10px 12px;
+  padding: var(--control-pad-x) var(--space-md);
   margin: 0;
   background: var(--panel-raised);
   border: 1px solid var(--line);
@@ -193,6 +198,6 @@
   color: var(--text);
   font-size: var(--font-size-sm);
   margin: 0;
-  padding: var(--space-sm) 10px;
+  padding: var(--space-sm) var(--control-pad-x);
   border: 1px dashed var(--muted);
 }
