@@ -15,7 +15,12 @@ import type { CoverageFeature, Point, RouteFeature } from '../api'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import styles from './MapView.module.css'
 
-const PILOT_CENTER: [number, number] = [40.677, -73.993]
+// Where the map opens before any route exists: the south edge of Central
+// Park running down toward Times Square (user call 2026-08-31), so the
+// first thing you see is the park's green meeting the midtown grid -- the
+// shade contrast the whole app is about. (Was Carroll Gardens, the
+// original pilot area.)
+const INITIAL_CENTER: [number, number] = [40.764, -73.981]
 
 /* CARTO started watermarking keyless raster tile requests in 2026-08
    ("API KEY REQUIRED" repeated across the map). The key is a build-time
@@ -206,7 +211,9 @@ function RouteFraming({
 function Legend({ hasRoute, hasCoverage }: { hasRoute: boolean; hasCoverage: boolean }) {
   if (!hasRoute && !hasCoverage) return null
   return (
-    <ul className={styles.legend}>
+    // Named: an unnamed grouping announces as "list, 3 items" with no
+    // clue what the list IS (2026-08-30 tree-read finding).
+    <ul className={styles.legend} aria-label="Map legend">
       {hasRoute && (
         <>
           <li className={styles.legendRow}>
@@ -275,7 +282,7 @@ export function MapView({ start, end, selected, baseline, coverage, position, on
       <p className={styles.visuallyHidden}>
         Click to set your start and end points; you can also type addresses in the route controls.
       </p>
-      <MapContainer center={PILOT_CENTER} zoom={15} className={styles.map}>
+      <MapContainer center={INITIAL_CENTER} zoom={15} className={styles.map}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url={TILE_URL}

@@ -20,7 +20,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Shadewalker crashed:', error, info.componentStack)
+    console.error('Shade Walker crashed:', error, info.componentStack)
   }
 
   render() {
@@ -34,8 +34,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               normal <h1> in App.tsx, so without a real heading here a
               crashed page would have none at all -- the one screen where
               a screen reader user most needs something to orient on. */}
-          <h1 className={styles.heading}>// APP_CRASHED</h1>
-          <p className={styles.message}>Something went wrong and Shadewalker can't recover on its own.</p>
+          <h1 className={styles.heading}>
+            <span aria-hidden="true">// APP_CRASHED</span>
+            {/* Content split (not aria-label): this h1 sits in a role="alert"
+                live region, where a label and the text can both be read. */}
+            <span className={styles.visuallyHidden}>APP CRASHED</span>
+          </h1>
+          <p className={styles.message}>Something went wrong and Shade Walker can't recover on its own.</p>
           <button type="button" className={styles.reloadButton} onClick={() => window.location.reload()}>
             RELOAD
           </button>

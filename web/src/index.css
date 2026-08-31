@@ -41,6 +41,18 @@
                          read as more generous than the top-level section
                          spacing itself */
 
+  /* Horizontal inset for boxed controls and readouts (inputs, stat
+     boxes, the legend, notices). Sits between sm and md on purpose --
+     8px read cramped against a border, 12px read airy; before this
+     token existed the same 10px was hand-repeated in six rules across
+     four files, a step the scale had without naming it. */
+  --control-pad-x: 10px;
+
+  /* The translucent jade wash marking "data readout, not clickable"
+     (stat boxes, the mode/comparison hint). One token so it moves with
+     --green if that ever changes. */
+  --green-wash: rgba(0, 168, 107, 0.08);
+
   /* The small-caps-style "field/section label" look (Start_point,
      Shade_priority, My_route) is the same size everywhere it's used --
      one token instead of repeating the literal value in every

@@ -1,6 +1,15 @@
-"""The routing server. Run with:
+"""The routing server — and, when web/dist exists, the whole app. Run with:
 
     uv run uvicorn server.app:app --port 8000
+
+Production adds two flags (decided 2026-08-30, `abuse-and-privacy`):
+
+    uvicorn server.app:app --port 8000 --no-access-log --no-server-header
+
+--no-access-log because the access log ties each visitor's IP to their
+searched text (/geocode?q=...) and exact route coordinates — location
+data that must not accumulate in a file by default; --no-server-header
+to stop advertising the stack. App-level logs (startup, warnings) stay.
 
 FastAPI ≈ Express for Python: routes are functions, decorated with their
 path. Two extras Express doesn't give you for free: every query parameter
@@ -12,6 +21,8 @@ Endpoints:
     GET /health
     GET /coverage
     GET /route?from_lat=..&from_lon=..&to_lat=..&to_lon=..[&tree_weights=..&tree_weights=..][&month=..]
+    GET /geocode?q=..[&limit=..]
+    GET /geocode/reverse?lat=..&lon=..
 
 /route computes a route for EVERY requested tree_weight in one call, not
 just one — the frontend's Shade_priority control has four fixed presets
@@ -37,9 +48,11 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.staticfiles import StaticFiles
 
 from pipeline import config
+from server import geocode as geocoder
 from server.graph_store import GraphStore, clamp_shade_monotonic
 
 # Route graph_store's loggers somewhere visible under uvicorn, which
@@ -65,7 +78,30 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Shadewalker", lifespan=lifespan)
+# docs_url/redoc_url/openapi_url=None: the API has exactly one intended
+# client (our own frontend), so public interactive docs have no audience
+# -- and they'd advertise /geocode, a relay to a fair-use upstream, as a
+# documented try-it-out endpoint. Don't volunteer that (decided
+# 2026-08-30, same spirit as --no-server-header). We never use /docs in
+# dev either -- curl is the house tool; re-enabling is this one line.
+app = FastAPI(title="Shade Walker", lifespan=lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
+
+
+# Applies to every response, static files included (middleware wraps the
+# mount too). Only the two headers that belong to the APP no matter where
+# it runs: Referrer-Policy because route URLs carry coordinates in the
+# query string and must never ride an outbound Referer to a tile host or
+# any link target; nosniff because we serve user-adjacent JSON and static
+# files from one origin. The rest of the header story (CSP, HSTS) is
+# deliberately NOT here -- it depends on final asset origins and TLS, so
+# it lives in the Caddy layer at hosting time (PLAN.md, `hosting`).
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @app.get("/health")
@@ -102,6 +138,42 @@ def coverage() -> dict:
             "frame_feather_800": frame.get("feather_800", []),
         },
     }
+
+
+@app.get("/geocode")
+def geocode_search(
+    q: str = Query(min_length=1, max_length=config.MAX_GEOCODE_QUERY_CHARS),
+    limit: int = Query(default=1, ge=1, le=config.MAX_GEOCODE_RESULTS),
+) -> dict:
+    """Forward geocoding via the Photon proxy (server/geocode.py — the
+    whole why lives on that module's docstring). limit=1 is the address
+    field's submit-time resolve; higher limits are the autocomplete
+    dropdown's. NYC bbox and language are pinned server-side."""
+    q = " ".join(q.split())  # normalize whitespace so cache keys collapse
+    if not q:
+        raise HTTPException(status_code=422, detail="q must not be blank")
+    try:
+        results = geocoder.search(q, limit)
+    except geocoder.UpstreamError:
+        # Deliberately does NOT echo q back: query text is location data
+        # and this detail string is the only thing we'd ever emit it in.
+        raise HTTPException(status_code=502, detail="Geocoding is temporarily unavailable")
+    return {"results": list(results)}
+
+
+@app.get("/geocode/reverse")
+def geocode_reverse(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+) -> dict:
+    """Point → short address label, or null when nothing address-shaped
+    is nearby (the frontend then keeps showing coordinates). Rounded to
+    5dp (~1m) so a re-click of the same spot is a cache hit."""
+    try:
+        label = geocoder.reverse(round(lat, 5), round(lon, 5))
+    except geocoder.UpstreamError:
+        raise HTTPException(status_code=502, detail="Geocoding is temporarily unavailable")
+    return {"label": label}
 
 
 @app.get("/route")
@@ -237,3 +309,29 @@ def _describe(segments: list[dict]) -> str:
             word = step["action"].replace("_", " ")
             parts.append(f"turn {word} onto {step['name']}{side} for {dist}")
     return ", then ".join(parts) + "."
+
+
+def _mount_frontend(app: FastAPI) -> None:
+    """Serve the built frontend (web/dist) from the same process as the
+    API — the serving shape decided 2026-08-30: `uvicorn server.app:app`
+    IS the whole application, deployable anywhere that runs one process,
+    with the Caddy layer at hosting time purely additive in front.
+
+    Mounted at "/" AFTER every route above, so /route, /geocode etc.
+    always win and everything else falls through to static files
+    (html=True serves index.html for "/"). Conditional on the build
+    existing: dev serves the frontend from vite, CI and fresh checkouts
+    have no dist/ — in those the server is simply API-only, same as it
+    always was, and says so once at startup instead of failing.
+
+    StaticFiles sends ETag/Last-Modified; long-lived Cache-Control for
+    the content-hashed /assets bundle is Caddy-layer polish, not done
+    here."""
+    if config.WEB_DIST_DIR.is_dir():
+        app.mount("/", StaticFiles(directory=config.WEB_DIST_DIR, html=True), name="frontend")
+        logging.info("serving frontend from %s", config.WEB_DIST_DIR)
+    else:
+        logging.info("no frontend build at %s -- serving API only", config.WEB_DIST_DIR)
+
+
+_mount_frontend(app)

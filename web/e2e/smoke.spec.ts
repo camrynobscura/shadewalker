@@ -5,11 +5,17 @@ test('searching two addresses draws a route with stats and directions', async ({
   await mockGeocode(page)
   await page.goto('/')
 
-  await page.getByLabel('Start_point').fill('250 Court St')
-  await page.getByLabel('End_point').fill('3rd St & 3rd Ave')
-  await page.getByRole('button', { name: 'FIND_ROUTE' }).click()
+  // Escape after each fill: fill() counts as typing, so the autocomplete
+  // dropdown opens after its debounce and would float over the next
+  // control this test needs to reach (the listbox deliberately overlays
+  // rather than pushes). Dismissing it is exactly what a person does too.
+  await page.getByLabel('Start point').fill('250 Court St')
+  await page.keyboard.press('Escape')
+  await page.getByLabel('End point').fill('3rd St & 3rd Ave')
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'FIND ROUTE' }).click()
 
-  await expect(page.getByText('dist', { exact: true })).toBeVisible()
+  await expect(page.getByText('distance', { exact: true })).toBeVisible()
   await expect(page.getByText('trees', { exact: true })).toBeVisible()
   // The directions list is the only <ol> on the page (the map legend below
   // it is a <ul>), so the tag alone disambiguates without a test-only hook.
@@ -21,14 +27,31 @@ test('searching two addresses draws a route with stats and directions', async ({
   // It's compared by value against what resolve() already set, precisely
   // so this can't happen; assert the typed text actually survives, not
   // just that the route drew.
-  await expect(page.getByLabel('Start_point')).toHaveValue('250 Court St')
-  await expect(page.getByLabel('End_point')).toHaveValue('3rd St & 3rd Ave')
+  await expect(page.getByLabel('Start point')).toHaveValue('250 Court St')
+  await expect(page.getByLabel('End point')).toHaveValue('3rd St & 3rd Ave')
+})
+
+test('the share button copies the route URL to the clipboard', async ({ page }) => {
+  // Headless Chromium has no navigator.share, so the button falls to the
+  // clipboard path -- grant it and assert both the confirmation and the
+  // actual clipboard contents (the shareable URL App keeps in sync).
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await mockGeocode(page)
+  await page.goto(routeUrl(POINT_A, POINT_B))
+  await expect(page.getByText('distance', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Share route' }).click()
+  await expect(page.getByText('link copied', { exact: true })).toBeVisible()
+
+  const clip = await page.evaluate(() => navigator.clipboard.readText())
+  expect(clip).toContain('from=')
+  expect(clip).toContain('to=')
 })
 
 test('loading a shared route URL fills in the address fields via reverse geocoding', async ({ page }) => {
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
 
-  await expect(page.getByLabel('Start_point')).toHaveValue('250, Court St')
-  await expect(page.getByLabel('End_point')).toHaveValue('3rd Ave')
+  await expect(page.getByLabel('Start point')).toHaveValue('250 Court St')
+  await expect(page.getByLabel('End point')).toHaveValue('3rd Ave')
 })

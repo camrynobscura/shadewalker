@@ -1,6 +1,6 @@
-import { Fragment } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import type { RouteFeature, RouteStep } from '../api'
-import { formatDistance, formatDistanceParts, formatEtaParts } from '../format'
+import { formatDistance, formatDistanceParts, formatEtaParts, spokenDistance, spokenEta } from '../format'
 import { displayShade } from '../shade'
 import styles from './RouteStats.module.css'
 
@@ -126,54 +126,6 @@ function StepGlyph({ action }: { action: RouteStep['action'] }) {
   )
 }
 
-/** Below this shade_fraction, the route is objectively exposed — say so
- * instead of overselling (honest stats). Reads the same continuous stat
- * displayed as "% shaded" right above it, so the warning and the number
- * can never disagree (the old rule read tree_count/length instead, a
- * different signal entirely — a Central Park route could show "83%
- * shaded" AND this warning).
- *
- * RE-DERIVED 2026-08-26 for the coverage scale, 0.20 -> 0.15. The 0.20
- * bar was chosen against the display that saturated at density 0.02 —
- * which the leaf-cover exchange rate later revealed to be ~65% real
- * coverage, i.e. an inflated scale. When shade_fraction became measured
- * coverage (DENSITY_AT_FULL_COVERAGE, 2026-08-26) every displayed number
- * dropped ~12-15 points and 0.20 began firing on 29% of default-preset
- * April routes and 59% of April no-priority ones — worse than the 0.25
- * value the previous derivation explicitly REJECTED for firing on 26%
- * and 57%. Same failure, so same treatment: re-measure, don't re-tune.
- *
- * Measured on 188 routable random pairs (the routing harness's seeded
- * draw; the 2026-08-24 derivation found borough reweighting moved every
- * figure <1pt, so unweighted, with ±2-3pt sampling noise per cell).
- * Share of routes warned on the COVERAGE scale:
- *
- *             July MED  July NONE  April MED  April NONE
- *     0.125       1.1%       5.3%       9.6%      21.3%
- *     0.15        2.7%       8.5%      12.8%      35.1%   <- chosen
- *     0.20        4.8%      21.3%      29.3%      58.5%
- *
- * 0.15 reproduces the firing profile 0.20 was originally PICKED to
- * deliver (July MED ~5%/NONE ~15%, April MED ~15%/NONE ~38%) — the same
- * editorial judgment about when exposure deserves saying, re-expressed on
- * the truthful scale. And on this scale the words finally mean exactly
- * what they say: below 15% covered, 85% of the walk is in open sun. The
- * one high figure, 35%, is on April NONE ("fastest route, no detours for
- * shade") where the user has already said shade is not a priority.
- *
- * Seasonal variation is deliberate, not drift: April really is less shaded
- * than July (CANOPY_BY_MONTH), so the same bar firing more in spring is
- * the honest geography.
- *
- * The 2026-08-27 display curve (shade.ts) does NOT move this bar: the
- * comparison stays on the raw measured fraction, and because
- * displayShade is strictly monotone, exactly the same routes fire as
- * before -- the firing profile above is preserved without re-derivation.
- * Only the PRINTED numbers go through the curve (both of them, stat and
- * warning, so they can never disagree); at this bar the warning shows
- * itself at ~18% displayed rather than 15% measured, and its words stay
- * true either way. */
-const LOW_SHADE_FRACTION = 0.15
 
 /** When at least this share of the route's tree score is park-canopy AREA
  * credit (not countable trees), hide the "trees: N" stat -- the count
@@ -211,6 +163,17 @@ interface RouteStatsProps {
 }
 
 export function RouteStats({ route, description, loading }: RouteStatsProps) {
+  // Spoken-only, FIRST route only: the arrival announcement otherwise
+  // jumps from "FINDING" straight to results, right past the
+  // Shade_priority control -- the one control that matters most at that
+  // exact moment. A screen-reader user who never wanders upward would
+  // simply not know it exists (VoiceOver pass, 2026-08-31). Announced
+  // once; the flag flips after the first arrival and the tip unmounts
+  // (removals are never announced).
+  const [priorityHinted, setPriorityHinted] = useState(false)
+  useEffect(() => {
+    if (route && !loading) setPriorityHinted(true)
+  }, [route, loading])
   // This div must stay mounted unconditionally — aria-live only announces
   // *changes* to an already-present node, so swapping it in and out of the
   // DOM (rather than just its content) risks the first update going
@@ -231,14 +194,66 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
           not here -- see the comment there. This component only ever
           rendered it when a route successfully loaded anyway, so there's
           nothing route-specific left for this component to say about it. */}
+      {route && !loading && !priorityHinted && (
+        <p className={styles.visuallyHidden}>
+          Tip: the Shade priority setting above these results chooses how far
+          the route detours for extra shade.
+        </p>
+      )}
       {route && !loading && <StatsBody route={route} description={description} />}
+    </div>
+  )
+}
+
+/** Shares the current route. The whole request already lives in the URL
+ * (App.tsx mirrors start/end/weight to the query string), so "share" is
+ * just handing that URL along -- the native share sheet where the browser
+ * has one (mobile/Safari), a clipboard copy with confirmation everywhere
+ * else. */
+function ShareButton() {
+  const [copied, setCopied] = useState(false)
+
+  async function onShare() {
+    const url = window.location.href
+    if (navigator.share) {
+      // Native sheet: canceling is a normal outcome, not an error, and
+      // needs no clipboard fallback on a device that has share.
+      try {
+        await navigator.share({ title: 'Shade Walker route', url })
+      } catch {
+        /* dismissed */
+      }
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2500)
+    } catch {
+      /* clipboard blocked (insecure context, denied) -- no graceful action */
+    }
+  }
+
+  return (
+    <div className={styles.share}>
+      <button
+        type="button"
+        className={styles.shareButton}
+        onClick={onShare}
+        aria-label="Share route"
+      >
+        SHARE_ROUTE
+      </button>
+      {/* Polite live region so the copy is announced without stealing focus. */}
+      <span className={styles.shareStatus} role="status">
+        {copied ? 'link copied' : ''}
+      </span>
     </div>
   )
 }
 
 function StatsBody({ route, description }: { route: RouteFeature; description: string }) {
   const stats = route.properties
-  const isLowShade = stats.shade_fraction < LOW_SHADE_FRACTION
   // Computed once and used by BOTH the stat and the warning below --
   // the invariant that the warning can never disagree with the number
   // now includes agreeing about the display curve.
@@ -262,51 +277,82 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
           directions list) but too loose for a title hugging its own
           content, the same tight relationship .presetGroup legend's
           margin-bottom already gets. */}
-      <h2 className={styles.sectionTitle}>My_route</h2>
+      {/* Content split, not aria-label: inside the aria-live wrapper a
+          label AND the text can both be announced -- "My route" twice
+          (VoiceOver pass). aria-hidden text is excluded from both the
+          announcement and the heading's name; the sr twin serves both. */}
+      <h2 className={styles.sectionTitle}>
+        <span aria-hidden="true">My_route</span>
+        <span className={styles.visuallyHidden}>My route</span>
+      </h2>
       <div className={styles.section}>
         {/* Label above value (user call 2026-08-28), eta leading — the
             question a walker asks first. DOM order matches visual order,
-            so screen readers also announce label-then-value. */}
-        <div className={styles.statRow}>
+            so screen readers also announce label-then-value. A real
+            <dl> since 2026-08-30: these are key-value pairs, and dt/dd
+            gives AT the term-to-value association the old spans only
+            implied by proximity (each pair wrapped in a div, which HTML
+            allows inside <dl> exactly for this styling shape). */}
+        <dl className={styles.statRow}>
           <div className={styles.stat}>
-            <span className={styles.statLabel}>eta</span>
-            <span className={styles.statVal}>
-              {formatEtaParts(stats.minutes).map((part, i) => (
-                <Fragment key={part.unit}>
-                  {i > 0 ? ' ' : null}
-                  {part.value}
-                  <small> {part.unit}</small>
-                </Fragment>
-              ))}
-            </span>
+            {/* All four dt labels are aria-hidden: each dd speaks a
+                self-contained phrase ("74 percent shaded"), so the stats
+                announce as one clean stream instead of label-number
+                fragments (VoiceOver pass, 2026-08-31). */}
+            <dt className={styles.statLabel} aria-hidden="true">eta</dt>
+            {/* The compact visual ("2 hr 9 min") is aria-hidden; the
+                sr-only twin speaks full words. Same pattern on distance. */}
+            <dd className={styles.statVal}>
+              <span aria-hidden="true">
+                {formatEtaParts(stats.minutes).map((part, i) => (
+                  <Fragment key={part.unit}>
+                    {i > 0 ? ' ' : null}
+                    {part.value}
+                    <small> {part.unit}</small>
+                  </Fragment>
+                ))}
+              </span>
+              <span className={styles.visuallyHidden}>{spokenEta(stats.minutes)}</span>
+            </dd>
           </div>
           <div className={styles.stat}>
             {/* Unit in the same lighter <small> the eta box's "min" gets --
                 the value is the datum, the unit is context. */}
-            <span className={styles.statLabel}>dist</span>
-            <span className={styles.statVal}>
-              {dist.value}
-              <small> {dist.unit}</small>
-            </span>
+            <dt className={styles.statLabel} aria-hidden="true">distance</dt>
+            <dd className={styles.statVal}>
+              <span aria-hidden="true">
+                {dist.value}
+                <small> {dist.unit}</small>
+              </span>
+              <span className={styles.visuallyHidden}>{spokenDistance(stats.length_m)}</span>
+            </dd>
           </div>
           <div className={styles.stat}>
-            <span className={styles.statLabel}>shaded</span>
-            <span className={styles.statVal}>{shownShadePct}%</span>
+            <dt className={styles.statLabel} aria-hidden="true">shaded</dt>
+            <dd className={styles.statVal}>
+              {/* Same <small> treatment AND same leading space as eta's
+                  "min" and distance's "mi" -- the unit gap matches across
+                  all three boxes (user call, 2026-08-31). */}
+              <span aria-hidden="true">
+                {shownShadePct}
+                <small> %</small>
+              </span>
+              <span className={styles.visuallyHidden}>{shownShadePct} percent shaded</span>
+            </dd>
           </div>
           {stats.park_canopy_share < CANOPY_SHARE_HIDES_TREE_COUNT && (
             <div className={styles.stat}>
-              <span className={styles.statLabel}>trees</span>
-              <span className={styles.statVal}>{stats.tree_count}</span>
+              <dt className={styles.statLabel} aria-hidden="true">trees</dt>
+              <dd className={styles.statVal}>
+                <span aria-hidden="true">{stats.tree_count}</span>
+                <span className={styles.visuallyHidden}>
+                  {`${stats.tree_count} ${stats.tree_count === 1 ? 'tree' : 'trees'}`}
+                </span>
+              </dd>
             </div>
           )}
-        </div>
+        </dl>
 
-        {isLowShade && (
-          <p className={styles.sparseNote}>
-            // LOW_SHADE: {shownShadePct}% shaded over{' '}
-            {formatDistance(stats.length_m)} — expect mostly direct sun
-          </p>
-        )}
 
         {/* The one caution the product owes every route (user-approved
             wording, 2026-08-28), ABOVE the list so it reads before the
@@ -314,8 +360,13 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
             uncertainty about street names is disclosed structurally,
             per-step, as "unnamed path", not by a blanket note. */}
         <p className={styles.disclaimer}>
-          <strong>// CAUTION:</strong> walking routes may not always reflect
-          real-world conditions
+          <strong><span aria-hidden="true">// </span>CAUTION:</strong> walking routes may not always reflect
+          real-world conditions —{' '}
+          {/* The moment a user doubts the data is the moment they'll take
+              the explanation (user call 2026-08-30). */}
+          <a className={styles.cautionLink} href="/about.html#caution">
+            learn why
+          </a>
         </p>
 
         {stats.segments.length > 0 ? (
@@ -335,7 +386,13 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
               <li key={i}>
                 <StepGlyph action={step.action} />
                 <span>
-                  {stepText(step)} — {formatDistance(step.length_m)}
+                  <span aria-hidden="true">
+                    {stepText(step)} — {formatDistance(step.length_m)}
+                  </span>
+                  {/* Spoken twin: "524 feet", not "five two four F T". */}
+                  <span className={styles.visuallyHidden}>
+                    {stepText(step)}, {spokenDistance(step.length_m)}
+                  </span>
                 </span>
               </li>
             ))}
@@ -343,8 +400,13 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
         ) : (
           // Empty segments means start == end, so the server's generic
           // "already there" text is accurate.
-          <p className={styles.description}>&gt; {description}</p>
+          <p className={styles.description}>
+            <span aria-hidden="true">&gt; </span>
+            {description}
+          </p>
         )}
+
+        <ShareButton />
       </div>
     </>
   )

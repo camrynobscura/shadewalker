@@ -51,6 +51,14 @@ OSM_EXTRACT_PATH = ORACLE_DIR / "new-york-latest.osm.pbf"
 # over what a live server is serving.
 EXPORT_DIR = Path(os.environ.get("SHADEWALKER_EXPORT_DIR", DATA_DIR / "export"))
 
+# The built frontend (web/dist) the server hands out alongside the API --
+# the "serving shape" decided 2026-08-30: one self-sufficient process, a
+# Caddy layer added in front at hosting time (history/geocoding-photon.md
+# era of the deploy plan; see PLAN.md). Overridable for deploys where the
+# build lands elsewhere. When the directory doesn't exist (dev with vite,
+# CI, fresh checkout) the server simply serves API-only.
+WEB_DIST_DIR = Path(os.environ.get("SHADEWALKER_WEB_DIST", REPO_ROOT / "web" / "dist"))
+
 
 # ── Geography ─────────────────────────────────────────────────────────────────
 
@@ -298,6 +306,25 @@ MAX_TREE_WEIGHT = 40.0
 # worker for ~2.2 SECONDS. That strengthens the case for the cap rather
 # than weakening it; don't raise it without re-measuring the tail.
 MAX_TREE_WEIGHTS_PER_REQUEST = 8
+
+# --- Geocoding proxy (server/geocode.py) --------------------------------
+# All geocoding goes through our own server, never straight from the
+# visitor's browser to a third party (decided 2026-08-30,
+# history/geocoding-photon.md). Upstream is Photon: the public komoot
+# instance by default, a self-hosted NYC index by flipping this env var —
+# the frontend never knows which.
+PHOTON_URL = os.environ.get("SHADEWALKER_PHOTON_URL", "https://photon.komoot.io")
+PHOTON_TIMEOUT_S = 3.0
+# Free-text length cap — a geocoder query is a street address, not a
+# document; anything longer is garbage or abuse and gets a 422.
+MAX_GEOCODE_QUERY_CHARS = 200
+MAX_GEOCODE_RESULTS = 10
+# Per-process LRU (functools.lru_cache) on search + reverse. No TTL on
+# purpose: staleness is bounded by the monthly refresh restart
+# (server/app.py docstring), and repeat prefixes in one bounded city are
+# exactly what a cache eats — being polite to the fair-use upstream is
+# the point, not saving our own milliseconds.
+GEOCODE_CACHE_MAX_ENTRIES = 10_000
 
 # Edge kinds that are CONNECTORS — pavement you pass over, not a street
 # walked along with an identity. Matched as substrings of an edge's `kind`

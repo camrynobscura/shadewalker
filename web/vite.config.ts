@@ -13,6 +13,13 @@ const API_TARGET = process.env.SHADEWALKER_API_URL ?? 'http://localhost:8000'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      // Two entries: the app, and the static About page (plain HTML, no
+      // React) -- served by the same static mount in production.
+      input: { main: 'index.html', about: 'about.html' },
+    },
+  },
   server: {
     // Dev-only: forward API calls to the FastAPI server so the frontend can
     // fetch("/route?...") with no CORS setup and no hardcoded host. In
@@ -26,6 +33,7 @@ export default defineConfig({
       '/route': API_TARGET,
       '/health': API_TARGET,
       '/coverage': API_TARGET,
+      '/geocode': API_TARGET, // prefix match — also covers /geocode/reverse
     },
   },
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { RouteFeature } from '../api'
-import { compareRoutes, snapToPreset } from './Controls'
+import type { RouteFeature } from './api'
+import { compareRoutes, snapToPreset } from './presets'
 
 function feature(lengthM: number, minutes: number, treeCount: number, shadeFraction: number): RouteFeature {
   return {

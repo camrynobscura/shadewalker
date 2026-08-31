@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchRoute, RouteError, type Point, type RouteFeature, type RouteResponse } from '../api'
-import { TREE_PRESETS } from '../components/Controls'
+import { TREE_PRESETS } from '../presets'
 
 const TREE_WEIGHTS = TREE_PRESETS.map((preset) => preset.value)
 

@@ -1,0 +1,112 @@
+/* The About page's own styles, layered on the shared Greenhouse tokens.
+   A static second page (decided 2026-08-30): no router, no React — plain
+   semantic HTML that Vite builds as a second entry (vite.config.ts
+   rollupOptions.input), served by the same static mount as the app. */
+@import './index.css';
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-lg) var(--space-2xl);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.wordmark {
+  margin: 0;
+  font-size: var(--font-size-md);
+  letter-spacing: 0.06em;
+}
+
+.wordmark a {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.backlink {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.page {
+  /* Prose measure: readable line length, not app-panel width. */
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--space-2xl) var(--space-xl); /* bottom matches top (user call) */
+  /* The same proportional face the app's stat readouts use (see
+     web/CLAUDE.md's mono exception: readouts, not terminal voice).
+     Long-form prose is the least terminal-chrome thing in the product,
+     and paragraphs of monospace genuinely read worse (user call
+     2026-08-30). The header and back links above/below stay mono; the
+     reading stays sans. */
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.page h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 650;
+}
+
+.page section {
+  margin-top: var(--space-2xl);
+}
+
+/* Plain-language headings (user call 2026-08-30 -- the terminal
+   //snake_case voice stays in the app chrome; this page speaks like a
+   person). */
+.page h2 {
+  margin: 0 0 var(--space-md);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.page p,
+.page li {
+  margin: 0 0 var(--space-md);
+  font-size: 0.9375rem; /* 15px: sans reads smaller than mono at equal size */
+  line-height: 1.65;
+}
+
+.page ul {
+  margin: 0 0 var(--space-md);
+  padding-left: 1.2em;
+}
+
+.page li {
+  margin-bottom: var(--space-sm);
+}
+
+.page a {
+  color: var(--green-dim);
+  text-underline-offset: 2px;
+}
+
+.page a:hover {
+  color: var(--text);
+}
+
+.footer {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0 var(--space-xl) var(--space-2xl);
+  font-size: var(--font-size-sm);
+}
+
+.footer p {
+  margin: 0; /* the browser default here made the bottom gap outgrow the top's */
+}
+
+/* Last text ends flush so the page's own bottom padding is the whole
+   gap -- matching the header-to-title gap above exactly. */
+.page section:last-child p:last-child {
+  margin-bottom: 0;
+}
+
+.footer a,
+.backlink a {
+  color: var(--green-dim);
+}

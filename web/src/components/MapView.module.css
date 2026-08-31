@@ -60,7 +60,7 @@
   bottom: 10px;
   z-index: 1000; /* above Leaflet's map panes, same tier as .locateButton */
   margin: 0;
-  padding: var(--space-sm) 10px;
+  padding: var(--space-sm) var(--control-pad-x);
   list-style: none;
   display: flex;
   flex-direction: column;

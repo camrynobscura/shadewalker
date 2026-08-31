@@ -8,7 +8,7 @@
   position: absolute;
   left: -9999px;
   z-index: 2000;
-  padding: 10px 16px;
+  padding: var(--control-pad-x) var(--space-lg);
   background: var(--panel-raised);
   color: var(--text);
   border: 1px solid var(--border);
@@ -21,9 +21,53 @@
 }
 
 .header {
-  padding: var(--space-xl) var(--space-2xl);
+  /* One row: wordmark left, the two text lines beside it (user call
+     2026-08-30 — stacked, the header spent ~130px on what one row says
+     in ~70). Vertical padding stepped down xl -> lg with the height win.
+     flex-wrap so a viewport too narrow for the pair drops the text
+     block below the wordmark instead of clipping. */
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-2xl);
+  padding: var(--space-lg) var(--space-2xl);
   background: var(--panel);
   border-bottom: 1px solid var(--border);
+}
+
+/* The tagline + instructions pair, stacked flush beside the wordmark —
+   no gap at all (user call 2026-08-30): line-height alone separates
+   them, reading as one tight terminal block. */
+.headerText {
+  display: flex;
+  flex-direction: column;
+}
+
+.headerNav {
+  margin-left: auto;
+}
+
+/* Terminal-chrome link, sized as a real target (padding brings it past
+   the 24px AA floor) without adding header height. */
+.aboutLink {
+  display: inline-block;
+  padding: var(--space-sm);
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.1em;
+  color: var(--green-dim);
+  text-underline-offset: 3px;
+}
+
+.aboutLink:hover {
+  color: var(--text);
+}
+
+/* The wordmark-as-home-link inherits the masthead type; no default link
+   underline/color -- it reads as the logo, and the pointer cursor is the
+   only affordance it needs. */
+.homeLink {
+  color: inherit;
+  text-decoration: none;
 }
 
 .title {
@@ -65,11 +109,11 @@
 }
 
 .tagline {
-  /* Its own line at every width: a masthead-sized wordmark can't share a
-     line with 12px italic text — and block keeps the whole "> find..."
-     phrase (greater-than sign included) wrapping as one unit. */
-  display: block;
-  margin-top: var(--space-md);
+  /* A <p> beside the h1 since 2026-08-30, not a span inside it -- the
+     accessible heading is just the wordmark now, instead of the whole
+     "Shade_walker > find the shadiest..." sentence a screen reader's
+     heading navigation used to read out. */
+  margin: 0;
   font-weight: 400;
   font-style: italic;
   font-size: var(--font-size-sm);
@@ -100,7 +144,7 @@
 }
 
 .instructions {
-  margin: var(--space-xs) 0 0;
+  margin: 0;
   font-size: var(--font-size-sm);
   color: var(--green-dim);
   font-style: italic;

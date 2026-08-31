@@ -20,17 +20,47 @@ test('a drawn route has no violations', async ({ page }) => {
   // into the address fields on load -- mock it or this hits live Nominatim.
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
-  await expect(page.getByText('dist', { exact: true })).toBeVisible()
+  await expect(page.getByText('distance', { exact: true })).toBeVisible()
 
   const results = await new AxeBuilder({ page }).analyze()
   expect(results.violations).toEqual([])
 })
 
+test('an open autocomplete listbox has no violations', async ({ page }) => {
+  // The combobox wiring (aria-expanded/-controls/-activedescendant,
+  // option roles) only exists in the DOM while the dropdown is open --
+  // none of the other states here ever render it, so without this state
+  // axe never sees the pattern at all.
+  await mockGeocode(page)
+  await page.goto('/')
+  const start = page.getByLabel('Start point')
+  await start.click()
+  await start.pressSequentially('court', { delay: 30 })
+  await expect(page.getByRole('listbox', { name: 'Start point suggestions' })).toBeVisible()
+  await page.keyboard.press('ArrowDown') // active option: aria-activedescendant set
+
+  const results = await new AxeBuilder({ page }).analyze()
+  expect(results.violations).toEqual([])
+})
+
+test('the About page has no violations and links back', async ({ page }) => {
+  // A static second page (no React) served from the same build -- easy
+  // for regressions to hide on since no component test ever renders it.
+  await page.goto('/about.html')
+  await expect(page.getByRole('heading', { name: 'About Shade Walker' })).toBeVisible()
+
+  const results = await new AxeBuilder({ page }).analyze()
+  expect(results.violations).toEqual([])
+
+  await page.getByRole('link', { name: 'back to the map' }).first().click()
+  await expect(page).toHaveURL(/\/$|\/\?/)
+})
+
 test('address search with no match has no violations', async ({ page }) => {
   await mockGeocode(page)
   await page.goto('/')
-  await page.getByLabel('Start_point').fill('Nowhere, USA')
-  await page.getByRole('button', { name: 'FIND_ROUTE' }).click()
+  await page.getByLabel('Start point').fill('Nowhere, USA')
+  await page.getByRole('button', { name: 'FIND ROUTE' }).click()
   await expect(page.getByText('NOT_FOUND', { exact: false })).toBeVisible()
 
   const results = await new AxeBuilder({ page }).analyze()
