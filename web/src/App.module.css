@@ -54,12 +54,14 @@
   padding: var(--space-sm);
   font-size: var(--font-size-sm);
   letter-spacing: 0.1em;
-  color: var(--green-dim);
+  /* Ink normally, jade on hover (user call 2026-09-01) -- the reverse of
+     before. */
+  color: var(--text);
   text-underline-offset: 3px;
 }
 
 .aboutLink:hover {
-  color: var(--text);
+  color: var(--green-dim);
 }
 
 /* The wordmark-as-home-link inherits the masthead type; no default link
@@ -117,7 +119,9 @@
   font-weight: 400;
   font-style: italic;
   font-size: var(--font-size-sm);
-  color: var(--green-dim);
+  /* Ink, not jade (user call 2026-09-01): the muted green read as hard to
+     read. Kept italic. */
+  color: var(--text);
   text-transform: none;
   letter-spacing: normal;
 }
@@ -146,7 +150,8 @@
 .instructions {
   margin: 0;
   font-size: var(--font-size-sm);
-  color: var(--green-dim);
+  /* Ink, not jade -- pairs with .tagline above (user call 2026-09-01). */
+  color: var(--text);
   font-style: italic;
 }
 
@@ -170,5 +175,19 @@
 
   .header {
     padding: var(--space-lg);
+  }
+}
+
+/* The header runs out of room for wordmark + both subtitles + About in one
+   row well before the map/panel need to stack (measured ~965px), so its
+   reflow gets its own wider breakpoint: wordmark + About share the top row
+   (About pushed right by its margin-left:auto), and the tagline +
+   instructions drop to a full-width row beneath both (user call
+   2026-09-01). flex-basis:100% forces the text block onto its own line;
+   order:3 keeps it after About so it doesn't split the wordmark/About row. */
+@media (max-width: 980px) {
+  .headerText {
+    order: 3;
+    flex-basis: 100%;
   }
 }

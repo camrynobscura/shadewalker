@@ -354,57 +354,66 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
         </dl>
 
 
-        {/* The one caution the product owes every route (user-approved
-            wording, 2026-08-28), ABOVE the list so it reads before the
-            instructions do (user call, 2026-08-28). Deliberately GENERAL:
-            uncertainty about street names is disclosed structurally,
-            per-step, as "unnamed path", not by a blanket note. */}
-        <p className={styles.disclaimer}>
-          <strong><span aria-hidden="true">// </span>CAUTION:</strong> walking routes may not always reflect
-          real-world conditions —{' '}
-          {/* The moment a user doubts the data is the moment they'll take
-              the explanation (user call 2026-08-30). */}
-          <a className={styles.cautionLink} href="/about.html#caution">
-            learn why
-          </a>
-        </p>
+        <div className={styles.directionsGroup}>
+          <h3 className={styles.subTitle}>Directions</h3>
 
-        {stats.segments.length > 0 ? (
-          /* Ordered list, not the old one-sentence paragraph: each turn gets
-             its own line, and a screen reader announces "item 2 of 4" instead
-             of one long run-on. Built from `segments` (structured data)
-             rather than parsing `description` (English prose), so it
-             can use formatDistance() and stay unit-consistent with the rest
-             of the panel. Always the selected preset's directions -- Shade
-             priority's NONE option gives the plain shortest route directly
-             (same segments), so there's no separate route to switch to here. */
-          /* role="list" is NOT redundant: the stylesheet sets
-             list-style: none for the flush-left numbering, which strips
-             the list role in Safari/VoiceOver. */
-          <ol className={styles.directionsList} role="list">
-            {stats.segments.map((step, i) => (
-              <li key={i}>
-                <StepGlyph action={step.action} />
-                <span>
-                  <span aria-hidden="true">
-                    {stepText(step)} — {formatDistance(step.length_m)}
-                  </span>
-                  {/* Spoken twin: "524 feet", not "five two four F T". */}
-                  <span className={styles.visuallyHidden}>
-                    {stepText(step)}, {spokenDistance(step.length_m)}
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          // Empty segments means start == end, so the server's generic
-          // "already there" text is accurate.
-          <p className={styles.description}>
-            <span aria-hidden="true">&gt; </span>
-            {description}
+          {/* The one caution the product owes every route (user-approved
+              wording, 2026-08-28), ABOVE the list so it reads before the
+              instructions do (user call, 2026-08-28). Deliberately GENERAL:
+              uncertainty about street names is disclosed structurally,
+              per-step, as "unnamed path", not by a blanket note. */}
+          <p className={styles.disclaimer}>
+            <span className={styles.disclaimerMark} aria-hidden="true">&gt;</span>
+            <span>
+              {/* sr-only label: the ">" is decorative, so screen readers still
+                  get the "caution" framing the visible text no longer states. */}
+              <span className={styles.visuallyHidden}>Caution: </span>
+              walking routes may not always reflect real-world conditions —{' '}
+              {/* The moment a user doubts the data is the moment they'll take
+                  the explanation (user call 2026-08-30). */}
+              <a className={styles.cautionLink} href="/about.html#caution">
+                learn more
+              </a>
+            </span>
           </p>
-        )}
+
+          {stats.segments.length > 0 ? (
+            /* Ordered list, not the old one-sentence paragraph: each turn gets
+               its own line, and a screen reader announces "item 2 of 4" instead
+               of one long run-on. Built from `segments` (structured data)
+               rather than parsing `description` (English prose), so it
+               can use formatDistance() and stay unit-consistent with the rest
+               of the panel. Always the selected preset's directions -- Shade
+               priority's NONE option gives the plain shortest route directly
+               (same segments), so there's no separate route to switch to here. */
+            /* role="list" is NOT redundant: the stylesheet sets
+               list-style: none for the flush-left numbering, which strips
+               the list role in Safari/VoiceOver. */
+            <ol className={styles.directionsList} role="list">
+              {stats.segments.map((step, i) => (
+                <li key={i}>
+                  <StepGlyph action={step.action} />
+                  <span>
+                    <span aria-hidden="true">
+                      {stepText(step)} — {formatDistance(step.length_m)}
+                    </span>
+                    {/* Spoken twin: "524 feet", not "five two four F T". */}
+                    <span className={styles.visuallyHidden}>
+                      {stepText(step)}, {spokenDistance(step.length_m)}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            // Empty segments means start == end, so the server's generic
+            // "already there" text is accurate.
+            <p className={styles.description}>
+              <span aria-hidden="true">&gt; </span>
+              {description}
+            </p>
+          )}
+        </div>
 
         <ShareButton />
       </div>

@@ -59,6 +59,12 @@
      *.module.css file that needs it. */
   --label-font-size: 0.625rem; /* 10px */
 
+  /* One step up from --label-font-size, for the section/field TITLES
+     (Start_point, End_point, Shade_priority, My_route) so they outrank the
+     10px sublabels beneath them -- user call 2026-09-01. The sublabels keep
+     --label-font-size; that decoupling is what creates the hierarchy. */
+  --section-label-size: 0.75rem; /* 12px */
+
   /* Body/caption text-size scale. Distinct from --label-font-size above:
      that one names a specific look (the small-caps field-label style),
      these name steps on a general size scale, the same relationship

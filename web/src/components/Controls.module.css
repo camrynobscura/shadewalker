@@ -38,11 +38,16 @@
    rejection, not a failure. The two rules below are duplicated, not
    shared, matching the .sectionDivider precedent -- keep them in sync;
    only their margins differ (see each). */
-/* The empty alert slot: no box, no gap footprint until an error exists
+/* The empty alert slot: no box, and no gap footprint until an error exists
    (the region stays mounted for the live-region announcement -- see the
-   comment in Controls.tsx). */
+   comment in Controls.tsx). The negative bottom margin cancels
+   .addressGroup's flex `gap` beneath this zero-height slot, so Start_point
+   sits at the panel's top padding (--space-xl) rather than 12px lower --
+   matching the separator-to-section gap used elsewhere (user call
+   2026-09-01). When an error IS present the class flips to .error, which
+   carries no such margin, so the alert keeps its normal spacing. */
 .errorEmpty {
-  margin: 0;
+  margin: 0 0 calc(-1 * var(--space-md));
 }
 
 .error {
@@ -80,10 +85,13 @@
 
 .addressField label {
   display: block;
-  font-size: var(--label-font-size);
+  /* Section-title tier: 12px ink, above the 10px muted sublabels, so the
+     field headers stand out (user call 2026-09-01). Kept in sync with
+     .presetGroup legend and RouteStats' .sectionTitle. */
+  font-size: var(--section-label-size);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--muted);
+  color: var(--text);
   margin: 0;
 }
 
@@ -219,12 +227,19 @@
 .presetGroup legend {
   padding: 0;
   margin-bottom: var(--space-sm);
-  font-size: var(--label-font-size);
+  /* Section-title tier (12px ink) -- see .addressField label. */
+  font-size: var(--section-label-size);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--muted);
+  color: var(--text);
 }
 
+/* The Shade_priority selector, a segmented radio control. Reverted
+   2026-09-01 from the jade spec-frame back to this lighter treatment: the
+   framed version read too much like the RouteStats readout, and the
+   selector must look UNLIKE the (non-clickable) readouts since it's the one
+   thing in the panel you actually press (user call). Raised-white ground +
+   a light jade border; magenta marks the selected preset. */
 .segmented {
   display: flex;
   gap: 1px;
@@ -279,47 +294,61 @@
   color: var(--text);
 }
 
-/* Wraps the mode description and (once a route exists) the actual
-   tradeoff numbers as one unit -- what a walker weighs when deciding
-   whether a shadier route is worth it. Same translucent green wash
-   RouteStats.module.css's .stat boxes use, plus the left-accent-border
-   pattern .sparseNote already established for "pay attention here" --
-   green, not magenta, since this highlights a gain from the shadier
-   choice, not a warning. Visible from first load (just the mode line)
-   so the box doesn't only appear once a route exists. */
+/* The mode description + tradeoff, under the selector. No box and no
+   separator rule (user call 2026-09-01) -- just a gap below the selector;
+   the text alone reads as the caption. Both lines are sans-serif, set HERE
+   on the shared parent so they can't drift apart: the mono figures read
+   gappy and the mono space after each "+" was too wide, and the two lines
+   must share character spacing (user call 2026-09-01). */
 .comparisonHint {
-  margin: var(--space-md) 0 0;
-  padding: 6px var(--space-sm);
-  background: var(--green-wash);
-  border-left: 3px solid var(--green);
+  margin: var(--space-sm) 0 0;
 }
 
 .modeLine {
   min-height: 1.2em;
   margin: 0;
   font-size: var(--font-size-sm);
-  color: var(--muted);
+  /* Ink text (user call 2026-09-01: the green read as hard to read); the
+     mode value is bolded (.modeVal) to stand out. */
+  color: var(--text);
+}
+
+/* The current mode value ("medium"): bold, so the selected mode reads as
+   the answer to "how shady?". */
+.modeVal {
+  font-weight: 600;
 }
 
 .comparisonLine {
   margin: var(--space-xs) 0 0;
   font-size: var(--font-size-sm);
-  color: var(--muted);
+  color: var(--text);
 }
 
-/* The leading "&gt;" prompt marker -- colored on both lines so they read
-   as one unit, even though only the comparison line's actual numbers (not
-   its words/units) get the bold treatment below. */
+/* The leading "&gt;" prompt marker on both subtitle lines. Ink (no green),
+   with a fixed em gap after it -- bigger than a plain space and identical on
+   both lines (user call 2026-09-01). */
 .promptSymbol {
-  color: var(--green-dim);
+  color: var(--text);
+  margin-right: 0.75em;
 }
 
-/* Only the numbers themselves stand out -- "min"/"trees"/"shade"/"mi" and
-   the +/· separators around them stay plain, so the values are what jump
-   out at a glance, not the whole line. */
+/* Separator between the three tradeoff deltas. A vertical bar reads more
+   clearly than the old middle dot, which was too small to notice (user
+   call 2026-09-01). */
+.sep {
+  color: var(--muted);
+  margin: 0 0.45em;
+}
+
+/* The numbers stand out by weight AND face: ink + bold + sans-serif, while
+   everything else in the subtitle stays the app's mono. Putting sans on
+   ONLY the figures fixes the gappy monospace digits without touching the
+   words' kerning, so both lines' text still lines up (user call 2026-09-01). */
 .numberHighlight {
-  color: var(--green-dim);
+  color: var(--text);
   font-weight: 600;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
 /* Notice tier (user call 2026-08-31): the panel's boxes collapsed to two
@@ -354,7 +383,11 @@
   padding: var(--space-sm) var(--space-md);
   background: var(--green-dim);
   color: #fff;
-  border: none;
+  /* A white hairline so the solid-fill primary reads as a bordered button
+     like the secondaries below it -- a --border (jade) edge would vanish
+     against the green fill, so white (user call 2026-09-01). box-sizing:
+     border-box (global) keeps the 44px min-height with the border added. */
+  border: 1px solid #fff;
   border-radius: 0;
   font-size: var(--font-size-md);
   font-weight: 600;
