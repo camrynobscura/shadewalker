@@ -4,8 +4,7 @@
 shade priority; get the walk that keeps you under the tree canopy — with the
 routing cost of the shade (extra minutes, extra distance) shown.
 
-<!-- TODO(screenshot): docs/screenshot.png — a July route with the
-     shadiest/fastest pair visible -->
+![The Shade Walker app on a Greenwich Village route: the shadiest walk (solid green) splits from the fastest (dashed pink), with the walk's stats beside the map — 20 min, 1.0 mi, 55% shaded, 113 trees.](docs/screenshot.png)
 
 Built on three public datasets: OpenStreetMap's pedestrian network, the
 live NYC Tree Map, and the city's
