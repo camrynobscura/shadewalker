@@ -189,7 +189,23 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
     // element and needs to stay mounted for screen readers to catch the
     // first update.
     <div aria-live="polite" className={hasContent ? styles.sectionDivider : undefined}>
-      {loading && <p className={styles.quiet}>Finding your route…</p>}
+      {loading && (
+        <>
+          {/* The spoken version stays the plain sentence this live region
+              has always announced; the terminal-voice visuals below are
+              decoration a screen reader shouldn't spell out. */}
+          <p className={styles.visuallyHidden}>Finding your route…</p>
+          <div aria-hidden="true" className={styles.loadingBlock}>
+            <p className={styles.loadingLabel}>
+              FINDING_ROUTE<span className={styles.loadingCursor}>▊</span>
+            </p>
+            <div className={styles.scanTrack}>
+              <div className={styles.scanBar} />
+            </div>
+            <p className={styles.quiet}>Scoring four route options for shade…</p>
+          </div>
+        </>
+      )}
       {/* A rejected route's error message lives in App.tsx's header now,
           not here -- see the comment there. This component only ever
           rendered it when a route successfully loaded anyway, so there's

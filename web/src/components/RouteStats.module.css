@@ -238,6 +238,82 @@
   margin: 0;
 }
 
+/* The pending state. Loud on purpose: on the production box a route is
+   ~1-3s of real Dijkstra time (measured 2026-09-01), and the old single
+   muted line was designed against locally-instant responses — the user
+   had never even seen it. The 250ms fade-in delay keeps fast responses
+   from flashing it. */
+.loadingBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  opacity: 0;
+  animation: loading-appear 0.15s ease-out 0.25s forwards;
+}
+
+@keyframes loading-appear {
+  to {
+    opacity: 1;
+  }
+}
+
+.loadingLabel {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.loadingCursor {
+  color: var(--magenta);
+  animation: loading-blink 1s steps(1) infinite;
+}
+
+@keyframes loading-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.scanTrack {
+  height: 6px;
+  border: 1px solid var(--border);
+  background: var(--green-wash);
+  overflow: hidden;
+}
+
+.scanBar {
+  width: 28%;
+  height: 100%;
+  background: var(--green);
+  /* The bar is 28% of the track, so its own -110%..380% carries it fully
+     off both ends (transform % is relative to the BAR's width). */
+  animation: loading-scan 1.1s linear infinite;
+}
+
+@keyframes loading-scan {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(380%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still clearly "busy", just still: full-width dimmed bar, no sweep,
+     no blink. The opacity fade-in stays — it's not motion. */
+  .loadingCursor {
+    animation: none;
+  }
+  .scanBar {
+    animation: none;
+    width: 100%;
+    opacity: 0.35;
+  }
+}
+
 /* The standing route caution: muted-green italic text at normal size, no
    box (user call 2026-09-01). No border, so it can't echo the framed
    My_route readout above it; the italic + soft green set it apart as a
