@@ -296,7 +296,14 @@
   fill: var(--green);
   /* Scale each leaf about its own box, not the SVG origin. */
   transform-box: fill-box;
-  animation: 3.8s ease-out infinite;
+  /* NO shared animation shorthand here — a nameless `animation: 3.8s
+     ease-out infinite` is minifier-hostile: name=none, so the production
+     minifier collapses the whole thing to `animation:none`, deleting the
+     duration/easing longhands the .vl* rules relied on inheriting. The
+     leaves then "animated" at the default 0s and rendered full-size from
+     t=0 (caught live 2026-09-01, first prod deploy of the vine; dev's
+     unminified CSS masked it). Each .vl* below carries its complete
+     animation instead. */
 }
 
 /* Each leaf grows FROM its base on the vine, so the scale origin is the
@@ -313,14 +320,14 @@
 /* Each leaf pops as the drawing tip passes it, then shares the hold+fade
    tail. Dedicated keyframes per leaf: CSS variables can't parameterize
    keyframe selectors. */
-.vl1 { animation-name: vl1; }
-.vl2 { animation-name: vl2; }
-.vl3 { animation-name: vl3; }
-.vl4 { animation-name: vl4; }
-.vl5 { animation-name: vl5; }
-.vl6 { animation-name: vl6; }
-.vl7 { animation-name: vl7; }
-.vl8 { animation-name: vl8; }
+.vl1 { animation: vl1 3.8s ease-out infinite; }
+.vl2 { animation: vl2 3.8s ease-out infinite; }
+.vl3 { animation: vl3 3.8s ease-out infinite; }
+.vl4 { animation: vl4 3.8s ease-out infinite; }
+.vl5 { animation: vl5 3.8s ease-out infinite; }
+.vl6 { animation: vl6 3.8s ease-out infinite; }
+.vl7 { animation: vl7 3.8s ease-out infinite; }
+.vl8 { animation: vl8 3.8s ease-out infinite; }
 
 @keyframes vl6 {
   0%, 24% { transform: scale(0); }
@@ -381,9 +388,19 @@
 @media (prefers-reduced-motion: reduce) {
   /* Still clearly "busy", just still: the fully-grown vine with all its
      leaves. The opacity fade-in on .loadingBlock stays — it's not
-     motion. */
+     motion. Targets the .vl* classes (where the animations actually
+     live), not .vineLeaf — overriding via a different class on the same
+     element is order-dependent, the trap that broke the leaves in
+     production. */
   .vinePath,
-  .vineLeaf {
+  .vl1,
+  .vl2,
+  .vl3,
+  .vl4,
+  .vl5,
+  .vl6,
+  .vl7,
+  .vl8 {
     animation: none;
   }
 }
