@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import igraph
+import ijson
 import numpy as np
 import shapely
 from shapely.geometry import Point
@@ -585,19 +586,27 @@ class GraphStore:
         kinds: list[str] = []
         sides: list[str] = []
         fold_names: list[tuple] = []
-        coords_per_edge: list[list[list[float]]] = []  # packed into _coord_buf after the loop
+        # One (n_points, 2) float64 array per edge, converted at ingest so
+        # geometry never sits around as Python lists; packed into _coord_buf
+        # after the loop.
+        coords_per_edge: list[np.ndarray] = []
         seen_edges: dict[tuple, int] = {}  # (u, v, key, side) -> position in the lists above
         seen_geometries: set[tuple] = set()  # (u, v, side, geometry hash) -- see below
         # Pass 1: every node from every export file, so the complete node universe
-        # is known before any edge is ingested. (Tiles are re-read in pass 2
-        # rather than held in memory -- one file at a time keeps peak RAM
-        # flat across a citywide load.)
+        # is known before any edge is ingested. STREAMED (ijson straight off
+        # the gzip stream), never json.loads of the whole file: the parsed
+        # citywide payload alone costs ~1.0GB as Python objects (measured
+        # 2026-09-01 -- 489k edge dicts whose coords are lists of lists of
+        # Python floats, ~50x the bytes of the same points as arrays), and
+        # holding it is what OOM'd the 2GB droplet. Each file is re-streamed
+        # in pass 2 rather than held; the second decompress+parse costs
+        # seconds and keeps peak RAM near steady-state.
         for path in export_paths:
-            payload = json.loads(gzip.open(path, "rt").read())
-            for node_id, (lon, lat) in payload["nodes"].items():
-                if node_id not in self._id_to_idx:
-                    self._id_to_idx[node_id] = len(node_lonlat)
-                    node_lonlat.append([lon, lat])
+            with gzip.open(path, "rb") as f:
+                for node_id, (lon, lat) in ijson.kvitems(f, "nodes", use_float=True):
+                    if node_id not in self._id_to_idx:
+                        self._id_to_idx[node_id] = len(node_lonlat)
+                        node_lonlat.append([lon, lat])
 
         def _emit(u_id, v_id, key, side, seg_length_m, decid, everg,
                   cnt, canopy, name, kind, folds, coords):
@@ -640,13 +649,12 @@ class GraphStore:
             # parallel edges under different multigraph keys (159 confirmed
             # citywide). Keep one: same endpoints,
             # so dropping the extra copy can't disconnect anything. Hashing
-            # the coords (direction-insensitive) instead of storing them
-            # keeps this set small; genuinely different parallel edges
-            # between the same nodes (a street and a separate path) hash
-            # differently and both survive.
-            forward = tuple(tuple(point) for point in coords)
+            # the coords (direction-insensitive, via the array's bytes)
+            # instead of storing them keeps this set small; genuinely
+            # different parallel edges between the same nodes (a street and
+            # a separate path) hash differently and both survive.
             geometry_key = (*dedupe_key[:2], side,
-                            min(hash(forward), hash(forward[::-1])))
+                            min(hash(coords.tobytes()), hash(coords[::-1].tobytes())))
             if geometry_key in seen_geometries:
                 return
             seen_geometries.add(geometry_key)
@@ -664,19 +672,20 @@ class GraphStore:
             fold_names.append(folds)
             coords_per_edge.append(coords)
 
-        # Pass 2: edges, each emitted through the dedupe above.
+        # Pass 2: edges, streamed one dict at a time (freed as soon as it's
+        # emitted), each through the dedupe above.
         for path in export_paths:
-            payload = json.loads(gzip.open(path, "rt").read())
-            for edge in payload["edges"]:
-                _emit(edge["u"], edge["v"], edge["key"], edge["side"],
-                      edge["length_m"], edge["tree_deciduous"],
-                      edge["tree_evergreen"], edge["tree_count"],
-                      edge.get("tree_park_canopy", 0.0), edge["name"],
-                      # sys.intern: 488k kind strings are ~7 distinct
-                      # values; interning stores each once.
-                      sys.intern(edge.get("kind", "")),
-                      tuple(edge.get("fold_names", ())),
-                      edge["coords"])
+            with gzip.open(path, "rb") as f:
+                for edge in ijson.items(f, "edges.item", use_float=True):
+                    _emit(edge["u"], edge["v"], edge["key"], edge["side"],
+                          edge["length_m"], edge["tree_deciduous"],
+                          edge["tree_evergreen"], edge["tree_count"],
+                          edge.get("tree_park_canopy", 0.0), edge["name"],
+                          # sys.intern: 488k kind strings are ~7 distinct
+                          # values; interning stores each once.
+                          sys.intern(edge.get("kind", "")),
+                          tuple(edge.get("fold_names", ())),
+                          np.asarray(edge["coords"], dtype=np.float64))
 
         self._names = names
         self._kinds = kinds
@@ -707,9 +716,7 @@ class GraphStore:
         # boundaries — offsets[e] is where edge e's points start.
         point_counts = [len(edge_coords) for edge_coords in coords_per_edge]
         self._coord_offsets = np.concatenate(([0], np.cumsum(point_counts))).astype(np.int64)
-        self._coord_buf = np.concatenate(
-            [np.asarray(edge_coords, dtype=np.float64) for edge_coords in coords_per_edge]
-        )
+        self._coord_buf = np.concatenate(coords_per_edge)
 
         self._graph = igraph.Graph(n=len(node_lonlat), edges=edge_pairs, directed=False)
 
