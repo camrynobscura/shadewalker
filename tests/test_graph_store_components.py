@@ -40,6 +40,8 @@ Synthetic fixtures, same pattern as test_graph_store_pruning.py.
 
 import gzip
 import json
+import logging
+import os
 
 from shapely.geometry import Point, Polygon
 
@@ -159,3 +161,40 @@ def test_load_params_are_part_of_the_coverage_fingerprint(tmp_path, monkeypatch)
     before = graph_store._export_fingerprint(paths)
     monkeypatch.setattr(graph_store, "LOAD_PARAMS", "load-vTEST|no-overrides")
     assert graph_store._export_fingerprint(paths) != before
+
+
+def test_fingerprint_is_content_based_not_stat_based(tmp_path):
+    """The cache is built on the laptop and shipped by rsync, which keeps
+    mtimes only to whole seconds -- so file stats cannot be identity. A
+    stat-based fingerprint never matched on the box, and every start
+    recomputed coverage until the droplet OOM-froze (2026-09-01). Same
+    bytes = same fingerprint however the mtime moves; different bytes =
+    different fingerprint.
+    """
+    _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
+    paths = sorted(tmp_path.glob("*.json.gz"))
+    before = graph_store._export_fingerprint(paths)
+    os.utime(tmp_path / "main.json.gz", (0, 0))  # 1970, nanoseconds zeroed
+    assert graph_store._export_fingerprint(paths) == before
+    _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES[:1])
+    assert graph_store._export_fingerprint(paths) != before
+
+
+def test_unwritable_cache_dir_does_not_crash_load(tmp_path, monkeypatch, caplog):
+    """The cache is strictly a speed optimization; on the box data/export
+    belongs to the deploy user and the service cannot write it. A failed
+    cache save must cost a warning (and the next start a recompute),
+    never this start.
+    """
+    monkeypatch.setattr(config, "EXPORT_DIR", tmp_path)
+    _write_tile(tmp_path / "main.json.gz", MAIN_NODES, MAIN_EDGES)
+    tmp_path.chmod(0o555)
+    try:
+        store = GraphStore()
+        with caplog.at_level(logging.WARNING):
+            store.load()
+    finally:
+        tmp_path.chmod(0o755)
+    m1_lon, m1_lat = MAIN_NODES["m1"]
+    assert store.in_coverage(m1_lat, m1_lon) is True
+    assert "could not write coverage cache" in caplog.text

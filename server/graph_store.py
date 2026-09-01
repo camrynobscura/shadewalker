@@ -414,10 +414,18 @@ LOAD_PARAMS = "load-v23|no-hide-rule"
 
 
 def _export_fingerprint(export_paths: list) -> str:
-    """A cheap fingerprint of every loaded export file's identity (name, size,
-    mtime) — changes whenever a tile is added, removed, or re-exported,
+    """A fingerprint of every loaded export file's CONTENT (sha256 of its
+    bytes) — changes whenever a tile is added, removed, or re-exported,
     which is exactly when the coverage cache (above) needs recomputing
     rather than reused.
+
+    Content, deliberately not (name, size, mtime): the cache is built on
+    the laptop and shipped to the box by rsync, which preserves mtimes
+    only to whole seconds, so an mtime-based fingerprint could never
+    match after a deploy. The box then recomputed coverage on every
+    start — a job that peaks >1.77GB and OOM-froze the 2GB droplet on
+    2026-09-01. Bytes are identity that survives any transport; hashing
+    the 26MB citywide export measured 21ms (laptop, 2026-09-01).
 
     Two recipe tags ride along, because the drawn coverage depends on more
     than the export files' bytes: the offshore frame's parameters
@@ -425,7 +433,8 @@ def _export_fingerprint(export_paths: list) -> str:
     WHICH components end up visible. Deleting the hide rule was exactly
     that kind of change -- without a LOAD_PARAMS bump it would have served
     rings computed under the old rule from every existing cache."""
-    parts = sorted(f"{p.name}:{p.stat().st_size}:{p.stat().st_mtime_ns}" for p in export_paths)
+    parts = sorted(f"{p.name}:{hashlib.sha256(p.read_bytes()).hexdigest()}"
+                   for p in export_paths)
     rule = coverage_frame.FRAME_PARAMS + "|" + LOAD_PARAMS
     return hashlib.sha256(("\n".join(parts) + "\n" + rule).encode()).hexdigest()
 
@@ -450,7 +459,14 @@ def _load_cached_coverage(cache_path, fingerprint: str) -> dict | None:
 
 
 def _save_cached_coverage(cache_path, fingerprint: str, rings, frame: dict) -> None:
-    cache_path.write_text(json.dumps({"fingerprint": fingerprint, "rings": rings, "frame": frame}))
+    """Best-effort, matching the load side: the cache is strictly a speed
+    optimization, so a failed save (on the box, data/export belongs to the
+    deploy user and the service can't write it) costs the next start a
+    recompute — it must never take THIS start down."""
+    try:
+        cache_path.write_text(json.dumps({"fingerprint": fingerprint, "rings": rings, "frame": frame}))
+    except OSError as exc:
+        logger.warning(f"[graph_store] could not write coverage cache {cache_path}: {exc}")
 
 
 def _local_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

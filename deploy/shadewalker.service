@@ -16,6 +16,13 @@ Description=Shade Walker routing + app server (uvicorn)
 After=network-online.target
 Wants=network-online.target
 
+# Give up rather than loop: with Restart=always, a start that keeps dying
+# (e.g. OOM-killed) would otherwise retry forever — that loop is what kept
+# the droplet frozen on 2026-09-01. Three tries in 10 minutes, then the
+# unit parks itself failed and `systemctl status shadewalker` says why.
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
 [Service]
 Type=exec
 User=shadewalker
@@ -33,6 +40,15 @@ ExecStart=/opt/shadewalker/.venv/bin/uvicorn server.app:app \
 
 Restart=always
 RestartSec=3
+
+# Memory guard — the box has 2GB total and no swap. A normal start peaks
+# ~1.1GB (warm coverage cache); a cold-cache start peaks >1.77GB, which on
+# 2026-09-01 thrashed the whole droplet unresponsive for 8+ minutes before
+# the kernel OOM killer fired. The cap converts any such runaway into a
+# clean kill of THIS unit the moment it crosses 1.7GB; MemoryHigh starts
+# reclaiming/throttling it before that. Raise both only with a bigger box.
+MemoryHigh=1500M
+MemoryMax=1700M
 
 # When you self-host Photon later, point the proxy at it here (default is
 # the public komoot instance) — nothing else moves:

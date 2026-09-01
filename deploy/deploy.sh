@@ -7,14 +7,17 @@
 # AFTER building the frontend with the CARTO key present:
 #
 #     (cd web && VITE_CARTO_KEY=... npm run build)
-#     HOST=shadewalker@203.0.113.10 ./deploy/deploy.sh
+#     HOST=deploy@203.0.113.10 ./deploy/deploy.sh
+#
+# (deploy, not shadewalker: the service user has no login shell — see
+# deploy/README.md §1 for the deploy user + its narrow sudoers rule.)
 #
 # Idempotent: re-run any time to push a new build/export. It rsyncs, then
 # reconciles the box's venv from uv.lock and restarts the service.
 
 set -euo pipefail
 
-HOST="${HOST:?set HOST=user@ip — the droplet, e.g. shadewalker@203.0.113.10}"
+HOST="${HOST:?set HOST=user@ip — the droplet, e.g. deploy@203.0.113.10}"
 DEST="${DEST:-/opt/shadewalker}"
 
 # Guard: the frontend build must exist, or we'd ship an API-only box.
