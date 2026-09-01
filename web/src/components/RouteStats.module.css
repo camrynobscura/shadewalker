@@ -229,15 +229,6 @@
   text-underline-offset: 2px;
 }
 
-.quiet {
-  color: var(--muted);
-  font-size: var(--font-size-sm);
-  /* Previously unset — silently fell back to the browser's default <p>
-     margin (~1em top/bottom), one of the actual sources of "spacing is all
-     over the place". Now the parent's `gap` is the only source. */
-  margin: 0;
-}
-
 /* The pending state. Loud on purpose: on the production box a route is
    ~1-3s of real Dijkstra time (measured 2026-09-01), and the old single
    muted line was designed against locally-instant responses — the user
@@ -257,60 +248,143 @@
   }
 }
 
-.loadingLabel {
-  margin: 0;
-  color: var(--text);
-  font-size: var(--font-size-sm);
-  font-weight: 700;
-  letter-spacing: 0.04em;
+.vineStage {
+  position: relative;
+  height: 64px;
+  overflow: hidden;
 }
 
-.loadingCursor {
-  color: var(--magenta);
-  animation: loading-blink 1s steps(1) infinite;
+
+.vineSvg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
-@keyframes loading-blink {
-  50% {
+.vinePath {
+  fill: none;
+  stroke: var(--green-dim);
+  stroke-width: 2;
+  stroke-linecap: round;
+  /* 640 covers the path's real length with slack; the draw is the classic
+     dashoffset reveal. One cycle = grow (0-64%), hold, fade, regrow. */
+  stroke-dasharray: 640;
+  animation: vine-draw 3.8s ease-in-out infinite;
+}
+
+@keyframes vine-draw {
+  0% {
+    stroke-dashoffset: 640;
+    opacity: 1;
+  }
+  64% {
+    stroke-dashoffset: 0;
+  }
+  88% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  96%,
+  100% {
+    stroke-dashoffset: 0;
     opacity: 0;
   }
 }
 
-.scanTrack {
-  height: 6px;
-  border: 1px solid var(--border);
-  background: var(--green-wash);
-  overflow: hidden;
+.vineLeaf {
+  fill: var(--green);
+  /* Scale each leaf about its own box, not the SVG origin. */
+  transform-box: fill-box;
+  animation: 3.8s ease-out infinite;
 }
 
-.scanBar {
-  width: 28%;
-  height: 100%;
-  background: var(--green);
-  /* The bar is 28% of the track, so its own -110%..380% carries it fully
-     off both ends (transform % is relative to the BAR's width). */
-  animation: loading-scan 1.1s linear infinite;
+/* Each leaf grows FROM its base on the vine, so the scale origin is the
+   bbox corner holding the anchor point (up-right leaf = bottom-left, etc). */
+.oBL { transform-origin: left bottom; }
+.oBR { transform-origin: right bottom; }
+.oTL { transform-origin: left top; }
+.oTR { transform-origin: right top; }
+
+.vineLeafDim {
+  fill: var(--green-dim);
 }
 
-@keyframes loading-scan {
-  from {
-    transform: translateX(-110%);
-  }
-  to {
-    transform: translateX(380%);
-  }
+/* Each leaf pops as the drawing tip passes it, then shares the hold+fade
+   tail. Dedicated keyframes per leaf: CSS variables can't parameterize
+   keyframe selectors. */
+.vl1 { animation-name: vl1; }
+.vl2 { animation-name: vl2; }
+.vl3 { animation-name: vl3; }
+.vl4 { animation-name: vl4; }
+.vl5 { animation-name: vl5; }
+.vl6 { animation-name: vl6; }
+.vl7 { animation-name: vl7; }
+.vl8 { animation-name: vl8; }
+
+@keyframes vl6 {
+  0%, 24% { transform: scale(0); }
+  31% { transform: scale(1); }
+  88% { transform: scale(1); opacity: 1; }
+  96%, 100% { opacity: 0; }
+}
+
+@keyframes vl7 {
+  0%, 38% { transform: scale(0); }
+  45% { transform: scale(1); }
+  88% { transform: scale(1); opacity: 1; }
+  96%, 100% { opacity: 0; }
+}
+
+@keyframes vl8 {
+  0%, 48% { transform: scale(0); }
+  55% { transform: scale(1); }
+  88% { transform: scale(1); opacity: 1; }
+  96%, 100% { opacity: 0; }
+}
+
+@keyframes vl1 {
+  0%, 11% { transform: scale(0); }
+  18% { transform: scale(1); }
+  88% { transform: scale(1); opacity: 1; }
+  96%, 100% { opacity: 0; }
+}
+
+@keyframes vl2 {
+  0%, 19% { transform: scale(0); }
+  26% { transform: scale(1); }
+  88% { transform: scale(1); opacity: 1; }
+  96%, 100% { opacity: 0; }
+}
+
+@keyframes vl3 {
+  0%, 27% { transform: scale(0); }
+  34% { transform: scale(1); }
+  88% { transform: scale(1); opacity: 1; }
+  96%, 100% { opacity: 0; }
+}
+
+@keyframes vl4 {
+  0%, 35% { transform: scale(0); }
+  42% { transform: scale(1); }
+  88% { transform: scale(1); opacity: 1; }
+  96%, 100% { opacity: 0; }
+}
+
+@keyframes vl5 {
+  0%, 45% { transform: scale(0); }
+  52% { transform: scale(1); }
+  88% { transform: scale(1); opacity: 1; }
+  96%, 100% { opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /* Still clearly "busy", just still: full-width dimmed bar, no sweep,
-     no blink. The opacity fade-in stays — it's not motion. */
-  .loadingCursor {
+  /* Still clearly "busy", just still: the fully-grown vine with all its
+     leaves. The opacity fade-in on .loadingBlock stays — it's not
+     motion. */
+  .vinePath,
+  .vineLeaf {
     animation: none;
-  }
-  .scanBar {
-    animation: none;
-    width: 100%;
-    opacity: 0.35;
   }
 }
 
