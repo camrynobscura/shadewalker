@@ -23,9 +23,13 @@ uv run uvicorn server.app:app --port "${PORT}" --no-access-log --no-server-heade
 SERVER_PID=$!
 trap 'kill "${SERVER_PID}" 2>/dev/null' EXIT
 
-# Wait for /health — the citywide graph load takes ~15s.
+# Wait for /health — the citywide load takes ~10-15s on the laptop even
+# with a COLD coverage cache (measured 2026-09-01: cold boot 9.8s total).
+# The high ceiling is insurance for slower machines and future model
+# growth; the loop exits the moment the server is ready, so it costs a
+# passing run nothing.
 ready=0
-for _ in $(seq 1 60); do
+for _ in $(seq 1 360); do
   if curl -sf "${BASE}/health" >/dev/null 2>&1; then ready=1; break; fi
   sleep 1
 done
