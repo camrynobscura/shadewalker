@@ -189,7 +189,57 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
     // element and needs to stay mounted for screen readers to catch the
     // first update.
     <div aria-live="polite" className={hasContent ? styles.sectionDivider : undefined}>
-      {loading && <p className={styles.quiet}>Finding your route…</p>}
+      {loading && (
+        <>
+          {/* The spoken version stays the plain sentence this live region
+              has always announced; the terminal-voice visuals below are
+              decoration a screen reader shouldn't spell out. */}
+          <p className={styles.visuallyHidden}>Finding your route…</p>
+          <div aria-hidden="true" className={styles.loadingBlock}>
+            {/* The growing vine (picked over a glitch box, falling leaves
+                and a pixel tree, 2026-09-01): one path draws itself across
+                the open panel -- horizontal growth reads as progress with
+                no bar -- sprouting leaves as the tip passes and running
+                visibly behind the label's letters (no backing patch; user
+                call). Deliberately no box either: that treatment belonged
+                to the rejected glitch candidate. */}
+            {/* No visible text (user call, 2026-09-01, after trying the
+                label overlaid, above, and colored): the vine alone is the
+                pending state -- motion with a direction reads as work, the
+                FIND_ROUTE button already says FINDING…, and the
+                visually-hidden sentence above keeps the spoken
+                announcement intact. */}
+            <div className={styles.vineStage}>
+              <svg viewBox="0 0 520 64" preserveAspectRatio="none" className={styles.vineSvg}>
+                {/* One vine (tried three 2026-09-01, walked back same day —
+                    user call). Leaf anchors are computed points ON the
+                    Bézier path (crest/trough/slope), so every leaf's base
+                    touches the vine and grows out of it — origin classes
+                    put the scale-from point at that base corner. Pointed
+                    almond shape: two quadratics meeting sharp at base and
+                    tip; leaves cluster in pairs near the wave's turns,
+                    the way real vines bunch. */}
+                {/* The tail is an explicit C, not another S: an S mirrors
+                    the previous control to (524,48) — PAST the endpoint —
+                    which hooked the vine back on itself at the very end.
+                    This one continues the incoming slope and eases flat. */}
+                <path
+                  className={styles.vinePath}
+                  d="M4 32 C 44 16, 84 48, 124 32 S 204 16, 244 32 S 324 48, 364 32 S 444 16, 484 32 C 494 36, 504 38.5, 518 39"
+                />
+                <path className={`${styles.vineLeaf} ${styles.oBL} ${styles.vl1}`} d="M34 27.5 Q 39 11.5, 54 14.5 Q 48 28.5, 34 27.5 Z" />
+                <path className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oTR} ${styles.vl2}`} d="M94 36.5 Q 89 52.5, 74 49.5 Q 80 35.5, 94 36.5 Z" />
+                <path className={`${styles.vineLeaf} ${styles.oBR} ${styles.vl6}`} d="M154 23 Q 149 7, 134 10 Q 140 24, 154 23 Z" />
+                <path className={`${styles.vineLeaf} ${styles.oBL} ${styles.vl3}`} d="M184 20 Q 189 4, 204 7 Q 198 21, 184 20 Z" />
+                <path className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oTL} ${styles.vl4}`} d="M304 44 Q 309 60, 324 57 Q 318 43, 304 44 Z" />
+                <path className={`${styles.vineLeaf} ${styles.oTL} ${styles.vl7}`} d="M334 41 Q 339 57, 354 54 Q 348 40, 334 41 Z" />
+                <path className={`${styles.vineLeaf} ${styles.oBR} ${styles.vl5}`} d="M424 20 Q 419 4, 404 7 Q 410 21, 424 20 Z" />
+                <path className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oBL} ${styles.vl8}`} d="M454 23 Q 459 7, 474 10 Q 468 24, 454 23 Z" />
+              </svg>
+            </div>
+          </div>
+        </>
+      )}
       {/* A rejected route's error message lives in App.tsx's header now,
           not here -- see the comment there. This component only ever
           rendered it when a route successfully loaded anyway, so there's
