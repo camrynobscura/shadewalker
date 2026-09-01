@@ -378,7 +378,20 @@ export function Controls({
             to announce). Same fix + reasoning as RouteStats' wrapper.
             The empty <p> collapses to zero height, so no dead space. */}
         <p className={error ? styles.error : styles.errorEmpty} role="alert">
-          {error}
+          {error && (
+            <>
+              {/* Same "// TITLE:" prefix as the low-shade note (aria-hidden
+                  glyph + sr-only clean words), so this alert reads in the
+                  app's own voice (user call 2026-09-01). Covers every message
+                  in this slot: out-of-coverage, same start/end, no route,
+                  server down. */}
+              <strong>
+                <span aria-hidden="true">// ERROR:</span>
+                <span className={styles.visuallyHidden}>Error:</span>
+              </strong>{' '}
+              {error}
+            </>
+          )}
         </p>
         {/* One form for both fields, so Enter in either one — or the button —
             resolves whichever isn't already resolved. Each field's own
@@ -490,18 +503,19 @@ export function Controls({
                 with which section is talking. */}
             <span className={styles.visuallyHidden}>Shade priority: </span>
             <p className={styles.modeLine}>
-              <span className={styles.promptSymbol} aria-hidden="true">&gt;</span> mode:{' '}
-              <span aria-hidden="true">{selectedPreset?.label.toLowerCase()}</span>
-              <span className={styles.visuallyHidden}>{selectedPreset?.spoken.toLowerCase()}</span>{' '}
+              <span className={styles.promptSymbol} aria-hidden="true">&gt;</span>
+              <span className={styles.modeVal}>{selectedPreset?.spoken.toLowerCase()}</span>{' '}
               <span aria-hidden="true">//</span> {selectedPreset?.hint}
             </p>
             {comparison && (
               <p className={styles.comparisonLine}>
                 <span aria-hidden="true">
-                  <span className={styles.promptSymbol}>&gt;</span> +
-                  <span className={styles.numberHighlight}>{comparison.extraShadePct}</span>% shade · +
-                  <span className={styles.numberHighlight}>{comparison.extraMinutes}</span>{' '}
-                  min · +{highlightNumber(formatDistance(comparison.extraLengthM))}
+                  <span className={styles.promptSymbol}>&gt;</span>+{' '}
+                  <span className={styles.numberHighlight}>{comparison.extraShadePct}</span>% shade
+                  <span className={styles.sep}>|</span>+{' '}
+                  <span className={styles.numberHighlight}>{comparison.extraMinutes}</span> min
+                  <span className={styles.sep}>|</span>+{' '}
+                  {highlightNumber(formatDistance(comparison.extraLengthM))}
                 </span>
                 {/* Spoken twin: full words, no glyph soup (VoiceOver pass). */}
                 {/* One string, not adjacent nodes: a pluralizing "s" as its

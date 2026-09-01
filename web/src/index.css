@@ -59,6 +59,12 @@
      *.module.css file that needs it. */
   --label-font-size: 0.625rem; /* 10px */
 
+  /* One step up from --label-font-size, for the section/field TITLES
+     (Start_point, End_point, Shade_priority, My_route) so they outrank the
+     10px sublabels beneath them -- user call 2026-09-01. The sublabels keep
+     --label-font-size; that decoupling is what creates the hierarchy. */
+  --section-label-size: 0.75rem; /* 12px */
+
   /* Body/caption text-size scale. Distinct from --label-font-size above:
      that one names a specific look (the small-caps field-label style),
      these name steps on a general size scale, the same relationship
@@ -79,6 +85,16 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  /* Fixed-viewport app: the header, map, and panel fill the screen and each
+     manage their OWN scrolling (the panel via overflow-y:auto, the map by
+     panning). Nothing is meant to scroll at the document level, so hide it
+     here. Without this, a stray or transient child overflow (Leaflet reflows
+     on load/zoom are a classic one) makes the document taller than the
+     viewport and leaves a phantom margin below the whole app on scroll
+     (user report 2026-09-01; every layout box measured correctly at
+     viewport height, so this is the right guard, not a clip of real
+     content -- the panel keeps its own scroll). */
+  overflow: hidden;
 }
 
 body {
