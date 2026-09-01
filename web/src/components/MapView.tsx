@@ -15,12 +15,13 @@ import type { CoverageFeature, Point, RouteFeature } from '../api'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import styles from './MapView.module.css'
 
-// Where the map opens before any route exists: the south edge of Central
-// Park running down toward Times Square (user call 2026-08-31), so the
-// first thing you see is the park's green meeting the midtown grid -- the
-// shade contrast the whole app is about. (Was Carroll Gardens, the
-// original pilot area.)
-const INITIAL_CENTER: [number, number] = [40.764, -73.981]
+// Where the map opens before any route exists: Washington Square, framing
+// Greenwich Village + the East Village (user call 2026-09-01). Midtown
+// looked dramatic but its shade scores are low and FLAT, so first clicks
+// there returned near-identical routes across every preset; Village blocks
+// vary enough that the presets visibly diverge, which is the actual demo.
+// (Was Midtown 2026-08-31; Carroll Gardens, the pilot area, before that.)
+const INITIAL_CENTER: [number, number] = [40.7320, -73.9985]
 
 /* CARTO started watermarking keyless raster tile requests in 2026-08
    ("API KEY REQUIRED" repeated across the map). The key is a build-time

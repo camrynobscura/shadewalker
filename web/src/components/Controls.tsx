@@ -405,8 +405,12 @@ export function Controls({
             end.resolve()
           }}
         >
-          <AddressField label="Start_point" example="768 5th Ave" field={start} />
-          <AddressField label="End_point" example="Broadway & W 42nd St" field={end} />
+          {/* Both examples verified against /geocode (2026-09-01): each
+              resolves to the right spot in the Village, inside the landing
+              view. Tempting alternatives fail silently -- "45 Charles St"
+              lands in Alden Manor, "99 Perry St" on Staten Island. */}
+          <AddressField label="Start_point" example="Washington Square Park" field={start} />
+          <AddressField label="End_point" example="24 East 7th St" field={end} />
           <button
             type="submit"
             className={styles.primaryButton}
