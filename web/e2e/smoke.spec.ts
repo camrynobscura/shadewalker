@@ -55,3 +55,19 @@ test('loading a shared route URL fills in the address fields via reverse geocodi
   await expect(page.getByLabel('Start point')).toHaveValue('250 Court St')
   await expect(page.getByLabel('End point')).toHaveValue('3rd Ave')
 })
+
+test('the About page is a scrollable document', async ({ page }) => {
+  // Regression: about.css imports index.css for the tokens, and the app's
+  // fixed-viewport guard there (html/body overflow:hidden, 2026-08-31)
+  // silently clipped this page's scroll until about.css restored document
+  // behavior. A short viewport guarantees the prose overflows it.
+  await page.setViewportSize({ width: 800, height: 450 })
+  await page.goto('/about.html')
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+  await page.evaluate(() => window.scrollTo(0, 9999))
+  // With overflow:hidden inherited, scrollTo() is a no-op and scrollY
+  // stays 0 -- this asserts real scrolling, not just computed styles.
+  const scrolled = await page.evaluate(() => window.scrollY)
+  expect(scrolled).toBeGreaterThan(0)
+})

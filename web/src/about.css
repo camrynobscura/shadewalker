@@ -4,6 +4,18 @@
    rollupOptions.input), served by the same static mount as the app. */
 @import './index.css';
 
+/* About is a normal scrolling DOCUMENT. index.css (imported above for the
+   tokens) pins html/body to the viewport with overflow:hidden — right for
+   the app's fixed screen, but it clipped this page's scroll entirely when
+   it landed 2026-08-31 (caught live 2026-09-01, first night on the
+   domain). Restore the browser defaults; about.html has no #root, so the
+   app's layout rules have nothing else to grab here. */
+html,
+body {
+  height: auto;
+  overflow: visible;
+}
+
 .header {
   display: flex;
   align-items: center;
