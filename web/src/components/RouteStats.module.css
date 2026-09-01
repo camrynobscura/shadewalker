@@ -270,7 +270,7 @@
   /* 640 covers the path's real length with slack; the draw is the classic
      dashoffset reveal. One cycle = grow (0-64%), hold, fade, regrow. */
   stroke-dasharray: 640;
-  animation: vine-draw 3.8s ease-in-out infinite;
+  animation: vine-draw 2.4s ease-in-out infinite;
 }
 
 @keyframes vine-draw {
@@ -320,14 +320,14 @@
 /* Each leaf pops as the drawing tip passes it, then shares the hold+fade
    tail. Dedicated keyframes per leaf: CSS variables can't parameterize
    keyframe selectors. */
-.vl1 { animation: vl1 3.8s ease-out infinite; }
-.vl2 { animation: vl2 3.8s ease-out infinite; }
-.vl3 { animation: vl3 3.8s ease-out infinite; }
-.vl4 { animation: vl4 3.8s ease-out infinite; }
-.vl5 { animation: vl5 3.8s ease-out infinite; }
-.vl6 { animation: vl6 3.8s ease-out infinite; }
-.vl7 { animation: vl7 3.8s ease-out infinite; }
-.vl8 { animation: vl8 3.8s ease-out infinite; }
+.vl1 { animation: vl1 2.4s ease-out infinite; }
+.vl2 { animation: vl2 2.4s ease-out infinite; }
+.vl3 { animation: vl3 2.4s ease-out infinite; }
+.vl4 { animation: vl4 2.4s ease-out infinite; }
+.vl5 { animation: vl5 2.4s ease-out infinite; }
+.vl6 { animation: vl6 2.4s ease-out infinite; }
+.vl7 { animation: vl7 2.4s ease-out infinite; }
+.vl8 { animation: vl8 2.4s ease-out infinite; }
 
 @keyframes vl6 {
   0%, 24% { transform: scale(0); }
