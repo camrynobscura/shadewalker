@@ -135,6 +135,16 @@
   .header {
     padding: var(--space-lg);
   }
+
+  /* Phone header = wordmark + tagline only (user call 2026-09-02): the
+     instructions line wrapped to two lines and spent scarce vertical
+     space explaining interactions a touch UI already invites, while the
+     tagline carries the one thing the screen can't show — that routes
+     here optimize for SHADE. Deliberately removed from the a11y tree
+     too, not just visually: on mobile it isn't the interface. */
+  .instructions {
+    display: none;
+  }
 }
 
 /* The header runs out of room for wordmark + both subtitles + About in one
