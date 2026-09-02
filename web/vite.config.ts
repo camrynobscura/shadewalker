@@ -36,4 +36,14 @@ export default defineConfig({
       '/geocode': API_TARGET, // prefix match — also covers /geocode/reverse
     },
   },
+  preview: {
+    // Phone testing through a cloudflared quick tunnel (`cloudflared
+    // tunnel --url http://localhost:4173`; installed globally via npm) —
+    // the HTTPS context geolocation requires, which the LAN preview
+    // can't provide.
+    // Vite's host check (DNS-rebinding protection) rejects the tunnel's
+    // random hostname without this; the leading dot allows any
+    // *.trycloudflare.com, since the name changes every run.
+    allowedHosts: ['.trycloudflare.com'],
+  },
 })
