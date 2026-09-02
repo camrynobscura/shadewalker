@@ -11,7 +11,8 @@ test('reaches and operates every control in order via keyboard alone', async ({ 
   // into the address fields on load -- mock it or this hits live Nominatim.
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
-  // Wait for the route so CLEAR_ROUTE exists and is part of the tab order.
+  // Wait for the route so both fields hold text and their ✕ accessories
+  // (which replaced CLEAR_ROUTE, 2026-09-02) are part of the tab order.
   await expect(page.getByText('distance', { exact: true })).toBeVisible()
 
   await page.keyboard.press('Tab')
@@ -23,22 +24,20 @@ test('reaches and operates every control in order via keyboard alone', async ({ 
   await page.keyboard.press('Enter')
   await expect(page.locator('#controls')).toBeFocused()
 
+  // Each field is followed by its in-field accessory: the ✕ while it
+  // holds text (as both do here), the start field's ⌖ once cleared.
   await page.keyboard.press('Tab')
-  await expect(page.getByLabel('Start point')).toBeFocused()
+  await expect(page.getByRole('combobox', { name: 'Start point' })).toBeFocused()
 
   await page.keyboard.press('Tab')
-  await expect(page.getByLabel('End point')).toBeFocused()
+  const clearStart = page.getByRole('button', { name: 'Clear start point' })
+  await expect(clearStart).toBeFocused()
 
   await page.keyboard.press('Tab')
-  const findRoute = page.getByRole('button', { name: 'FIND ROUTE' })
-  await expect(findRoute).toBeFocused()
+  await expect(page.getByRole('combobox', { name: 'End point' })).toBeFocused()
 
   await page.keyboard.press('Tab')
-  await expect(page.getByRole('button', { name: 'USE LOCATION' })).toBeFocused()
-
-  await page.keyboard.press('Tab')
-  const clearRoute = page.getByRole('button', { name: 'CLEAR ROUTE' })
-  await expect(clearRoute).toBeFocused()
+  await expect(page.getByRole('button', { name: 'Clear end point' })).toBeFocused()
 
   // Shade_priority is one native radiogroup tab stop: focus lands on
   // whichever preset is already checked (MED, from routeUrl's default
@@ -53,10 +52,14 @@ test('reaches and operates every control in order via keyboard alone', async ({ 
   await expect(maxRadio).toBeFocused()
   await expect(maxRadio).toBeChecked()
 
-  // Enter/Space activate buttons reached this way, same as a pointer click.
-  await clearRoute.focus()
+  // Enter/Space activate buttons reached this way, same as a pointer
+  // click: clearing the start field drops its text, point, and the route
+  // with them, and the emptied field's accessory swaps to the ⌖.
+  await clearStart.focus()
   await page.keyboard.press('Enter')
-  await expect(page.getByRole('button', { name: 'CLEAR ROUTE' })).toHaveCount(0)
+  await expect(page.getByRole('combobox', { name: 'Start point' })).toHaveValue('')
+  await expect(page.getByText('distance', { exact: true })).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Use location' })).toBeVisible()
 })
 
 // The autocomplete combobox never moves DOM focus into its listbox --
@@ -84,7 +87,7 @@ test('address autocomplete is fully keyboard operable', async ({ page }) => {
   await expect(options).toHaveCount(2) // '250 Court St' + 'Court St & Baltic St'
 
   // Nothing highlighted until the keyboard asks -- Enter here would
-  // submit the form, not grab an option the user never chose.
+  // geocode the typed text, not grab an option the user never chose.
   await expect(start).not.toHaveAttribute('aria-activedescendant', /.+/)
 
   await page.keyboard.press('ArrowDown')
@@ -95,8 +98,8 @@ test('address autocomplete is fully keyboard operable', async ({ page }) => {
   await expect(options.nth(0)).toHaveAttribute('aria-selected', 'true')
   await expect(start).toHaveAttribute('aria-activedescendant', /.+/)
 
-  // Enter picks the highlighted option: label lands in the field, list
-  // closes, and no form submit happened (no FINDING… flash to wait out).
+  // Enter picks the highlighted option: label lands in the field and the
+  // list closes — no second geocode round trip for text a pick resolved.
   await page.keyboard.press('Enter')
   await expect(listbox).toBeHidden()
   await expect(start).toHaveValue('250 Court St, Brooklyn')

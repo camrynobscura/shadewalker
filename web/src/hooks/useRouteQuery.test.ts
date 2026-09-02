@@ -103,16 +103,7 @@ describe('useRouteQuery', () => {
     expect(result.current.snappedStart).toBeNull()
   })
 
-  it('clear() resets start, end, route, selected, and error together', async () => {
-    fetchRoute.mockResolvedValue(fakeResponse())
-    const { result } = renderHook(() => useRouteQuery(START, END, 15))
-    await waitFor(() => expect(result.current.route).not.toBeNull())
-
-    act(() => result.current.clear())
-    expect(result.current.start).toBeNull()
-    expect(result.current.end).toBeNull()
-    expect(result.current.route).toBeNull()
-    expect(result.current.selected).toBeNull()
-    expect(result.current.error).toBeNull()
-  })
+  // clear() was removed with the CLEAR_ROUTE button (2026-09-02): fields
+  // clear individually via each field's ✕, and the wordmark's home link
+  // is the full reset.
 })

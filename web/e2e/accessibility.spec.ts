@@ -60,7 +60,8 @@ test('address search with no match has no violations', async ({ page }) => {
   await mockGeocode(page)
   await page.goto('/')
   await page.getByLabel('Start point').fill('Nowhere, USA')
-  await page.getByRole('button', { name: 'FIND ROUTE' }).click()
+  // Enter resolves the typed text — the FIND_ROUTE button is gone (2026-09-02).
+  await page.keyboard.press('Enter')
   await expect(page.getByText('NOT_FOUND', { exact: false })).toBeVisible()
 
   const results = await new AxeBuilder({ page }).analyze()

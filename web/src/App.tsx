@@ -47,7 +47,6 @@ export default function App() {
     setTreeWeight,
     setStart: updateStart,
     setEnd: updateEnd,
-    clear: handleClear,
   } = useRouteQuery(
     parsePoint(initialParams.get('from')),
     parsePoint(initialParams.get('to')),
@@ -118,11 +117,9 @@ export default function App() {
             end={end}
             onSetStart={updateStart}
             onSetEnd={updateEnd}
-            onClear={handleClear}
             position={position}
             locationEnabled={locationEnabled}
             onEnableLocation={() => setLocationEnabled(true)}
-            canClear={start !== null || end !== null}
             error={error}
             selected={selected}
             baseline={baseline}

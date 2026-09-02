@@ -13,10 +13,10 @@
   gap: var(--space-md);
 }
 
-/* One form wraps both address fields plus the Find_route button (below) —
-   visually it's still just one flat list, this is purely so Enter in
-   either field submits both. */
-.routeForm {
+/* The two address fields, one column. A plain div since 2026-09-02 —
+   the wrapping <form> and its FIND_ROUTE submit went when routes started
+   auto-computing; Enter/blur resolution lives in AddressField now. */
+.addressFields {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
@@ -110,6 +110,44 @@
      purpose — an iPad in portrait is wider than the mobile breakpoint
      and zooms too. .fakePlaceholder below must stay the same size. */
   font-size: 1rem;
+  /* Room for the .fieldAccessory (✕ / ⌖) seated over the right edge —
+     reserved unconditionally so text never reflows when the accessory
+     appears with the first typed character. */
+  padding-right: 44px;
+}
+
+/* The in-field icon button (per-field ✕, the start field's ⌖): a 44px
+   touch target overlaying the input's right edge — absolute against
+   .suggestWrap, so in full-screen search mode it stays glued to the
+   input at the top. Chrome-less on purpose: a bordered box inside the
+   bordered input read as a button inside a button. */
+.fieldAccessory {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: 1rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.fieldAccessory:hover {
+  color: var(--text);
+}
+
+/* Acquiring state (⌖ pressed, no fix yet) — visibly parked, not broken.
+   Its "forever" failure mode is use-location-ux's problem, not styling's. */
+.fieldAccessory:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .addressInput::placeholder {
@@ -130,8 +168,13 @@
 .fakePlaceholder {
   position: absolute;
   left: var(--control-pad-x);
+  /* Stop short of the accessory slot, like the input's own padding does. */
+  right: 44px;
   top: 50%;
   transform: translateY(-50%);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--muted);
   font-size: 1rem; /* mirrors .addressInput — see the note there */
   pointer-events: none;
@@ -269,6 +312,17 @@
   margin: 0;
   font-size: var(--font-size-sm);
   color: var(--muted);
+}
+
+/* The empty status slot: same trick as .errorEmpty above — the zero-height
+   <p> stays mounted for its live-region announcement, but the field's flex
+   gap around it doesn't collapse, leaving a phantom --space-sm under every
+   input. Visible as asymmetry once the button row was gone: the divider's
+   top gap read 8px bigger than its bottom (user report 2026-09-02). The
+   negative margin cancels the gap; NOT_FOUND flips the class to
+   .addressStatus, which spaces normally. */
+.addressStatusEmpty {
+  margin: calc(-1 * var(--space-sm)) 0 0;
 }
 
 .presetGroup {
@@ -453,61 +507,7 @@
   margin: 0;
 }
 
-/* The one button that actually produces a route — solid fill, same
-   treatment the old per-field LOCK button had, so it outranks the
-   bordered .secondaryButton controls below it. */
-.primaryButton {
-  display: block;
-  width: 100%;
-  min-height: 44px;
-  margin: 0;
-  padding: var(--space-sm) var(--space-md);
-  background: var(--green-dim);
-  color: #fff;
-  /* A white hairline so the solid-fill primary reads as a bordered button
-     like the secondaries below it -- a --border (jade) edge would vanish
-     against the green fill, so white (user call 2026-09-01). box-sizing:
-     border-box (global) keeps the 44px min-height with the border added. */
-  border: 1px solid #fff;
-  border-radius: 0;
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.primaryButton:disabled {
-  opacity: 0.6;
-  cursor: wait;
-}
-
-/* Holds the location control (button or status text) and, once a route
-   exists, Clear route beside it. flex: 1 on each child means a lone child
-   still fills the row exactly as a block button did before. */
-.buttonRow {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.buttonRow > * {
-  flex: 1;
-  margin: 0;
-}
-
-.secondaryButton {
-  display: block;
-  width: 100%;
-  min-height: 44px;
-  margin: 0;
-  padding: var(--space-sm) var(--space-md);
-  background: var(--panel-raised);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 0;
-  font-size: var(--font-size-md);
-  cursor: pointer;
-}
-
-.secondaryButton:hover {
-  background: var(--line);
-}
+/* .primaryButton (FIND_ROUTE), .buttonRow, and .secondaryButton
+   (USE_LOCATION / CLEAR_ROUTE) were deleted 2026-09-02 with their
+   buttons: routes auto-compute, clearing moved into each field's ✕,
+   location into the start field's ⌖ (.fieldAccessory above). */
