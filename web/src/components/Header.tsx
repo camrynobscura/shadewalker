@@ -8,12 +8,10 @@ import styles from './Header.module.css'
    - the map page's wordmark is that page's <h1>; About has a real h1 of
      its own ("About Shade Walker"), so its wordmark is a styled <p> —
      one h1 per page;
-   - the "tap the map…" instructions line describes the app screen and
-     is absent on About;
-   - the ABOUT link self-links on About and carries aria-current, so
-     assistive tech (and any future styling) knows it's the current
-     page (user call 2026-09-01: same link on both pages, no MAP swap —
-     the wordmark and the footer already link back to the map). */
+   - the tagline/instructions block is map-page-only;
+   - the nav link is reciprocal (user call 2026-09-01, revisiting the
+     same-day same-link call): ABOUT on the map page, MAP on About —
+     with two pages, the nav names the OTHER destination. */
 export function Header({ page }: { page: 'map' | 'about' }) {
   const onMap = page === 'map'
   const Wordmark: 'h1' | 'p' = onMap ? 'h1' : 'p'
@@ -55,15 +53,18 @@ export function Header({ page }: { page: 'map' | 'about' }) {
       )}
       {/* A real navigation, not a bare link: a full page of its own
           deserves the landmark. margin-left auto rides the header's
-          flex row to the right edge. */}
+          flex row to the right edge. Reciprocal: each page links to the
+          other one. */}
       <nav className={styles.headerNav} aria-label="Site">
-        <a
-          className={styles.aboutLink}
-          href="/about.html"
-          aria-current={onMap ? undefined : 'page'}
-        >
-          ABOUT
-        </a>
+        {onMap ? (
+          <a className={styles.navLink} href="/about.html">
+            ABOUT
+          </a>
+        ) : (
+          <a className={styles.navLink} href="/">
+            MAP
+          </a>
+        )}
       </nav>
     </header>
   )

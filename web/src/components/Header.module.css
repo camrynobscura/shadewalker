@@ -32,7 +32,7 @@
 
 /* Terminal-chrome link, sized as a real target (padding brings it past
    the 24px AA floor) without adding header height. */
-.aboutLink {
+.navLink {
   display: inline-block;
   padding: var(--space-sm);
   font-size: var(--font-size-sm);
@@ -43,7 +43,7 @@
   text-underline-offset: 3px;
 }
 
-.aboutLink:hover {
+.navLink:hover {
   color: var(--green-dim);
 }
 
