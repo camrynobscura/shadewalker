@@ -103,7 +103,13 @@
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 0;
-  font-size: var(--font-size-md);
+  /* 1rem (16px), NOT the type scale's --font-size-md (14px): iOS Safari
+     auto-zooms the whole page when a focused text field is under 16px,
+     and the zoomed state is what exposed the mint canvas as a "green
+     box" with the keyboard up (2026-09-02). Applies at every width on
+     purpose — an iPad in portrait is wider than the mobile breakpoint
+     and zooms too. .fakePlaceholder below must stay the same size. */
+  font-size: 1rem;
 }
 
 .addressInput::placeholder {
@@ -127,7 +133,7 @@
   top: 50%;
   transform: translateY(-50%);
   color: var(--muted);
-  font-size: var(--font-size-md);
+  font-size: 1rem; /* mirrors .addressInput — see the note there */
   pointer-events: none;
 }
 
@@ -176,6 +182,81 @@
    .comparisonHint. */
 .suggestActive {
   background: rgba(0, 168, 107, 0.12);
+}
+
+/* ── Full-screen search mode (mobile) ──────────────────────────────────
+   Applied by AddressField while a field is focused on the mobile layout
+   (the JS side of the 720px breakpoint — see useMediaQuery.ts). The
+   focused field takes over the screen with its input at the TOP: that is
+   the actual fix for iOS Safari's keyboard-avoidance window scroll (the
+   "green box"), because a top-of-screen input gives Safari nothing to
+   scroll for — and the suggestion list gets the screen instead of a
+   240px strip. Same DOM, same combobox roles; only geometry changes. */
+.fieldExpanded {
+  position: fixed;
+  inset: 0;
+  z-index: 1500; /* above the map's controls tier (1000), below the skip link (2000) */
+  padding: var(--space-lg);
+  background: var(--panel);
+  overflow: hidden; /* the suggestion list scrolls, never the overlay itself */
+}
+
+/* Collapsed: display:contents so the label participates in .addressField's
+   column flex exactly as it did before this wrapper existed. Expanded: a
+   real row, label left, CANCEL right. */
+.fieldHead {
+  display: contents;
+}
+
+.expandedHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Text-chrome button, same voice as the header's nav link; padding alone
+   carries it past the 24px target floor. */
+.cancelSearch {
+  margin: 0;
+  padding: var(--space-sm);
+  background: none;
+  border: none;
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.1em;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* The wrap becomes the overlay's working column: input on top, list
+   filling the rest. min-height: 0 so the list can actually shrink-scroll
+   inside it. */
+.fieldExpanded .suggestWrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.fieldExpanded .addressInput {
+  flex: none;
+}
+
+/* The fake placeholder centers itself against .suggestWrap, which is now
+   screen-tall — pin it to the input's own 44px box instead. */
+.fieldExpanded .fakePlaceholder {
+  top: 22px;
+}
+
+/* In the overlay the list is the main content, not a floating dropdown:
+   static, filling the column, scrolling internally. Side borders dropped —
+   flush with the overlay's own padding it read as a stray box. */
+.fieldExpanded .suggestList {
+  position: static;
+  flex: 1;
+  max-height: none;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
 }
 
 /* No min-height: an AddressField's status paragraph is empty almost all

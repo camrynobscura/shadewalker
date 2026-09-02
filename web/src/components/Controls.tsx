@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { flushSync } from 'react-dom'
 import { geocode, reverseGeocode, type GeocodeResult, type Point, type RouteFeature } from '../api'
 import { formatCoords, formatDistance, spokenDistance } from '../format'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import { useGeocodeSuggestions } from '../hooks/useGeocodeSuggestions'
+import { MOBILE_LAYOUT_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
 import { compareRoutes, TREE_PRESETS } from '../presets'
 import { displayShade, LOW_SHADE_FRACTION } from '../shade'
 import styles from './Controls.module.css'
@@ -204,9 +206,81 @@ function AddressField({
   const listboxId = `${id}-listbox`
   const { suggestions, activeIndex, open } = field
 
+  /* Full-screen search mode (mobile only). The fields sit mid-screen on
+     the stacked mobile layout — below where the iOS keyboard's top edge
+     lands — so Safari scrolled the whole window to lift a focused field
+     into view, exposing bare canvas below the one-screen-tall app (the
+     "green box", 2026-09-02). Expanding the focused field to a fixed
+     full-screen layer puts the input at the TOP of the screen, so Safari
+     has nothing to scroll for — and the suggestion list gets real room,
+     which the squeezed mobile panel never had. Same DOM node, same
+     combobox semantics, just repositioned: focus never moves, so
+     `expanded` can simply BE "focused while mobile" — any blur (keyboard
+     Done, CANCEL, tabbing away) collapses it, which is also why it needs
+     no dialog role or focus trap. */
+  const isMobile = useMediaQuery(MOBILE_LAYOUT_QUERY)
+  const [focused, setFocused] = useState(false)
+  const expanded = focused && isMobile
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  /* While the overlay is open the correct window scroll is EXACTLY 0 —
+     the input is pinned to the top by design, and nothing at the document
+     level legitimately scrolls (the suggestion list scrolls itself). But
+     Safari queues its keyboard scroll-into-view against the field's
+     PRE-expansion position and lands it asynchronously, after both the
+     re-layout and any one-shot reset — a field tapped low in a scrolled
+     panel left the whole overlay shoved out of view that way (phone,
+     2026-09-02). So pin for the overlay's whole lifetime: any scroll that
+     appears while it's open gets put back, whenever it lands. */
+  useEffect(() => {
+    if (!expanded) return
+    const pin = () => {
+      if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0)
+    }
+    pin()
+    window.addEventListener('scroll', pin)
+    // Keyboard-avoidance can also move the visual viewport without a
+    // window scroll event; its own scroll/resize events catch that path.
+    const vv = window.visualViewport
+    vv?.addEventListener('scroll', pin)
+    vv?.addEventListener('resize', pin)
+    return () => {
+      window.removeEventListener('scroll', pin)
+      vv?.removeEventListener('scroll', pin)
+      vv?.removeEventListener('resize', pin)
+    }
+  }, [expanded])
+
+  /** Collapse the overlay (and the on-screen keyboard with it). */
+  function collapse() {
+    inputRef.current?.blur()
+  }
+
+  /* Expand BEFORE focus, not in response to it. On focus, Safari computes
+     its keyboard scroll-into-view against the field's position at that
+     instant — and depending on iOS version it delivers that move as a
+     window scroll (the pin above catches it) or as a pure visual-viewport
+     pan that no script can undo (a scrolled-down panel left the overlay
+     shoved out of view on the phone, 2026-09-02, while a newer-iOS
+     simulator behaved). Beating both: on touchstart — which fires before
+     any focus — flushSync the expanded layout in, then focus the input
+     synchronously (still inside the user gesture, so the keyboard still
+     opens). By the time Safari measures, the input is already at the top
+     of the screen and there is nothing to avoid. */
+  function onTouchStart() {
+    if (!isMobile || focused) return
+    flushSync(() => setFocused(true))
+    inputRef.current?.focus()
+  }
+
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    // Enter with no highlighted option falls through to the form submit
+    // (resolve) — in full-screen mode also close the keyboard, so the
+    // route appears on a fully visible map instead of behind the overlay.
+    if (e.key === 'Enter' && activeIndex < 0 && expanded) collapse()
     if (!open) {
       if (e.key === 'ArrowDown') field.openSuggestions()
+      if (e.key === 'Escape' && expanded) collapse() // nothing to close but the overlay
       return
     }
     if (e.key === 'ArrowDown') {
@@ -218,17 +292,50 @@ function AddressField({
     } else if (e.key === 'Enter' && activeIndex >= 0) {
       e.preventDefault() // pick the highlighted option instead of submitting the form
       field.selectSuggestion(suggestions[activeIndex])
+      if (expanded) collapse() // a picked address ends the search session
     } else if (e.key === 'Escape') {
       field.closeSuggestions()
     }
   }
 
   return (
-    <div className={styles.addressField}>
-      <label htmlFor={id}>{label}</label>
+    <div
+      className={expanded ? `${styles.addressField} ${styles.fieldExpanded}` : styles.addressField}
+      /* While expanded, a press on the overlay's DEAD SPACE must not
+         steal focus and collapse the session — the same preventDefault
+         the options and CANCEL use, widened to the container. The input
+         itself is exempted so its own mousedown still places the caret.
+         This also absorbs the browser's synthesized mouse events that
+         trail a touch tap and land at pre-expansion coordinates (they
+         collapsed the overlay the instant it opened under Playwright's
+         tap, 2026-09-02). */
+      onMouseDown={(e) => {
+        if (expanded && e.target !== inputRef.current) e.preventDefault()
+      }}
+    >
+      {/* display:contents when collapsed, so the label lays out exactly as
+          it always did as a direct flex child; as a flex row only when
+          expanded, to seat CANCEL beside it. */}
+      <div className={expanded ? styles.expandedHead : styles.fieldHead}>
+        <label htmlFor={id}>{label}</label>
+        {expanded && (
+          /* mousedown preventDefault: same trick as the options below —
+             keep the tap from blurring the input first, so this click is
+             the one deliberate collapse, not a blur race. */
+          <button
+            type="button"
+            className={styles.cancelSearch}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={collapse}
+          >
+            CANCEL
+          </button>
+        )}
+      </div>
       <div className={styles.suggestWrap}>
         <input
           id={id}
+          ref={inputRef}
           className={styles.addressInput}
           type="text"
           /* Spoken name drops the underscore ("Start point", not "Start
@@ -250,7 +357,12 @@ function AddressField({
           aria-activedescendant={open && activeIndex >= 0 ? `${id}-opt-${activeIndex}` : undefined}
           onChange={(e) => field.onChange(e.target.value)}
           onKeyDown={onKeyDown}
-          onBlur={field.onBlur}
+          onTouchStart={onTouchStart}
+          onFocus={() => setFocused(true)}
+          onBlur={() => {
+            setFocused(false)
+            field.onBlur()
+          }}
         />
         {/* A FAKE placeholder: a real one is announced in the value slot
             before the label (skipping into the panel said "e.g. 250 Court
