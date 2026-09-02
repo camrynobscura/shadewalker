@@ -205,9 +205,8 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
                 to the rejected glitch candidate. */}
             {/* No visible text (user call, 2026-09-01, after trying the
                 label overlaid, above, and colored): the vine alone is the
-                pending state -- motion with a direction reads as work, the
-                FIND_ROUTE button already says FINDING…, and the
-                visually-hidden sentence above keeps the spoken
+                pending state -- motion with a direction reads as work, and
+                the visually-hidden sentence above keeps the spoken
                 announcement intact. */}
             <div className={styles.vineStage}>
               <svg viewBox="0 0 520 64" preserveAspectRatio="none" className={styles.vineSvg}>

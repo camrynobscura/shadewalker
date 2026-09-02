@@ -99,6 +99,11 @@
   right: 10px;
   bottom: 24px;
   z-index: 1000; /* above Leaflet's map panes */
+  /* Seats the SVG crosshair on the text's centerline — an inline svg
+     rides the baseline and looks dropped otherwise. */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
   padding: var(--space-sm) 14px;
   min-height: 44px; /* comfortable touch target */
   background: var(--panel-raised);

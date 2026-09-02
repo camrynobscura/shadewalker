@@ -5,15 +5,13 @@ test('searching two addresses draws a route with stats and directions', async ({
   await mockGeocode(page)
   await page.goto('/')
 
-  // Escape after each fill: fill() counts as typing, so the autocomplete
-  // dropdown opens after its debounce and would float over the next
-  // control this test needs to reach (the listbox deliberately overlays
-  // rather than pushes). Dismissing it is exactly what a person does too.
-  await page.getByLabel('Start point').fill('250 Court St')
-  await page.keyboard.press('Escape')
-  await page.getByLabel('End point').fill('3rd St & 3rd Ave')
-  await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: 'FIND ROUTE' }).click()
+  // Enter after each fill: with FIND_ROUTE gone (2026-09-02) typed text
+  // resolves on Enter (or blur) — Enter also dismisses the autocomplete
+  // dropdown that fill()'s synthetic typing opens.
+  await page.getByRole('combobox', { name: 'Start point' }).fill('250 Court St')
+  await page.keyboard.press('Enter')
+  await page.getByRole('combobox', { name: 'End point' }).fill('3rd St & 3rd Ave')
+  await page.keyboard.press('Enter')
 
   await expect(page.getByText('distance', { exact: true })).toBeVisible()
   await expect(page.getByText('trees', { exact: true })).toBeVisible()
@@ -27,8 +25,8 @@ test('searching two addresses draws a route with stats and directions', async ({
   // It's compared by value against what resolve() already set, precisely
   // so this can't happen; assert the typed text actually survives, not
   // just that the route drew.
-  await expect(page.getByLabel('Start point')).toHaveValue('250 Court St')
-  await expect(page.getByLabel('End point')).toHaveValue('3rd St & 3rd Ave')
+  await expect(page.getByRole('combobox', { name: 'Start point' })).toHaveValue('250 Court St')
+  await expect(page.getByRole('combobox', { name: 'End point' })).toHaveValue('3rd St & 3rd Ave')
 })
 
 test('the share button copies the route URL to the clipboard', async ({ page }) => {
@@ -52,8 +50,8 @@ test('loading a shared route URL fills in the address fields via reverse geocodi
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
 
-  await expect(page.getByLabel('Start point')).toHaveValue('250 Court St')
-  await expect(page.getByLabel('End point')).toHaveValue('3rd Ave')
+  await expect(page.getByRole('combobox', { name: 'Start point' })).toHaveValue('250 Court St')
+  await expect(page.getByRole('combobox', { name: 'End point' })).toHaveValue('3rd Ave')
 })
 
 test('the About page is a scrollable document', async ({ page }) => {

@@ -1,8 +1,11 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import { geocode, reverseGeocode, type GeocodeResult, type Point, type RouteFeature } from '../api'
 import { formatCoords, formatDistance, spokenDistance } from '../format'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import { useGeocodeSuggestions } from '../hooks/useGeocodeSuggestions'
+import { MOBILE_LAYOUT_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
+import { ClearIcon, CrosshairIcon } from './icons'
 import { compareRoutes, TREE_PRESETS } from '../presets'
 import { displayShade, LOW_SHADE_FRACTION } from '../shade'
 import styles from './Controls.module.css'
@@ -91,13 +94,32 @@ function useAddressField(onResolve: (p: Point | null) => void, externalPoint: Po
    * shouldn't outlive the text (user report 2026-08-31). Only on blur,
    * never per-keystroke, so retyping an address doesn't nuke the marker
    * mid-edit. Guarded on externalPoint so tabbing through an
-   * already-empty field does nothing. */
-  function onBlur() {
+   * already-empty field does nothing.
+   *
+   * Blur is also where typed text gets geocoded since 2026-09-02 — the
+   * FIND_ROUTE button's old job, moved to the moment attention leaves
+   * the field (the button was dead weight once suggestion picks and map
+   * taps auto-routed). `abandon` skips that: CANCEL and Escape end the
+   * mobile search WITHOUT acting on half-typed text. */
+  function onBlur(abandon = false) {
     setSuggestOn(false)
     if (query.trim() === '' && externalPoint) {
       shownPointRef.current = null
       onResolve(null)
+      return
     }
+    if (!abandon) void resolve()
+  }
+
+  /** The per-field ✕: text, point, and marker drop together — one field's
+   * worth of the old CLEAR_ROUTE (removed 2026-09-02; clearing both is
+   * two taps, or the wordmark's full reset). */
+  function clearField() {
+    setQuery('')
+    setStatus('idle')
+    setSuggestOn(false)
+    shownPointRef.current = null
+    onResolve(null)
   }
 
   /** ArrowDown on a closed field re-opens it (ARIA combobox convention) --
@@ -114,6 +136,12 @@ function useAddressField(onResolve: (p: Point | null) => void, externalPoint: Po
     if (!query.trim() || status !== 'idle') return
     setStatus('searching')
     const result = await geocode(query)
+    // A point that landed while the lookup was in flight — a map tap, a
+    // picked suggestion, USE_LOCATION — supersedes the typed text this
+    // resolve started from; drop the response instead of stomping it.
+    // (Those paths already set query/status, so bailing leaves the field
+    // consistent.) Likelier now that blur triggers resolve (2026-09-02).
+    if (shownPointRef.current) return
     if (result) {
       setStatus('found')
       shownPointRef.current = { lat: result.lat, lon: result.lon }
@@ -177,6 +205,7 @@ function useAddressField(onResolve: (p: Point | null) => void, externalPoint: Po
     closeSuggestions,
     openSuggestions,
     onBlur,
+    clearField,
   }
 }
 
@@ -193,10 +222,15 @@ function AddressField({
   label,
   example,
   field,
+  accessory,
 }: {
   label: string
   example: string
   field: ReturnType<typeof useAddressField>
+  /** Icon button seated inside the input's right edge — the per-field ✕,
+   * or the start field's ⌖ (2026-09-02, replacing the button row).
+   * Composed by Controls, which owns the field state the choice hangs on. */
+  accessory?: ReactNode
 }) {
   // useId generates a unique, SSR-safe id so <label htmlFor> can point at
   // the input even when the component appears twice on the page.
@@ -204,9 +238,98 @@ function AddressField({
   const listboxId = `${id}-listbox`
   const { suggestions, activeIndex, open } = field
 
+  /* Full-screen search mode (mobile only). The fields sit mid-screen on
+     the stacked mobile layout — below where the iOS keyboard's top edge
+     lands — so Safari scrolled the whole window to lift a focused field
+     into view, exposing bare canvas below the one-screen-tall app (the
+     "green box", 2026-09-02). Expanding the focused field to a fixed
+     full-screen layer puts the input at the TOP of the screen, so Safari
+     has nothing to scroll for — and the suggestion list gets real room,
+     which the squeezed mobile panel never had. Same DOM node, same
+     combobox semantics, just repositioned: focus never moves, so
+     `expanded` can simply BE "focused while mobile" — any blur (keyboard
+     Done, CANCEL, tabbing away) collapses it, which is also why it needs
+     no dialog role or focus trap. */
+  const isMobile = useMediaQuery(MOBILE_LAYOUT_QUERY)
+  const [focused, setFocused] = useState(false)
+  const expanded = focused && isMobile
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  /* While the overlay is open the correct window scroll is EXACTLY 0 —
+     the input is pinned to the top by design, and nothing at the document
+     level legitimately scrolls (the suggestion list scrolls itself). But
+     Safari queues its keyboard scroll-into-view against the field's
+     PRE-expansion position and lands it asynchronously, after both the
+     re-layout and any one-shot reset — a field tapped low in a scrolled
+     panel left the whole overlay shoved out of view that way (phone,
+     2026-09-02). So pin for the overlay's whole lifetime: any scroll that
+     appears while it's open gets put back, whenever it lands. */
+  useEffect(() => {
+    if (!expanded) return
+    const pin = () => {
+      if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0)
+    }
+    pin()
+    window.addEventListener('scroll', pin)
+    // Keyboard-avoidance can also move the visual viewport without a
+    // window scroll event; its own scroll/resize events catch that path.
+    const vv = window.visualViewport
+    vv?.addEventListener('scroll', pin)
+    vv?.addEventListener('resize', pin)
+    return () => {
+      window.removeEventListener('scroll', pin)
+      vv?.removeEventListener('scroll', pin)
+      vv?.removeEventListener('resize', pin)
+    }
+  }, [expanded])
+
+  /* Whether the NEXT blur should skip acting on typed text (CANCEL,
+     Escape) — a ref, not state: it's consumed by the blur handler in the
+     same interaction, never rendered. */
+  const abandonRef = useRef(false)
+
+  /** Collapse the overlay (and the on-screen keyboard with it).
+   * `abandon` marks the blur as a walk-away, so half-typed text isn't
+   * geocoded on the way out. */
+  function collapse(abandon = false) {
+    abandonRef.current = abandon
+    inputRef.current?.blur()
+  }
+
+  /* Expand BEFORE focus, not in response to it. On focus, Safari computes
+     its keyboard scroll-into-view against the field's position at that
+     instant — and depending on iOS version it delivers that move as a
+     window scroll (the pin above catches it) or as a pure visual-viewport
+     pan that no script can undo (a scrolled-down panel left the overlay
+     shoved out of view on the phone, 2026-09-02, while a newer-iOS
+     simulator behaved). Beating both: on touchstart — which fires before
+     any focus — flushSync the expanded layout in, then focus the input
+     synchronously (still inside the user gesture, so the keyboard still
+     opens). By the time Safari measures, the input is already at the top
+     of the screen and there is nothing to avoid. */
+  function onTouchStart() {
+    if (!isMobile || focused) return
+    flushSync(() => setFocused(true))
+    inputRef.current?.focus()
+  }
+
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    // Enter with no highlighted option resolves the typed text. Handled
+    // here, not via form submission: with FIND_ROUTE gone the form has no
+    // submit button, and a form with two text inputs and no submit button
+    // suppresses implicit submission entirely — Enter (and iOS's Go key,
+    // which arrives as Enter) would silently do nothing. In full-screen
+    // mode also close the keyboard, so the route appears on a fully
+    // visible map instead of behind the overlay.
+    if (e.key === 'Enter' && activeIndex < 0) {
+      e.preventDefault()
+      void field.resolve()
+      if (expanded) collapse()
+      return
+    }
     if (!open) {
       if (e.key === 'ArrowDown') field.openSuggestions()
+      if (e.key === 'Escape' && expanded) collapse(true) // walk away; don't geocode leftovers
       return
     }
     if (e.key === 'ArrowDown') {
@@ -218,17 +341,50 @@ function AddressField({
     } else if (e.key === 'Enter' && activeIndex >= 0) {
       e.preventDefault() // pick the highlighted option instead of submitting the form
       field.selectSuggestion(suggestions[activeIndex])
+      if (expanded) collapse() // a picked address ends the search session
     } else if (e.key === 'Escape') {
       field.closeSuggestions()
     }
   }
 
   return (
-    <div className={styles.addressField}>
-      <label htmlFor={id}>{label}</label>
+    <div
+      className={expanded ? `${styles.addressField} ${styles.fieldExpanded}` : styles.addressField}
+      /* While expanded, a press on the overlay's DEAD SPACE must not
+         steal focus and collapse the session — the same preventDefault
+         the options and CANCEL use, widened to the container. The input
+         itself is exempted so its own mousedown still places the caret.
+         This also absorbs the browser's synthesized mouse events that
+         trail a touch tap and land at pre-expansion coordinates (they
+         collapsed the overlay the instant it opened under Playwright's
+         tap, 2026-09-02). */
+      onMouseDown={(e) => {
+        if (expanded && e.target !== inputRef.current) e.preventDefault()
+      }}
+    >
+      {/* display:contents when collapsed, so the label lays out exactly as
+          it always did as a direct flex child; as a flex row only when
+          expanded, to seat CANCEL beside it. */}
+      <div className={expanded ? styles.expandedHead : styles.fieldHead}>
+        <label htmlFor={id}>{label}</label>
+        {expanded && (
+          /* mousedown preventDefault: same trick as the options below —
+             keep the tap from blurring the input first, so this click is
+             the one deliberate collapse, not a blur race. */
+          <button
+            type="button"
+            className={styles.cancelSearch}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => collapse(true)}
+          >
+            CANCEL
+          </button>
+        )}
+      </div>
       <div className={styles.suggestWrap}>
         <input
           id={id}
+          ref={inputRef}
           className={styles.addressInput}
           type="text"
           /* Spoken name drops the underscore ("Start point", not "Start
@@ -250,8 +406,16 @@ function AddressField({
           aria-activedescendant={open && activeIndex >= 0 ? `${id}-opt-${activeIndex}` : undefined}
           onChange={(e) => field.onChange(e.target.value)}
           onKeyDown={onKeyDown}
-          onBlur={field.onBlur}
+          onTouchStart={onTouchStart}
+          onFocus={() => setFocused(true)}
+          onBlur={() => {
+            setFocused(false)
+            const abandoned = abandonRef.current
+            abandonRef.current = false
+            field.onBlur(abandoned)
+          }}
         />
+        {accessory}
         {/* A FAKE placeholder: a real one is announced in the value slot
             before the label (skipping into the panel said "e.g. 250 Court
             St" instead of "Start_point"), and the user wants the example
@@ -277,7 +441,10 @@ function AddressField({
                 // keeps focus in the field, so blur can't close the list
                 // out from under the click that's about to land.
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => field.selectSuggestion(suggestion)}
+                onClick={() => {
+                  field.selectSuggestion(suggestion)
+                  if (expanded) collapse() // a picked address ends the search session
+                }}
                 onMouseMove={() => field.setActiveIndex(i)}
               >
                 {suggestion.label}
@@ -290,7 +457,7 @@ function AddressField({
           result without stealing focus. Nothing shown for 'searching' —
           the Find_route button's own "FINDING…" label already covers that,
           and showing it here too just flickered on and off per field. */}
-      <p className={styles.addressStatus} role="status">
+      <p className={field.status === 'notfound' ? styles.addressStatus : styles.addressStatusEmpty} role="status">
         {field.status === 'notfound' && (
           <>
             <span aria-hidden="true">// NOT_FOUND:</span>
@@ -300,6 +467,31 @@ function AddressField({
         )}
       </p>
     </div>
+  )
+}
+
+/** The in-field ✕ (2026-09-02, replacing CLEAR_ROUTE): clears one field —
+ * and with it that field's point and marker. mousedown preventDefault so
+ * the tap neither steals focus nor, on mobile, reads as a reason to
+ * expand or collapse the search — clearing is an edit, not a session
+ * boundary. */
+function ClearFieldButton({
+  field,
+  spokenLabel,
+}: {
+  field: ReturnType<typeof useAddressField>
+  spokenLabel: string
+}) {
+  return (
+    <button
+      type="button"
+      className={styles.fieldAccessory}
+      aria-label={`Clear ${spokenLabel}`}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => field.clearField()}
+    >
+      <ClearIcon />
+    </button>
   )
 }
 
@@ -314,11 +506,9 @@ interface ControlsProps {
   end: Point | null
   onSetStart: (p: Point | null) => void
   onSetEnd: (p: Point | null) => void
-  onClear: () => void
   position: GeoPosition | null
   locationEnabled: boolean
   onEnableLocation: () => void
-  canClear: boolean
   /** The currently selected Shade_priority preset's route. */
   selected: RouteFeature | null
   /** The NONE (tree_weight=0) route -- the baseline `selected` is compared
@@ -339,11 +529,9 @@ export function Controls({
   end: endPoint,
   onSetStart,
   onSetEnd,
-  onClear,
   position,
   locationEnabled,
   onEnableLocation,
-  canClear,
   selected,
   baseline,
   error,
@@ -361,7 +549,40 @@ export function Controls({
 
   const start = useAddressField(onSetStart, startPoint)
   const end = useAddressField(onSetEnd, endPoint)
-  const isSearching = start.status === 'searching' || end.status === 'searching'
+
+  /* The start field's empty-state accessory is the location control
+     (2026-09-02, replacing the USE_LOCATION button row): "use my location"
+     is a start-point affordance, so it lives in the start field — same
+     slot the ✕ takes over once there's text to clear. Three states mirror
+     the old button row's: not yet enabled (tap = permission prompt on a
+     user gesture), fix in hand (tap = set start), and acquiring (disabled;
+     the eternal-ACQUIRING failure UX is `use-location-ux`'s job, not
+     this reposition's). Same ⌖ glyph as the map's own locate button. */
+  const locationAccessory = !locationEnabled ? (
+    <button
+      type="button"
+      className={styles.fieldAccessory}
+      aria-label="Use location"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onEnableLocation}
+    >
+      <CrosshairIcon />
+    </button>
+  ) : position ? (
+    <button
+      type="button"
+      className={styles.fieldAccessory}
+      aria-label="Set start point to my location"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => onSetStart(position)}
+    >
+      <CrosshairIcon />
+    </button>
+  ) : (
+    <button type="button" className={styles.fieldAccessory} aria-label="Acquiring location" disabled>
+      <CrosshairIcon />
+    </button>
+  )
 
   return (
     <>
@@ -393,60 +614,30 @@ export function Controls({
             </>
           )}
         </p>
-        {/* One form for both fields, so Enter in either one — or the button —
-            resolves whichever isn't already resolved. Each field's own
-            resolve() no-ops on an empty or already-resolved query, so this
-            is safe to fire even if only one field changed. */}
-        <form
-          className={styles.routeForm}
-          onSubmit={(e) => {
-            e.preventDefault()
-            start.resolve()
-            end.resolve()
-          }}
-        >
+        {/* No FIND_ROUTE button and no form since 2026-09-02: routes
+            auto-compute the moment both points exist (suggestion picks,
+            map taps), typed text resolves on Enter (handled in
+            AddressField's keydown — a two-input form with no submit
+            button gets no implicit submission) and on blur. A plain div:
+            keeping a <form> that can never submit would be lying to
+            assistive tech. */}
+        <div className={styles.addressFields}>
           {/* Both examples verified against /geocode (2026-09-01): each
               resolves to the right spot in the Village, inside the landing
               view. Tempting alternatives fail silently -- "45 Charles St"
               lands in Alden Manor, "99 Perry St" on Staten Island. */}
-          <AddressField label="Start_point" example="Washington Square Park" field={start} />
-          <AddressField label="End_point" example="24 East 7th St" field={end} />
-          <button
-            type="submit"
-            className={styles.primaryButton}
-            disabled={isSearching}
-            aria-label={isSearching ? 'FINDING' : 'FIND ROUTE'}
-          >
-            {isSearching ? 'FINDING…' : 'FIND_ROUTE'}
-          </button>
-        </form>
-
-        {/* Location and Clear share a row — both are secondary, one-off
-            actions, as opposed to Start/End (always needed) and Shade
-            priority (a standing preference). Location is opt-in: first a
-            button that *requests* it (triggering the browser permission
-            prompt on a user gesture, never on load), which then becomes
-            "use it" once a fix arrives. */}
-        <div className={styles.buttonRow}>
-          {!locationEnabled ? (
-            <button type="button" className={styles.secondaryButton} onClick={onEnableLocation} aria-label="USE LOCATION">
-              USE_LOCATION
-            </button>
-          ) : position ? (
-            <button type="button" className={styles.secondaryButton} onClick={() => onSetStart(position)} aria-label="SET START POINT">
-              SET_START_POINT
-            </button>
-          ) : (
-            <p className={styles.addressStatus} role="status">
-              ACQUIRING…
-            </p>
-          )}
-
-          {canClear && (
-            <button type="button" className={styles.secondaryButton} onClick={onClear} aria-label="CLEAR ROUTE">
-              CLEAR_ROUTE
-            </button>
-          )}
+          <AddressField
+            label="Start_point"
+            example="Washington Square Park"
+            field={start}
+            accessory={start.query !== '' ? <ClearFieldButton field={start} spokenLabel="start point" /> : locationAccessory}
+          />
+          <AddressField
+            label="End_point"
+            example="24 East 7th St"
+            field={end}
+            accessory={end.query !== '' ? <ClearFieldButton field={end} spokenLabel="end point" /> : undefined}
+          />
         </div>
       </div>
 

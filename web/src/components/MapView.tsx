@@ -13,6 +13,7 @@ import {
 } from 'react-leaflet'
 import type { CoverageFeature, Point, RouteFeature } from '../api'
 import type { GeoPosition } from '../hooks/useGeolocation'
+import { CrosshairIcon } from './icons'
 import styles from './MapView.module.css'
 
 // Where the map opens before any route exists: Washington Square, framing
@@ -247,11 +248,11 @@ function LocateButton({ position }: { position: GeoPosition | null }) {
       className={styles.locateButton}
       onClick={() => map.setView([position.lat, position.lon], 16, { animate: !reducedMotion() })}
     >
-      {/* Same treatment as the legend swatches and A/B markers elsewhere in
-          this file: the glyph is decoration, the real accessible name is
-          the text after it. Without aria-hidden, some screen readers
-          announce the Unicode character's own name before "Locate me". */}
-      <span aria-hidden="true">⌖</span> Locate me
+      {/* Icon is decoration (aria-hidden inside the component); the text
+          after it is the accessible name. SVG, not the ⌖ character — that
+          glyph renders as tofu in iOS's mono fallback chain (2026-09-02),
+          and it's the same mark as the start field's location accessory. */}
+      <CrosshairIcon /> Locate me
     </button>
   )
 }

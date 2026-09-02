@@ -26,7 +26,6 @@ export interface UseRouteQueryResult {
   setTreeWeight: (weight: number) => void
   setStart: (point: Point | null) => void
   setEnd: (point: Point | null) => void
-  clear: () => void
 }
 
 /** Owns the request → response lifecycle for a route: start/end/treeWeight
@@ -74,13 +73,6 @@ export function useRouteQuery(
   function setEnd(p: Point | null) {
     setSnappedEnd(null)
     setEndRaw(p)
-  }
-
-  function clear() {
-    setStart(null)
-    setEnd(null)
-    setRoute(null)
-    setError(null)
   }
 
   // Fetch whenever start/end changes -- deliberately NOT treeWeight, see
@@ -136,6 +128,5 @@ export function useRouteQuery(
     setTreeWeight,
     setStart,
     setEnd,
-    clear,
   }
 }
