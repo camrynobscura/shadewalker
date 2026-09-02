@@ -1,5 +1,28 @@
 import styles from './Header.module.css'
 
+/* Whether this page load gets the cursor's three-blink hello. Map page
+   only, and once per TAB SESSION (user call 2026-09-01): every page here
+   is a full navigation, so without the sessionStorage memory the blink
+   re-fired on About and on every return trip. Module-level memo, not
+   state: computed once per page load, stable across re-renders (and
+   StrictMode's double-invocations, which would otherwise consume the
+   flag before the real render read it). try/catch because storage
+   access can throw (private modes); the fallback blinks per map load,
+   which is the pre-fix behavior minus About. */
+let blinkDecision: boolean | null = null
+function cursorShouldBlink(onMap: boolean): boolean {
+  if (!onMap) return false
+  if (blinkDecision === null) {
+    try {
+      blinkDecision = sessionStorage.getItem('sw-cursor-blinked') === null
+      if (blinkDecision) sessionStorage.setItem('sw-cursor-blinked', '1')
+    } catch {
+      blinkDecision = true
+    }
+  }
+  return blinkDecision
+}
+
 /* The one site header, shared by the map page and About (user call
    2026-09-01 — the two pages' headers had already drifted apart, and
    every redesign would have had to land twice; About became a second
@@ -28,7 +51,14 @@ export function Header({ page }: { page: 'map' | 'about' }) {
         <a href="/" className={styles.homeLink} aria-label="Shade Walker, home">
           Shade_walker
           {/* Decorative terminal cursor — never announced. */}
-          <span className={styles.cursor} aria-hidden="true" />
+          <span
+            className={
+              cursorShouldBlink(onMap)
+                ? `${styles.cursor} ${styles.cursorBlink}`
+                : styles.cursor
+            }
+            aria-hidden="true"
+          />
         </a>
       </Wordmark>
       {/* Tagline + instructions ride BESIDE the wordmark (user call
