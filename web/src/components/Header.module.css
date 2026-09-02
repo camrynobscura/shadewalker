@@ -1,0 +1,152 @@
+/* The shared site header — one component for the map page and About
+   (user call 2026-09-01; About became a second React entry for exactly
+   this, after its hand-made mini header drifted). Rules moved verbatim
+   from App.module.css the same day. */
+
+.header {
+  /* One row: wordmark left, the two text lines beside it (user call
+     2026-08-30 — stacked, the header spent ~130px on what one row says
+     in ~70). Vertical padding stepped down xl -> lg with the height win.
+     flex-wrap so a viewport too narrow for the pair drops the text
+     block below the wordmark instead of clipping. */
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-2xl);
+  padding: var(--space-lg) var(--space-2xl);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The tagline + instructions pair, stacked flush beside the wordmark —
+   no gap at all (user call 2026-08-30): line-height alone separates
+   them, reading as one tight terminal block. */
+.headerText {
+  display: flex;
+  flex-direction: column;
+}
+
+.headerNav {
+  margin-left: auto;
+}
+
+/* Terminal-chrome link, sized as a real target (padding brings it past
+   the 24px AA floor) without adding header height. */
+.navLink {
+  display: inline-block;
+  padding: var(--space-sm);
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.1em;
+  /* Ink normally, jade on hover (user call 2026-09-01) -- the reverse of
+     before. */
+  color: var(--text);
+  text-underline-offset: 3px;
+}
+
+.navLink:hover {
+  color: var(--green-dim);
+}
+
+/* The wordmark-as-home-link inherits the masthead type; no default link
+   underline/color -- it reads as the logo, and the pointer cursor is the
+   only affordance it needs. */
+.homeLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.title {
+  margin: 0;
+  /* Masthead scale, not body-text scale — at the old 16px the h1 read as
+     a form label. The glitch here is behavioral (the blinking cursor
+     below), not chromatic — no misprint fringes on this treatment. */
+  font-size: 1.7rem; /* ~27px */
+  /* Explicit, because the element varies: the map page renders this as
+     <h1> (browser default bold) and About as <p> (default 400) — the
+     wordmark looked thin on About until the weight was pinned (caught
+     2026-09-01, the same UA-default trap as RouteStats' .sectionTitle). */
+  font-weight: 700;
+  line-height: 1.1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* The terminal-prompt cursor after the wordmark — solid by default; the
+   blink is a separate class Header.tsx adds only on the ORIGINAL map-page
+   landing of a tab session (user call 2026-09-01: it re-fired on every
+   navigation, About included). */
+.cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 0.95em;
+  margin-left: 0.12em;
+  vertical-align: text-bottom;
+  background: var(--magenta);
+}
+
+/* Blinks three times, then settles solid: WCAG 2.2.2 only allows
+   auto-playing blinking for five seconds unless the user can pause it,
+   and 3 x 1.1s stays under that. Reduced-motion users never see it blink
+   at all — the global rule in index.css freezes animations, leaving it
+   solid. */
+.cursorBlink {
+  animation: blink 1.1s steps(1) 3;
+}
+
+@keyframes blink {
+  0%,
+  54% {
+    opacity: 1;
+  }
+
+  55%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.tagline {
+  /* A <p> beside the wordmark since 2026-08-30, not a span inside it --
+     the accessible heading is just the wordmark now, instead of the whole
+     "Shade_walker > find the shadiest..." sentence a screen reader's
+     heading navigation used to read out. */
+  margin: 0;
+  font-weight: 400;
+  font-style: italic;
+  font-size: var(--font-size-sm);
+  /* Ink, not jade (user call 2026-09-01): the muted green read as hard to
+     read. Kept italic. */
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.instructions {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  /* Ink, not jade -- pairs with .tagline above (user call 2026-09-01). */
+  color: var(--text);
+  font-style: italic;
+}
+
+/* The header's slice of the app's <=720px breakpoint — the layout half
+   (map/panel stacking) stays in App.module.css. */
+@media (max-width: 720px) {
+  .header {
+    padding: var(--space-lg);
+  }
+}
+
+/* The header runs out of room for wordmark + both subtitles + About in one
+   row well before the map/panel need to stack (measured ~965px), so its
+   reflow gets its own wider breakpoint: wordmark + About share the top row
+   (About pushed right by its margin-left:auto), and the tagline +
+   instructions drop to a full-width row beneath both (user call
+   2026-09-01). flex-basis:100% forces the text block onto its own line;
+   order:3 keeps it after About so it doesn't split the wordmark/About row. */
+@media (max-width: 980px) {
+  .headerText {
+    order: 3;
+    flex-basis: 100%;
+  }
+}

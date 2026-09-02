@@ -1,7 +1,9 @@
 /* The About page's own styles, layered on the shared Greenhouse tokens.
-   A static second page (decided 2026-08-30): no router, no React — plain
-   semantic HTML that Vite builds as a second entry (vite.config.ts
-   rollupOptions.input), served by the same static mount as the app. */
+   A second React ENTRY since 2026-09-01 (was plain HTML from 2026-08-30;
+   reversed so the header is the same component the map page renders —
+   see src/about.tsx). Still no router: vite.config.ts builds about.html
+   as its own entry. The header's styles live in Header.module.css; this
+   file covers only the prose + footer. */
 @import './index.css';
 
 /* About is a normal scrolling DOCUMENT. index.css (imported above for the
@@ -14,32 +16,6 @@ html,
 body {
   height: auto;
   overflow: visible;
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-lg) var(--space-2xl);
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-}
-
-.wordmark {
-  margin: 0;
-  font-size: var(--font-size-md);
-  letter-spacing: 0.06em;
-}
-
-.wordmark a {
-  color: var(--text);
-  text-decoration: none;
-  font-weight: 700;
-}
-
-.backlink {
-  margin: 0;
-  font-size: var(--font-size-sm);
 }
 
 .page {
@@ -118,7 +94,6 @@ body {
   margin-bottom: 0;
 }
 
-.footer a,
-.backlink a {
+.footer a {
   color: var(--green-dim);
 }
