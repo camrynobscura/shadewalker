@@ -36,24 +36,23 @@ export function Header({ page }: { page: 'map' | 'about' }) {
       {/* Tagline + instructions ride BESIDE the wordmark (user call
           2026-08-30: the header was spending three stacked lines of
           height on text that earns one row). Siblings of the wordmark,
-          not inside it: the accessible heading stays just the wordmark. */}
-      <div className={styles.headerText}>
-        <p className={styles.tagline}>
-          {/* The prompt glyph is decoration -- unspoken, or every read
-              starts with "greater than" (VoiceOver pass, 2026-08-31). */}
-          <span aria-hidden="true">&#62; </span>find the shadiest walking route in NYC
-        </p>
-        {/* On the map page this never toggles on route state -- it once
-            hid itself when a route existed, and re-picking a point made
-            it flicker in and out, shifting the layout on every click.
-            On About it's absent by design: it instructs a screen that
-            isn't there. */}
-        {onMap && (
+          not inside it: the accessible heading stays just the wordmark.
+          The whole block is map-page-only (user call 2026-09-01): About's
+          header is just wordmark + nav. On the map the instructions line
+          never toggles on route state -- it once hid itself when a route
+          existed and flickered on every click. */}
+      {onMap && (
+        <div className={styles.headerText}>
+          <p className={styles.tagline}>
+            {/* The prompt glyph is decoration -- unspoken, or every read
+                starts with "greater than" (VoiceOver pass, 2026-08-31). */}
+            <span aria-hidden="true">&#62; </span>find the shadiest walking route in NYC
+          </p>
           <p className={styles.instructions}>
             <span aria-hidden="true">&#62; </span>tap the map to set a start and end point, or search two addresses below
           </p>
-        )}
-      </div>
+        </div>
+      )}
       {/* A real navigation, not a bare link: a full page of its own
           deserves the landmark. margin-left auto rides the header's
           flex row to the right edge. */}

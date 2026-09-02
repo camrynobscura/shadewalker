@@ -61,6 +61,11 @@
      a form label. The glitch here is behavioral (the blinking cursor
      below), not chromatic — no misprint fringes on this treatment. */
   font-size: 1.7rem; /* ~27px */
+  /* Explicit, because the element varies: the map page renders this as
+     <h1> (browser default bold) and About as <p> (default 400) — the
+     wordmark looked thin on About until the weight was pinned (caught
+     2026-09-01, the same UA-default trap as RouteStats' .sectionTitle). */
+  font-weight: 700;
   line-height: 1.1;
   text-transform: uppercase;
   letter-spacing: 0.06em;
