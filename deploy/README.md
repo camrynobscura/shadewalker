@@ -98,10 +98,11 @@ sudo mkdir -p /var/log/caddy && sudo chown caddy:caddy /var/log/caddy
 # Prove the deployable works locally before shipping it: one uvicorn
 # process serving the real dist + API + rate limiter + headers, exactly
 # as the box runs it. (Needs a local data/export/ + the build above.)
-# This run also (re)writes data/export/.coverage_cache.json, which ships
-# with the deploy — the box validates it by CONTENT (graph_store.
-# _export_fingerprint), and a valid cache is what spares the box the
-# >1.77GB coverage recompute that OOM'd the 2GB droplet on 2026-09-01.
+# (The .coverage_cache.json shipping ritual that used to live here died
+# 2026-09-03 with the map's coverage outline — startup no longer computes
+# coverage rings at all, so the >1.77GB recompute that OOM'd the droplet
+# on 2026-09-01 no longer exists as a code path. A stale cache file in
+# data/export/ is ignored.)
 ./deploy/smoke_test.sh
 
 # Ship code + dist + export, sync the slim venv, restart

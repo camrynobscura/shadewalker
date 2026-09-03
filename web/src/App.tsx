@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchCoverage, type CoverageFeature, type Point } from './api'
+import { type Point } from './api'
 import { Controls } from './components/Controls'
 import { DEFAULT_TREE_WEIGHT, snapToPreset } from './presets'
 import { Header } from './components/Header'
@@ -127,16 +127,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [mapExpanded])
 
-  const [coverage, setCoverage] = useState<CoverageFeature | null>(null)
-  // Fetched once, not tied to any route request. Purely a visual aid — the
-  // server enforces real coverage on every /route call regardless of
-  // whether this loaded, so a failure here just means no boundary drawn.
-  useEffect(() => {
-    fetchCoverage()
-      .then(setCoverage)
-      .catch(() => {})
-  }, [])
-
   // Mirror state → URL (labels included — the point is the truth, the
   // label is what the field showed for it).
   useEffect(() => {
@@ -194,7 +184,6 @@ export default function App() {
             end={snappedEnd ?? end}
             selected={selected}
             baseline={baseline}
-            coverage={coverage}
             position={location.position}
             panTo={panTarget}
             onMapClick={handleMapClick}

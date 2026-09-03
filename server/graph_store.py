@@ -25,7 +25,6 @@ whole graph — which keeps every slider value exact rather than quantized.
 
 import logging
 import gzip
-import hashlib
 import json
 import math
 import sys
@@ -38,12 +37,10 @@ import ijson
 import numpy as np
 import shapely
 from shapely.geometry import Point
-from shapely.geometry.polygon import orient
 from shapely.ops import substring
 from shapely.strtree import STRtree
 
 from pipeline import config
-from server import coverage_frame
 
 logger = logging.getLogger(__name__)
 
@@ -386,90 +383,6 @@ def clamp_shade_monotonic(routes: list[dict], weights: list[float]) -> list[dict
 # longitude gets scaled) back into real meters.
 METERS_PER_DEGREE_LAT = 111_320.0
 
-# Simplification tolerance for the drawn coverage boundary, in
-# degrees-of-latitude units (~22m) — trims the served ring's vertex count.
-# Small on purpose: the boundary is drawn at exactly MAX_SNAP_DISTANCE_M
-# from the streets, so simplification is the only thing that can make the
-# drawn line disagree with the acceptance rule, and this bounds that
-# disagreement to a sliver nobody can click precisely enough to notice.
-COVERAGE_SIMPLIFY_DEG = 0.0002
-
-# Caches _compute_coverage_rings()'s output across server restarts --
-# measured at ~12s of a ~15s cold start at Brooklyn+Manhattan scale (a
-# shapely union_all over every edge's buffered geometry, which grows with
-# the graph), for output that only changes when the export files themselves do.
-# Named with a leading dot so it reads as a derived artifact, not an export;
-# living inside EXPORT_DIR (rather than a fixed path elsewhere) is
-# deliberate -- the cache automatically follows EXPORT_DIR wherever it
-# points, tests included, rather than every test that monkeypatches
-# EXPORT_DIR to a tmp_path silently reading/writing the real repo's cache
-# file instead of its own sandboxed one.
-COVERAGE_CACHE_FILENAME = ".coverage_cache.json"
-
-# A version tag for load()'s MERGE SEMANTICS, folded into the coverage
-# fingerprint (see _export_fingerprint). load() can change which components
-# exist without any file's bytes changing, so a cached coverage from before
-# such a change must be invalidated even when every export file is unchanged.
-# Bump when load()'s edge topology can change for identical files.
-LOAD_PARAMS = "load-v23|no-hide-rule"
-
-
-def _export_fingerprint(export_paths: list) -> str:
-    """A fingerprint of every loaded export file's CONTENT (sha256 of its
-    bytes) — changes whenever a tile is added, removed, or re-exported,
-    which is exactly when the coverage cache (above) needs recomputing
-    rather than reused.
-
-    Content, deliberately not (name, size, mtime): the cache is built on
-    the laptop and shipped to the box by rsync, which preserves mtimes
-    only to whole seconds, so an mtime-based fingerprint could never
-    match after a deploy. The box then recomputed coverage on every
-    start — a job that peaks >1.77GB and OOM-froze the 2GB droplet on
-    2026-09-01. Bytes are identity that survives any transport; hashing
-    the 26MB citywide export measured 21ms (laptop, 2026-09-01).
-
-    Two recipe tags ride along, because the drawn coverage depends on more
-    than the export files' bytes: the offshore frame's parameters
-    (server/coverage_frame.py) and LOAD_PARAMS, which covers any change to
-    WHICH components end up visible. Deleting the hide rule was exactly
-    that kind of change -- without a LOAD_PARAMS bump it would have served
-    rings computed under the old rule from every existing cache."""
-    parts = sorted(f"{p.name}:{hashlib.sha256(p.read_bytes()).hexdigest()}"
-                   for p in export_paths)
-    rule = coverage_frame.FRAME_PARAMS + "|" + LOAD_PARAMS
-    return hashlib.sha256(("\n".join(parts) + "\n" + rule).encode()).hexdigest()
-
-
-def _load_cached_coverage(cache_path, fingerprint: str) -> dict | None:
-    """The on-disk coverage cache ({"rings": ..., "frame": ...}), if its
-    fingerprint matches the export files being loaded right now — None on any
-    mismatch, missing file, corrupt cache, or pre-frame cache format, all
-    treated the same way (recompute), since this is strictly a speed
-    optimization with no correctness dependency on it."""
-    if not cache_path.exists():
-        return None
-    try:
-        cached = json.loads(cache_path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return None
-    if cached.get("fingerprint") != fingerprint:
-        return None
-    if "rings" not in cached or "frame" not in cached:
-        return None
-    return cached
-
-
-def _save_cached_coverage(cache_path, fingerprint: str, rings, frame: dict) -> None:
-    """Best-effort, matching the load side: the cache is strictly a speed
-    optimization, so a failed save (on the box, data/export belongs to the
-    deploy user and the service can't write it) costs the next start a
-    recompute — it must never take THIS start down."""
-    try:
-        cache_path.write_text(json.dumps({"fingerprint": fingerprint, "rings": rings, "frame": frame}))
-    except OSError as exc:
-        logger.warning(f"[graph_store] could not write coverage cache {cache_path}: {exc}")
-
-
 def _local_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Flat-earth distance between two nearby points -- fine at the
     few-meters-to-tens-of-meters scale it is used at (the standard
@@ -508,10 +421,6 @@ class GraphStore:
         # OSM node ids (strings) exist only at the boundary.
         self._id_to_idx: dict[str, int] = {}
         self._node_lonlat: np.ndarray | None = None  # (N, 2) float64
-        self._coverage_rings: list[list[list[float]]] = []  # closed [lon, lat] rings, CCW, one per piece
-        # The offshore frame + feather rings (server/coverage_frame.py),
-        # computed from the rings above at load, cached alongside them.
-        self._coverage_frame: dict = {}
         self._edge_lines_scaled: np.ndarray | None = None  # see _build_edge_index
         self._strtree: STRtree | None = None
         self._lat_scale = 1.0  # see _build_edge_index
@@ -572,9 +481,6 @@ class GraphStore:
                 "SHADEWALKER_EXPORT_DIR at a directory holding a built "
                 "export to run against that instead."
             )
-        coverage_fingerprint = _export_fingerprint(export_paths)
-        coverage_cache_path = config.EXPORT_DIR / COVERAGE_CACHE_FILENAME
-
         node_lonlat: list[list[float]] = []
         edge_pairs: list[tuple[int, int]] = []  # (u_idx, v_idx) for igraph
         length, deciduous, evergreen, counts = [], [], [], []
@@ -749,77 +655,8 @@ class GraphStore:
 
         self._build_edge_index()
 
-        cached = _load_cached_coverage(coverage_cache_path, coverage_fingerprint)
-        if cached is not None:
-            self._coverage_rings = cached["rings"]
-            self._coverage_frame = cached["frame"]
-        else:
-            self._coverage_rings = self._compute_coverage_rings()
-            self._coverage_frame = coverage_frame.build_frame(self._coverage_rings)
-            _save_cached_coverage(coverage_cache_path, coverage_fingerprint,
-                                  self._coverage_rings, self._coverage_frame)
-
         logger.info(f"[graph_store] {len(export_paths)} tile(s): "
               f"{len(node_lonlat)} nodes, {len(edge_pairs)} edges loaded")
-
-    def _compute_coverage_rings(self) -> list[list[list[float]]]:
-        """The drawn coverage boundary: the union of every street edge
-        buffered by MAX_SNAP_DISTANCE_M — i.e. exactly the region the
-        server accepts clicks in ("within 200m of a loaded street"), so
-        the dashed line(s) on the map are the acceptance rule made visible.
-
-        Chosen over a concave hull of the nodes after the hull clipped
-        Red Hook: any global "how far in should the outline carve" knob
-        shaves peninsulas, whereas a per-street footprint cannot exclude
-        a routable place by construction. Built in the same scaled space
-        the STRtree uses, so "200m" here is the same 200m the snap check
-        measures. Measured at ~12s at Brooklyn+Manhattan scale, growing
-        with the graph — load() only pays this on the first boot after a
-        real data change, caching the result otherwise (see load()'s use
-        of COVERAGE_CACHE_FILENAME).
-
-        Returns one ring per disjoint piece of the footprint — plural, not
-        a single ring picking "the biggest piece": load() now keeps every
-        real component (Governors Island, eventually Staten Island), and
-        each one deserves its own visible boundary rather than being
-        silently dropped from the map while still being fully routable.
-        /coverage serves these as a GeoJSON MultiPolygon.
-
-        Two accepted approximations, both slivers: simplify() can move a
-        ring up to ~22m either way (see COVERAGE_SIMPLIFY_DEG), and
-        interior holes in the footprint (a cemetery's unwalkable core) are
-        dropped — each piece is drawn as a single ring, and a click in
-        such a pocket still gets the honest out-of-coverage rejection."""
-        radius_deg = config.MAX_SNAP_DISTANCE_M / METERS_PER_DEGREE_LAT
-        # Every edge, because every edge is snappable: the drawn boundary
-        # IS the acceptance region, so advertising less than we accept
-        # would tell someone their own street is outside our coverage.
-        footprint = shapely.union_all(
-            shapely.buffer(self._edge_lines_scaled, radius_deg, quad_segs=2)
-        )
-        footprint = footprint.simplify(COVERAGE_SIMPLIFY_DEG)
-        pieces = list(footprint.geoms) if footprint.geom_type == "MultiPolygon" else [footprint]
-        # The frontend punches its map-dimming holes by reversing these
-        # rings, which assumes counterclockwise winding (the old
-        # rectangle's order) — orient() guarantees it regardless of what
-        # union_all produced.
-        return [
-            [[round(lon / self._lat_scale, 6), round(lat, 6)] for lon, lat in orient(piece).exterior.coords]
-            for piece in pieces
-        ]
-
-    def coverage_rings(self) -> list[list[list[float]]]:
-        """One closed [lon, lat] ring per disjoint coverage piece — see
-        _compute_coverage_rings for shape and winding guarantees."""
-        return self._coverage_rings
-
-    def coverage_frame(self) -> dict:
-        """The offshore frame + feather rings the frontend draws instead
-        of tracing the rings above — {"frame": rings, "feather_350":
-        rings, "feather_800": rings}, lon/lat (server/coverage_frame.py).
-        The rings above stay the ACCEPTANCE region (in_coverage); the
-        frame is the generous visual boundary drawn through the water."""
-        return self._coverage_frame
 
     def _edge_coords(self, edge: int) -> np.ndarray:
         """Edge `edge`'s [lon, lat] points — a zero-copy view into the
@@ -1005,12 +842,10 @@ class GraphStore:
         than the old nearest-NODE distance — it can only be smaller, never
         larger, so this never newly rejects a point that used to pass.
 
-        The bbox is padded by MAX_SNAP_DISTANCE_M to match the drawn
-        boundary: each coverage ring extends that far past its outermost
-        street (they ARE the acceptance region drawn — see
-        _compute_coverage_rings), so a raw node-min/max box would wrongly
-        reject clicks just past the outermost street that a drawn ring
-        includes and the snap check would accept.
+        The bbox is padded by MAX_SNAP_DISTANCE_M so the two checks agree
+        with each other: the snap check accepts a point that far past the
+        outermost street, and a raw node-min/max box would wrongly reject
+        clicks in that margin before the snap check ever ran.
         """
         pad_lat = config.MAX_SNAP_DISTANCE_M / METERS_PER_DEGREE_LAT
         pad_lon = pad_lat / self._lat_scale

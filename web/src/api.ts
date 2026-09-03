@@ -108,34 +108,6 @@ export async function fetchRoute(
   return res.json()
 }
 
-/** GeoJSON multipolygon of the area(s) we actually have street + tree data
- * for — drawn on the map so people can see where a route can start/end
- * before they try one. MultiPolygon, not Polygon: disjoint routable areas
- * (mainland NYC, Governors Island, eventually Staten Island) each get
- * their own piece rather than being merged or dropped. */
-export interface CoverageFeature {
-  type: 'Feature'
-  geometry: {
-    type: 'MultiPolygon'
-    coordinates: [number, number][][][]
-  }
-  /** The offshore frame (FIXES 12): what MapView actually draws — one
-   * generous dashed boundary through the water + a two-step feathered
-   * dim — while `geometry` above remains the true click-acceptance
-   * region the server checks. Rings are closed [lon, lat] lists. */
-  properties: {
-    frame: [number, number][][]
-    frame_feather_350: [number, number][][]
-    frame_feather_800: [number, number][][]
-  }
-}
-
-export async function fetchCoverage(): Promise<CoverageFeature> {
-  const res = await fetch('/coverage')
-  if (!res.ok) throw new Error(`Could not load coverage area (${res.status})`)
-  return res.json()
-}
-
 export interface GeocodeResult extends Point {
   label: string
 }

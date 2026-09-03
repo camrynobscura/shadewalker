@@ -13,8 +13,8 @@ settled -- rather than being ported piecemeal onto a fixture that kept
 mixing the two models together.
 
 Tests that need a graph now build their own tiny synthetic tile with
-`tmp_path` (see test_graph_store_pruning.py, test_graph_store_components.py,
-test_coverage_frame.py and test_pipeline_export.py for the pattern), which
+`tmp_path` (see test_graph_store_pruning.py, test_graph_store_components.py
+and test_pipeline_export.py for the pattern), which
 keeps each one's assumptions visible in the test itself.
 """
 

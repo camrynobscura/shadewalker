@@ -136,10 +136,10 @@ test('out-of-coverage rejection has no violations', async ({ page }) => {
   // routeUrl() now reverse-geocodes on load regardless of coverage.
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_OUTSIDE_COVERAGE))
-  // Plain getByText('coverage') is ambiguous once the map's own coverage-
-  // area legend entry is loaded (same word, unrelated element) -- role="alert"
-  // is unique to RouteStats' error message, so it's both the more specific
-  // locator and the one that actually proves the right state loaded.
+  // role="alert" is unique to RouteStats' error message, so it's both a
+  // specific locator and the one that proves the right state loaded.
+  // (It also outlived the legend's "coverage area" row, which used to
+  // make plain getByText('coverage') ambiguous — row deleted 2026-09-03.)
   await expect(page.getByRole('alert')).toContainText('coverage', { ignoreCase: true })
 
   const results = await new AxeBuilder({ page }).analyze()
