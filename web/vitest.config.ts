@@ -7,6 +7,13 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'jsdom',
+    // Node 22+ ships its own experimental localStorage/sessionStorage
+    // globals, undefined unless --localstorage-file is set — and they
+    // shadow jsdom's real Storage when vitest populates the test global
+    // (globalThis IS window here). Turn the experiment off so jsdom's
+    // storage wins; without this, localStorage is undefined in every
+    // test (hit by recents.test.ts, 2026-09-03, Node 26).
+    execArgv: ['--no-experimental-webstorage'],
     setupFiles: ['./vitest.setup.ts'],
     // Vitest's default include pattern also matches *.spec.ts, which would
     // otherwise sweep up web/e2e/'s Playwright specs -- those use a
