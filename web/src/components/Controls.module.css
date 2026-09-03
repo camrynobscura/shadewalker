@@ -160,8 +160,18 @@
   border: 1px solid var(--border);
   border-top: none;
   border-radius: 0;
-  max-height: 240px; /* ~5 rows; taller lists scroll inside the box */
+  max-height: 280px; /* header + 5 rows; taller lists scroll inside the box */
   overflow-y: auto;
+}
+
+/* Hairline matches the row dividers; it keeps the first row's hover
+   fill off the header text without adding resting whitespace. */
+.recentHeader {
+  padding: var(--space-sm) var(--control-pad-x);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.1em;
+  color: var(--muted);
 }
 
 .suggestOption {
@@ -366,6 +376,12 @@
 .sep {
   color: var(--muted);
   margin: 0 0.45em;
+}
+
+/* Margin instead of a space character: mono's full cell read too wide,
+   zero too tight — this is the exact-gap knob. */
+.plusSign {
+  margin-right: 3px;
 }
 
 .numberHighlight {

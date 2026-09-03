@@ -7,6 +7,7 @@ import { useGeocodeSuggestions } from '../hooks/useGeocodeSuggestions'
 import { MOBILE_LAYOUT_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
 import { ClearIcon, CrosshairIcon } from './icons'
 import { compareRoutes, TREE_PRESETS } from '../presets'
+import { loadRecents, recordRecent } from '../recents'
 import { displayShade, LOW_SHADE_FRACTION } from '../shade'
 import styles from './Controls.module.css'
 
@@ -61,16 +62,33 @@ function useAddressField(
   const restored = initialLabel !== null && externalPoint !== null
   const [query, setQuery] = useState(restored ? initialLabel : '')
   const [status, setStatus] = useState<FieldStatus>(restored ? 'found' : 'idle')
-  // Suggestions are wanted only while the current text is something the
-  // user TYPED -- a suggestion pick, a submit, or a programmatic fill
-  // (map click, reverse geocode) all turn this off, so the dropdown never
-  // reopens over text this code wrote itself.
+  // The dropdown is wanted only while the current text is something the
+  // user TYPED (suggestions), or while a focused field is EMPTY (recents)
+  // -- a suggestion pick, a submit, or a programmatic fill (map click,
+  // reverse geocode) all turn this off, so the dropdown never reopens
+  // over text this code wrote itself.
   const [suggestOn, setSuggestOn] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
+  // Read fresh each time the dropdown opens (openSuggestions), so a pick
+  // made in the OTHER field is already in this one's list.
+  const [recents, setRecents] = useState<GeocodeResult[]>([])
   // Starts as the restored point when a label came back from the URL —
   // that's what stops the mount effect below from reverse-geocoding over
   // the restored text.
   const shownPointRef = useRef<Point | null>(restored ? externalPoint : null)
+  // The deliberate entry (suggestion pick / resolved typed text) behind
+  // this field's CURRENT point, held until a route completes —
+  // commitRecent() records it then. Recents mean "addresses from real
+  // routes", not everything ever typed (user call 2026-09-03); nulled
+  // whenever the point it described is cleared or replaced from outside.
+  // Not set on mount for URL-restored labels: a deliberate one was
+  // already recorded when its route first drew.
+  const pendingRecentRef = useRef<GeocodeResult | null>(null)
+  // Bumped whenever the text an in-flight resolve() was about stops
+  // being current (cleared, retyped) — the response is then stale and
+  // gets dropped instead of refilling the field (the ✕-mid-lookup
+  // resurrection, caught 2026-09-03).
+  const resolveSeqRef = useRef(0)
   // Previous externalPoint, so the effect below can tell a point being
   // CLEARED (value -> null) from the steady "no point yet" state while
   // someone types a fresh address.
@@ -78,30 +96,53 @@ function useAddressField(
 
   const suggestions = useGeocodeSuggestions(query, suggestOn)
 
-  // A fresh suggestion list starts with nothing highlighted -- keeping an
+  // What the listbox holds right now: recents while the text is empty
+  // (the slot that used to show nothing), live suggestions once there's
+  // typed text. One list at a time — the keyboard/highlight machinery
+  // below only ever sees `options`.
+  const showingRecents = query.trim() === ''
+  const options = showingRecents ? recents : suggestions
+
+  // A fresh option list starts with nothing highlighted -- keeping an
   // old index would silently point Enter at whatever happens to occupy
   // that position now.
   useEffect(() => {
     setActiveIndex(-1)
-  }, [suggestions])
+  }, [options])
 
   function onChange(value: string) {
     setQuery(value)
     setStatus('idle')
     setSuggestOn(true)
     shownPointRef.current = null // free-typed text no longer matches any known point
+    resolveSeqRef.current++ // any in-flight lookup is about older text now
   }
 
   /** A picked suggestion already carries its point -- no second geocode
    * round trip on submit; the field behaves exactly as if resolve() had
-   * just succeeded with this result. */
+   * just succeeded with this result. Also serves picking a RECENT (a
+   * recent is a stored GeocodeResult) — re-committing one just bumps it
+   * back to the front of the list. */
   function selectSuggestion(suggestion: GeocodeResult) {
     setSuggestOn(false)
     setQuery(suggestion.label)
     setStatus('found')
     shownPointRef.current = { lat: suggestion.lat, lon: suggestion.lon }
+    pendingRecentRef.current = suggestion
     onResolve({ lat: suggestion.lat, lon: suggestion.lon })
     onLabel(suggestion.label)
+  }
+
+  /** Records the pending deliberate entry, if any. Called by Controls
+   * the moment a route exists — never before, so a lone entry in one
+   * field (or an abandoned one) doesn't reach the recents. One-shot:
+   * nulled after recording, so preset switches (which swap `selected`
+   * without a new geocode) can't re-record. */
+  function commitRecent() {
+    if (pendingRecentRef.current) {
+      recordRecent(pendingRecentRef.current)
+      pendingRecentRef.current = null
+    }
   }
 
   function closeSuggestions() {
@@ -137,12 +178,18 @@ function useAddressField(
     setStatus('idle')
     setSuggestOn(false)
     shownPointRef.current = null
+    pendingRecentRef.current = null
+    resolveSeqRef.current++ // a lookup still in flight is for cleared text — drop its answer
     onResolve(null)
   }
 
-  /** ArrowDown on a closed field re-opens it (ARIA combobox convention) --
-   * the hook refetches for the unchanged text after its debounce. */
+  /** Opens the dropdown: ArrowDown on a closed field (ARIA combobox
+   * convention — the hook refetches for the unchanged text after its
+   * debounce), and AddressField's empty-while-focused effect (recents).
+   * Reloads recents each time so the list is fresh however it opens —
+   * including a pick just made in the OTHER field. */
   function openSuggestions() {
+    setRecents(loadRecents())
     setSuggestOn(true)
   }
 
@@ -153,7 +200,12 @@ function useAddressField(
     setSuggestOn(false) // submitting is the end of the suggestion phase
     if (!query.trim() || status !== 'idle') return
     setStatus('searching')
+    const seq = resolveSeqRef.current
     const result = await geocode(query)
+    // The text this lookup was about is gone (✕, retyped, cleared from
+    // outside) — the late answer must not refill the field it was
+    // cleared out of.
+    if (seq !== resolveSeqRef.current) return
     // A point that landed while the lookup was in flight — a map tap, a
     // picked suggestion, USE_LOCATION — supersedes the typed text this
     // resolve started from; drop the response instead of stomping it.
@@ -163,6 +215,10 @@ function useAddressField(
     if (result) {
       setStatus('found')
       shownPointRef.current = { lat: result.lat, lon: result.lon }
+      // The typed text is the pending recent's label too (not the
+      // geocoder's), matching what the field keeps showing and the URL
+      // restores.
+      pendingRecentRef.current = { label: query, lat: result.lat, lon: result.lon }
       onResolve({ lat: result.lat, lon: result.lon })
       // The field keeps showing the TYPED text after a resolve (not the
       // geocoder's label), so that text is what the URL must restore.
@@ -182,11 +238,16 @@ function useAddressField(
       // report 2026-08-31: CLEAR_ROUTE left the addresses behind). Guarded
       // on `prev` so it fires only on the value->null transition, never on
       // the steady no-point state while a fresh address is being typed.
+      // suggestOn is left alone: a blurred field already has it off, and
+      // on a still-focused one (the ✕) forcing it off here would close
+      // the recents that AddressField's emptied-while-focused effect
+      // just opened — this effect runs a render behind it.
       if (prev) {
         setQuery('')
         setStatus('idle')
-        setSuggestOn(false)
         shownPointRef.current = null
+        pendingRecentRef.current = null
+        resolveSeqRef.current++ // any in-flight lookup is for text that just got cleared
       }
       return
     }
@@ -194,6 +255,7 @@ function useAddressField(
     if (shown && shown.lat === externalPoint.lat && shown.lon === externalPoint.lon) return
 
     shownPointRef.current = externalPoint
+    pendingRecentRef.current = null // this point wasn't typed or picked — it must not become a recent
     setSuggestOn(false) // the text below is generated, not typed
     // Coordinates first, instantly -- reverse-geocoding is a real network
     // round trip (measured ~70-100ms once warm, up to ~1s on a session's
@@ -221,14 +283,18 @@ function useAddressField(
   return {
     query,
     status,
-    suggestions,
+    options,
+    /** Whether `options` is the recents list (empty text) rather than
+     * live suggestions — drives the listbox's header row and name. */
+    showingRecents,
     activeIndex,
-    /** Whether the listbox is rendered: suggestions exist AND the text is
-     * still in its typed phase. */
-    open: suggestOn && suggestions.length > 0,
+    /** Whether the listbox is rendered: options exist AND the dropdown
+     * phase is on (typed text, or a focused empty field). */
+    open: suggestOn && options.length > 0,
     onChange,
     resolve,
     selectSuggestion,
+    commitRecent,
     setActiveIndex,
     closeSuggestions,
     openSuggestions,
@@ -238,7 +304,8 @@ function useAddressField(
 }
 
 /** One labeled address field, now an ARIA combobox: the input plus a
- * suggestion listbox driven by aria-activedescendant (focus never leaves
+ * listbox — typed-text suggestions, or recent addresses while the
+ * focused field is empty — driven by aria-activedescendant (focus never leaves
  * the input; arrows move a highlight instead). Presentational — Controls
  * owns the state through useAddressField, passed whole as `field`
  * because a combobox needs eight pieces of it and threading each as its
@@ -278,7 +345,8 @@ function AddressField({
   // the input even when the component appears twice on the page.
   const id = useId()
   const listboxId = `${id}-listbox`
-  const { suggestions, activeIndex, open } = field
+  const { options, showingRecents, activeIndex, open } = field
+  const spokenLabel = label.replace(/_/g, ' ')
 
   /* Full-screen search mode (mobile only). The fields sit mid-screen on
      the stacked mobile layout — below where the iOS keyboard's top edge
@@ -324,6 +392,22 @@ function AddressField({
       vv?.removeEventListener('resize', pin)
     }
   }, [expanded])
+
+  /* Recents open whenever the field is FOCUSED AND EMPTY, however it got
+     that way — a fresh focus, the ✕ (whose mousedown preventDefault
+     keeps focus in the field), select-all-delete. State-driven rather
+     than hung off the focus event so every emptying path behaves the
+     same; on mobile it's what keeps the overlay from stranding an
+     emptied field with no list and no ArrowDown key to reopen one. With
+     nothing stored this renders nothing (`open` needs options), and
+     Escape still dismisses: closing changes neither dep, so the effect
+     doesn't refire. openSuggestions deliberately not a dep — its
+     identity changes per render, and refiring on it would reload recents
+     into fresh state every render. */
+  useEffect(() => {
+    if (focused && field.query === '') field.openSuggestions()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focused, field.query])
 
   /* Whether the NEXT blur should skip acting on typed text (CANCEL,
      Escape) — a ref, not state: it's consumed by the blur handler in the
@@ -376,13 +460,13 @@ function AddressField({
     }
     if (e.key === 'ArrowDown') {
       e.preventDefault() // keep the caret still; the arrow moves the highlight
-      field.setActiveIndex((activeIndex + 1) % suggestions.length)
+      field.setActiveIndex((activeIndex + 1) % options.length)
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
-      field.setActiveIndex(activeIndex <= 0 ? suggestions.length - 1 : activeIndex - 1)
+      field.setActiveIndex(activeIndex <= 0 ? options.length - 1 : activeIndex - 1)
     } else if (e.key === 'Enter' && activeIndex >= 0) {
       e.preventDefault() // pick the highlighted option instead of submitting the form
-      field.selectSuggestion(suggestions[activeIndex])
+      field.selectSuggestion(options[activeIndex])
       if (expanded) collapse() // a picked address ends the search session
     } else if (e.key === 'Escape') {
       field.closeSuggestions()
@@ -438,7 +522,7 @@ function AddressField({
              underscore point") -- the terminal voice is visual chrome,
              not pronunciation (VoiceOver pass, 2026-08-31). Same split
              as the Shade_walker wordmark. */
-          aria-label={label.replace(/_/g, ' ')}
+          aria-label={spokenLabel}
           value={field.query}
           // Off, not "street-address": the browser's own autofill dropdown
           // would paint directly over our listbox, and the ARIA combobox
@@ -476,8 +560,21 @@ function AddressField({
           </span>
         )}
         {open && (
-          <ul className={styles.suggestList} role="listbox" id={listboxId} aria-label={`${label.replace(/_/g, ' ')} suggestions`}>
-            {suggestions.map((suggestion, i) => (
+          <ul
+            className={styles.suggestList}
+            role="listbox"
+            id={listboxId}
+            aria-label={showingRecents ? `${spokenLabel} recent addresses` : `${spokenLabel} suggestions`}
+          >
+            {/* role="presentation" + aria-hidden: a listbox may only hold
+                options, so this header is visual-only — the listbox's
+                aria-label carries "recent addresses" instead. */}
+            {showingRecents && (
+              <li className={styles.recentHeader} role="presentation" aria-hidden="true">
+                // RECENT
+              </li>
+            )}
+            {options.map((suggestion, i) => (
               <li
                 key={`${suggestion.label}-${i}`}
                 id={`${id}-opt-${i}`}
@@ -614,6 +711,21 @@ export function Controls({
 
   const start = useAddressField(onSetStart, startPoint, onStartLabel, initialStartLabel)
   const end = useAddressField(onSetEnd, endPoint, onEndLabel, initialEndLabel)
+
+  /* Recents are recorded HERE, on route arrival — not at resolve time.
+     Only the endpoints of a route that actually drew count as recent
+     addresses (user call 2026-09-03): a lone entry used to surface in
+     the OTHER field's recents before any route existed, and abandoned
+     one-field entries polluted the list. Each field's commit is
+     one-shot, so preset switches swapping `selected` re-record nothing.
+     commitRecent's identity changes per render and reads refs — deps on
+     it would just refire the effect uselessly. */
+  useEffect(() => {
+    if (!selected) return
+    start.commitRecent()
+    end.commitRecent()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected])
 
   /* The start field's empty-state accessory is the location control
      (2026-09-02, replacing the USE_LOCATION button row): "use my location"
@@ -801,11 +913,11 @@ export function Controls({
             {comparison && (
               <p className={styles.comparisonLine}>
                 <span aria-hidden="true">
-                  <span className={styles.promptSymbol}>&gt;</span>+{' '}
+                  <span className={styles.promptSymbol}>&gt;</span><span className={styles.plusSign}>+</span>
                   <span className={styles.numberHighlight}>{comparison.extraShadePct}</span>% shade
-                  <span className={styles.sep}>|</span>+{' '}
+                  <span className={styles.sep}>|</span><span className={styles.plusSign}>+</span>
                   <span className={styles.numberHighlight}>{comparison.extraMinutes}</span> min
-                  <span className={styles.sep}>|</span>+{' '}
+                  <span className={styles.sep}>|</span><span className={styles.plusSign}>+</span>
                   {highlightNumber(formatDistance(comparison.extraLengthM))}
                 </span>
                 {/* Spoken twin: full words, no glyph soup (VoiceOver pass). */}
