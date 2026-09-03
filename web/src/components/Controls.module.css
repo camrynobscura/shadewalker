@@ -1,57 +1,23 @@
-/* First of the panel's three top-level sections (a plain div, not a
-   <section> -- see .sectionDivider below for why, and for the other two).
-   Groups the address fields, Find_route, and the location/clear row at
-   the tighter --space-md tier: they're all one step (pick your
-   addresses), so they should read as more closely bound to each other
-   than to the divider before the next section. Every child here declares
-   `margin: 0` explicitly rather than leaning on whatever margin the
-   browser happens to default that tag to -- mixing gap with un-zeroed
-   margins is exactly how spacing ends up "all over the place". */
 .addressGroup {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
 }
 
-/* The two address fields, one column. A plain div since 2026-09-02 —
-   the wrapping <form> and its FIND_ROUTE submit went when routes started
-   auto-computing; Enter/blur resolution lives in AddressField now. */
 .addressFields {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
 }
 
-/* Same translucent-wash + left-accent-border treatment as .comparisonHint
-   below, in red instead of green -- reuses this app's existing "callout"
-   pattern rather than inventing a new one, and a left accent (not a full
-   border box) avoids looking like an interactive control the way
-   .segmented's boxed style would. */
-/* Alert card: the routing error and the per-route low-shade warning share
-   ONE treatment (user call 2026-08-31 -- both are "pay attention"
-   messages). Raised white panel + hairline + a 3px magenta attention
-   rail + full-ink text. This is the app's long-standing "notice this"
-   pattern, and it's deliberately the loudest of the panel's three
-   message dialects: green wash = readout, dashed = ambient caution,
-   THIS = alert. Red is now reserved for genuine catastrophe (the
-   ErrorBoundary crash screen) -- an out-of-coverage point is a routine
-   rejection, not a failure. The two rules below are duplicated, not
-   shared, matching the .sectionDivider precedent -- keep them in sync;
-   only their margins differ (see each). */
-/* The empty alert slot: no box, and no gap footprint until an error exists
-   (the region stays mounted for the live-region announcement -- see the
-   comment in Controls.tsx). The negative bottom margin cancels
-   .addressGroup's flex `gap` beneath this zero-height slot, so Start_point
-   sits at the panel's top padding (--space-xl) rather than 12px lower --
-   matching the separator-to-section gap used elsewhere (user call
-   2026-09-01). When an error IS present the class flips to .error, which
-   carries no such margin, so the alert keeps its normal spacing. */
+/* Empty alert slot: stays mounted for its live region; the negative
+   margin cancels .addressGroup's gap so the empty slot has no footprint. */
 .errorEmpty {
   margin: 0 0 calc(-1 * var(--space-md));
 }
 
+/* Keep in sync with .lowShadeNote below (only margins differ). */
 .error {
-  /* A flex child of .addressGroup, whose gap handles the spacing. */
   margin: 0;
   padding: var(--space-sm) var(--control-pad-x);
   background: var(--panel-raised);
@@ -61,9 +27,6 @@
   color: var(--text);
 }
 
-/* Same visually-hidden technique as the MapView/RouteStats copies (CSS
-   Modules are per-file). Carries the spoken twins of the terminal-voice
-   strings: underscores and glyphs are visual chrome, not pronunciation. */
 .visuallyHidden {
   position: absolute;
   width: 1px;
@@ -79,15 +42,15 @@
 .addressField {
   display: flex;
   flex-direction: column;
-  gap: var(--space-sm);
+  /* One knob: .addressStatusEmpty's negative margin must cancel exactly
+     this gap, and the mobile block shrinks it. */
+  --field-gap: var(--space-sm);
+  gap: var(--field-gap);
   margin: 0;
 }
 
 .addressField label {
   display: block;
-  /* Section-title tier: 12px ink, above the 10px muted sublabels, so the
-     field headers stand out (user call 2026-09-01). Kept in sync with
-     .presetGroup legend and RouteStats' .sectionTitle. */
   font-size: var(--section-label-size);
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -103,24 +66,16 @@
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 0;
-  /* 1rem (16px), NOT the type scale's --font-size-md (14px): iOS Safari
-     auto-zooms the whole page when a focused text field is under 16px,
-     and the zoomed state is what exposed the mint canvas as a "green
-     box" with the keyboard up (2026-09-02). Applies at every width on
-     purpose — an iPad in portrait is wider than the mobile breakpoint
-     and zooms too. .fakePlaceholder below must stay the same size. */
+  /* 1rem, not the 14px type scale: iOS Safari auto-zooms the page when a
+     focused field is under 16px. .fakePlaceholder must match. */
   font-size: 1rem;
-  /* Room for the .fieldAccessory (✕ / ⌖) seated over the right edge —
-     reserved unconditionally so text never reflows when the accessory
-     appears with the first typed character. */
+  /* Reserved unconditionally for the ✕/⌖ accessory, so text never
+     reflows when it appears. */
   padding-right: 44px;
 }
 
-/* The in-field icon button (per-field ✕, the start field's ⌖): a 44px
-   touch target overlaying the input's right edge — absolute against
-   .suggestWrap, so in full-screen search mode it stays glued to the
-   input at the top. Chrome-less on purpose: a bordered box inside the
-   bordered input read as a button inside a button. */
+/* ✕/⌖ inside the input's right edge; absolute against .suggestWrap so it
+   stays glued to the input in full-screen search mode. */
 .fieldAccessory {
   position: absolute;
   top: 0;
@@ -143,8 +98,6 @@
   color: var(--text);
 }
 
-/* Acquiring state (⌖ pressed, no fix yet) — visibly parked, not broken.
-   Its "forever" failure mode is use-location-ux's problem, not styling's. */
 .fieldAccessory:disabled {
   opacity: 0.5;
   cursor: wait;
@@ -154,21 +107,35 @@
   color: var(--muted);
 }
 
-/* Anchors the suggestion listbox to the input's exact box. A dedicated
-   wrapper, not .addressField, because the field also contains the label
-   and status line -- absolute positioning against those would slide the
-   dropdown under the wrong element. */
+/* Positioning anchor for the listbox, placeholder, and accessory. */
 .suggestWrap {
   position: relative;
 }
 
-/* The fake placeholder (see AddressField): sits where a real one would,
-   in the same muted grey, after the input in DOM order so it paints over
-   the input's opaque background. Click-through, unspoken. */
+/* Mobile A/B chip (see AddressField's `marker` prop); shown only in the
+   media block below, where the field labels hide. */
+.fieldMarker {
+  display: none;
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--green-dim);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: var(--font-size-sm);
+  pointer-events: none;
+}
+
+/* Fake placeholder (see AddressField for why it isn't a real one). */
 .fakePlaceholder {
   position: absolute;
   left: var(--control-pad-x);
-  /* Stop short of the accessory slot, like the input's own padding does. */
   right: 44px;
   top: 50%;
   transform: translateY(-50%);
@@ -176,16 +143,10 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--muted);
-  font-size: 1rem; /* mirrors .addressInput — see the note there */
+  font-size: 1rem; /* mirrors .addressInput */
   pointer-events: none;
 }
 
-/* The autocomplete listbox. Floats over whatever sits below the field
-   (the other address field, Find_route) instead of pushing it down -- an
-   open dropdown is transient, and layout jumping on every keystroke
-   reads as broken. Same raised-white + border language as the input it
-   extends, border-top dropped so input and list read as one continuous
-   control. */
 .suggestList {
   position: absolute;
   top: 100%;
@@ -203,8 +164,6 @@
   overflow-y: auto;
 }
 
-/* 44px rows: the same touch-target floor as every button and input in
-   this panel. */
 .suggestOption {
   display: flex;
   align-items: center;
@@ -219,22 +178,17 @@
   border-top: 1px solid var(--line);
 }
 
-/* One highlight serves hover AND the keyboard-active option -- mousemove
-   drives the same activeIndex the arrow keys do, so pointer and keyboard
-   can never show two competing selections. Same green wash as
-   .comparisonHint. */
+/* Serves hover AND keyboard-active: mousemove drives the same
+   activeIndex the arrow keys do. */
 .suggestActive {
   background: rgba(0, 168, 107, 0.12);
 }
 
 /* ── Full-screen search mode (mobile) ──────────────────────────────────
-   Applied by AddressField while a field is focused on the mobile layout
-   (the JS side of the 720px breakpoint — see useMediaQuery.ts). The
-   focused field takes over the screen with its input at the TOP: that is
-   the actual fix for iOS Safari's keyboard-avoidance window scroll (the
-   "green box"), because a top-of-screen input gives Safari nothing to
-   scroll for — and the suggestion list gets the screen instead of a
-   240px strip. Same DOM, same combobox roles; only geometry changes. */
+   The focused field takes the screen with its input at the TOP — that IS
+   the iOS keyboard fix: a top-of-screen input gives Safari's
+   keyboard-avoidance nothing to scroll for. Same DOM, same combobox
+   roles; only geometry changes. */
 .fieldExpanded {
   position: fixed;
   inset: 0;
@@ -244,9 +198,8 @@
   overflow: hidden; /* the suggestion list scrolls, never the overlay itself */
 }
 
-/* Collapsed: display:contents so the label participates in .addressField's
-   column flex exactly as it did before this wrapper existed. Expanded: a
-   real row, label left, CANCEL right. */
+/* Collapsed: display:contents keeps the label a direct flex child of
+   .addressField. Expanded swaps to a real row (label left, CANCEL right). */
 .fieldHead {
   display: contents;
 }
@@ -257,8 +210,6 @@
   justify-content: space-between;
 }
 
-/* Text-chrome button, same voice as the header's nav link; padding alone
-   carries it past the 24px target floor. */
 .cancelSearch {
   margin: 0;
   padding: var(--space-sm);
@@ -270,29 +221,23 @@
   cursor: pointer;
 }
 
-/* The wrap becomes the overlay's working column: input on top, list
-   filling the rest. min-height: 0 so the list can actually shrink-scroll
-   inside it. */
 .fieldExpanded .suggestWrap {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 0;
+  min-height: 0; /* lets the list shrink-scroll inside the column */
 }
 
 .fieldExpanded .addressInput {
   flex: none;
 }
 
-/* The fake placeholder centers itself against .suggestWrap, which is now
-   screen-tall — pin it to the input's own 44px box instead. */
+/* .suggestWrap is screen-tall in the overlay — pin to the input's 44px
+   box, not its center. Same for .fieldMarker in the media block. */
 .fieldExpanded .fakePlaceholder {
   top: 22px;
 }
 
-/* In the overlay the list is the main content, not a floating dropdown:
-   static, filling the column, scrolling internally. Side borders dropped —
-   flush with the overlay's own padding it read as a stray box. */
 .fieldExpanded .suggestList {
   position: static;
   flex: 1;
@@ -302,56 +247,28 @@
   border-bottom: none;
 }
 
-/* No min-height: an AddressField's status paragraph is empty almost all
-   of the time now (no more "// LOCKED" message, and "searching" moved to
-   the button), so reserving space for text that's usually absent just
-   left a dead gap under every field. A genuinely empty <p> collapses to
-   0 height on its own; NOT_FOUND appearing/disappearing shifts the layout
-   by one line instead, which reads as normal, not "weird". */
 .addressStatus {
   margin: 0;
   font-size: var(--font-size-sm);
   color: var(--muted);
 }
 
-/* The empty status slot: same trick as .errorEmpty above — the zero-height
-   <p> stays mounted for its live-region announcement, but the field's flex
-   gap around it doesn't collapse, leaving a phantom --space-sm under every
-   input. Visible as asymmetry once the button row was gone: the divider's
-   top gap read 8px bigger than its bottom (user report 2026-09-02). The
-   negative margin cancels the gap; NOT_FOUND flips the class to
-   .addressStatus, which spaces normally. */
+/* Empty status slot: mounted for its live region; the negative margin
+   cancels the field's flex gap around the zero-height <p>. */
 .addressStatusEmpty {
-  margin: calc(-1 * var(--space-sm)) 0 0;
+  margin: calc(-1 * var(--field-gap)) 0 0;
 }
 
+/* Reset the fieldset's browser-default border/padding/margin. */
 .presetGroup {
-  /* Fieldsets ship with a browser-default border, padding, AND margin
-     meant for old-school form sections — reset all three so it lays out
-     like a plain div instead. */
   margin: 0;
   padding: 0;
   border: none;
 }
 
-/* Second and third of the panel's three top-level sections (a plain div,
-   not a <section> -- this component's whole content used to be one
-   <section aria-label="Plan a route">, but that labeled the address
-   fields and Shade_priority as one thing when they're really two, and
-   duplicated the <aside> landmark one level up in App.tsx that already
-   covers "the whole controls panel". Three consistent divs instead, no
-   extra wrapping element -- the <aside> is already the one semantic
-   container this content needs).
-   Wraps .presetGroup so the divider's border-top lives on a plain div, not
-   the fieldset itself -- a fieldset with any border makes browsers render
-   its <legend> straddling that border line instead of sitting cleanly
-   below it, which put this line right through "Shade_priority" instead of
-   above it. Identical rule to RouteStats.module.css's .sectionDivider
-   (duplicated, not shared, since CSS Modules are per-file). The two
-   diverge on margins on purpose: this one separates sections mid-panel
-   and needs its own vertical air; RouteStats' wraps the always-mounted
-   aria-live region and takes only the padding, its spacing hand-tuned
-   there. */
+/* Divider lives on this wrapper, never the fieldset itself: a fieldset
+   with any border renders its <legend> straddling that border line.
+   Duplicated in RouteStats.module.css (margins differ on purpose). */
 .sectionDivider {
   margin-top: var(--space-xl);
   margin-bottom: var(--space-xl);
@@ -362,19 +279,12 @@
 .presetGroup legend {
   padding: 0;
   margin-bottom: var(--space-sm);
-  /* Section-title tier (12px ink) -- see .addressField label. */
   font-size: var(--section-label-size);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--text);
 }
 
-/* The Shade_priority selector, a segmented radio control. Reverted
-   2026-09-01 from the jade spec-frame back to this lighter treatment: the
-   framed version read too much like the RouteStats readout, and the
-   selector must look UNLIKE the (non-clickable) readouts since it's the one
-   thing in the panel you actually press (user call). Raised-white ground +
-   a light jade border; magenta marks the selected preset. */
 .segmented {
   display: flex;
   gap: 1px;
@@ -389,10 +299,9 @@
   position: relative;
 }
 
-/* The real radio is invisible but stretched over the whole segment
-   (inset: 0 = top/right/bottom/left all 0), so clicks, taps, focus, and
-   arrow keys all hit the native input. display: none would remove it from
-   the tab order — opacity keeps it interactive, just unseen. */
+/* The real radio, invisible but stretched over the segment so clicks,
+   focus, and arrow keys hit the native input. opacity, not display:none,
+   which would drop it from the tab order. */
 .segmentInput {
   position: absolute;
   inset: 0;
@@ -411,9 +320,6 @@
   color: var(--muted);
 }
 
-/* `+` is the adjacent-sibling selector: style the visible text based on the
-   state of the input right before it. This is how the hidden input's
-   :checked and :focus-visible states reach the label the user sees. */
 .segmentInput:checked + .segmentText {
   background: var(--magenta);
   color: var(--text); /* ink on neon magenta: 5.6:1 — white would fail AA */
@@ -429,12 +335,8 @@
   color: var(--text);
 }
 
-/* The mode description + tradeoff, under the selector. No box and no
-   separator rule (user call 2026-09-01) -- just a gap below the selector;
-   the text alone reads as the caption. Both lines are sans-serif, set HERE
-   on the shared parent so they can't drift apart: the mono figures read
-   gappy and the mono space after each "+" was too wide, and the two lines
-   must share character spacing (user call 2026-09-01). */
+/* Sans-serif set on the shared parent: mono figures read gappy, and both
+   subtitle lines must share character spacing. */
 .comparisonHint {
   margin: var(--space-sm) 0 0;
 }
@@ -443,13 +345,9 @@
   min-height: 1.2em;
   margin: 0;
   font-size: var(--font-size-sm);
-  /* Ink text (user call 2026-09-01: the green read as hard to read); the
-     mode value is bolded (.modeVal) to stand out. */
   color: var(--text);
 }
 
-/* The current mode value ("medium"): bold, so the selected mode reads as
-   the answer to "how shady?". */
 .modeVal {
   font-weight: 600;
 }
@@ -460,39 +358,25 @@
   color: var(--text);
 }
 
-/* The leading "&gt;" prompt marker on both subtitle lines. Ink (no green),
-   with a fixed em gap after it -- bigger than a plain space and identical on
-   both lines (user call 2026-09-01). */
 .promptSymbol {
   color: var(--text);
   margin-right: 0.75em;
 }
 
-/* Separator between the three tradeoff deltas. A vertical bar reads more
-   clearly than the old middle dot, which was too small to notice (user
-   call 2026-09-01). */
 .sep {
   color: var(--muted);
   margin: 0 0.45em;
 }
 
-/* The numbers stand out by weight AND face: ink + bold + sans-serif, while
-   everything else in the subtitle stays the app's mono. Putting sans on
-   ONLY the figures fixes the gappy monospace digits without touching the
-   words' kerning, so both lines' text still lines up (user call 2026-09-01). */
 .numberHighlight {
   color: var(--text);
   font-weight: 600;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* Notice tier (user call 2026-08-31): the panel's boxes collapsed to two
-   visual dialects -- green wash = readout, dashed border = notice. Same
-   dress as RouteStats' .disclaimer (duplicated, not shared: CSS Modules
-   are per-file; keep the two in sync). */
+/* Keep in sync with .error above (only margins differ) and RouteStats'
+   .disclaimer. */
 .lowShadeNote {
-  /* Flows after .comparisonHint (not a flex gap parent), so its own top
-     margin. Otherwise identical to .error above -- keep in sync. */
   margin: var(--space-md) 0 0;
   padding: var(--space-sm) var(--control-pad-x);
   background: var(--panel-raised);
@@ -502,12 +386,47 @@
   color: var(--text);
 }
 
-/* The empty live slot: zero footprint until a warning exists. */
 .lowShadeEmpty {
   margin: 0;
 }
 
-/* .primaryButton (FIND_ROUTE), .buttonRow, and .secondaryButton
-   (USE_LOCATION / CLEAR_ROUTE) were deleted 2026-09-02 with their
-   buttons: routes auto-compute, clearing moved into each field's ✕,
-   location into the start field's ⌖ (.fieldAccessory above). */
+/* Tighter rhythm for the stacked mobile layout, where the panel is a
+   short scroll window under a 45vh map. */
+@media (max-width: 720px) {
+  .addressFields {
+    gap: var(--space-sm);
+  }
+
+  .addressField {
+    --field-gap: 4px;
+  }
+
+  .sectionDivider {
+    margin-top: var(--space-lg);
+    margin-bottom: var(--space-lg);
+    padding-top: var(--space-lg);
+  }
+
+  /* Collapsed labels hide (the A/B chip is the field's identity; inputs
+     keep their aria-labels). The expanded overlay keeps its label. */
+  .fieldHead label {
+    display: none;
+  }
+
+  .fieldMarker {
+    display: flex;
+  }
+
+  /* Text clears the chip, mirroring the accessory's padding-right. */
+  .addressInput {
+    padding-left: 40px;
+  }
+
+  .fakePlaceholder {
+    left: 40px;
+  }
+
+  .fieldExpanded .fieldMarker {
+    top: 22px;
+  }
+}

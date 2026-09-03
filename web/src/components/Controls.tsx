@@ -248,12 +248,21 @@ function useAddressField(
  * screen. */
 function AddressField({
   label,
+  marker,
   example,
   field,
   accessory,
   notice,
 }: {
   label: string
+  /** The field's map-marker letter ("A" start, "B" end). Rendered as a
+   * chip inside the input's left edge, mobile only — where the visible
+   * labels are dropped (user call 2026-09-03, reclaiming panel height)
+   * the chip is the field's identity, echoing the map's A/B markers so
+   * field and marker read as the same object. Desktop keeps the labels
+   * and hides the chip. aria-hidden: the input's aria-label speaks the
+   * name at every width. */
+  marker: string
   example: string
   field: ReturnType<typeof useAddressField>
   /** Icon button seated inside the input's right edge — the per-field ✕,
@@ -415,6 +424,11 @@ function AddressField({
         )}
       </div>
       <div className={styles.suggestWrap}>
+        {/* Before the input in DOM order but painted over it (absolute) —
+            see .fieldMarker for the mobile-only visibility. */}
+        <span className={styles.fieldMarker} aria-hidden="true">
+          {marker}
+        </span>
         <input
           id={id}
           ref={inputRef}
@@ -707,6 +721,7 @@ export function Controls({
               lands in Alden Manor, "99 Perry St" on Staten Island. */}
           <AddressField
             label="Start_point"
+            marker="A"
             example="Washington Square Park"
             field={start}
             accessory={start.query !== '' ? <ClearFieldButton field={start} spokenLabel="start point" /> : locationAccessory}
@@ -714,6 +729,7 @@ export function Controls({
           />
           <AddressField
             label="End_point"
+            marker="B"
             example="24 East 7th St"
             field={end}
             accessory={end.query !== '' ? <ClearFieldButton field={end} spokenLabel="end point" /> : undefined}
