@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Header } from './Header.tsx'
 
 /* The About page: a second React entry (decided 2026-09-01, reversing
@@ -12,6 +13,24 @@ import { Header } from './Header.tsx'
    react-refresh only-export-components rule stays satisfied — the
    same split main.tsx/App.tsx use.) */
 export function AboutPage() {
+  // Being a React entry breaks native fragment navigation: the browser
+  // retries scrolling to location.hash only until the document's load
+  // event, and #root is empty until React commits — whether the target
+  // exists in time is a race the fast local build wins and a real
+  // network loses (measured: delaying the JS chunk 1.5s reproduces the
+  // land-at-top miss every time). Re-do the jump after render, and
+  // focus the target so the keyboard/reading position moves with the
+  // scroll the way a native fragment jump moves it.
+  useEffect(() => {
+    const id = window.location.hash.slice(1)
+    if (!id) return
+    const target = document.getElementById(id)
+    if (!target) return
+    target.scrollIntoView()
+    target.tabIndex = -1
+    target.focus({ preventScroll: true })
+  }, [])
+
   return (
     <>
       <Header page="about" />

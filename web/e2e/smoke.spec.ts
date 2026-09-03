@@ -69,3 +69,17 @@ test('the About page is a scrollable document', async ({ page }) => {
   const scrolled = await page.evaluate(() => window.scrollY)
   expect(scrolled).toBeGreaterThan(0)
 })
+
+test("the caution link's fragment lands on the caution section, not the page top", async ({ page }) => {
+  // RouteStats' "Learn more" links /about.html#caution. About is a React
+  // entry (PR #69): at the moment the browser attempts its native
+  // fragment scroll, #root is still empty, so #caution doesn't exist and
+  // the scroll silently no-ops at the top -- AboutPage re-scrolls after
+  // render. Short viewport so the section genuinely starts off-screen.
+  await page.setViewportSize({ width: 800, height: 450 })
+  await page.goto('/about.html#caution')
+  await expect(page.locator('#caution')).toBeInViewport()
+  // Native fragment navigation also moves the reading/tab position to
+  // the target; the re-scroll matches that by focusing it.
+  await expect(page.locator('#caution')).toBeFocused()
+})
