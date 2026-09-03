@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import type { RouteFeature, RouteStep } from '../api'
 import { formatDistance, formatDistanceParts, formatEtaParts, spokenDistance, spokenEta } from '../format'
+import { ShareIcon } from './icons'
 import { displayShade } from '../shade'
 import styles from './RouteStats.module.css'
 
@@ -291,6 +292,9 @@ function ShareButton() {
         onClick={onShare}
         aria-label="Share route"
       >
+        {/* Icon is decoration (user ask 2026-09-03) — the aria-label
+            above stays the whole spoken name. */}
+        <ShareIcon />
         SHARE_ROUTE
       </button>
       {/* Polite live region so the copy is announced without stealing focus. */}
@@ -442,9 +446,19 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
               {stats.segments.map((step, i) => (
                 <li key={i}>
                   <StepGlyph action={step.action} />
+                  {/* Two lines by design, everywhere (user, 2026-09-03):
+                      the one-liner "text — 524 ft" sat right at the panel's
+                      line length at every width, so the wrap point was
+                      whatever fell last — the bare number, the bare unit —
+                      a different orphan per step. Instruction first (it's
+                      what you scan for mid-walk), then how far to continue
+                      along it, as its own quieter line. */}
                   <span>
-                    <span aria-hidden="true">
-                      {stepText(step)} — {formatDistance(step.length_m)}
+                    <span aria-hidden="true" className={styles.stepMain}>
+                      {stepText(step)}
+                    </span>
+                    <span aria-hidden="true" className={styles.stepDist}>
+                      {formatDistance(step.length_m)}
                     </span>
                     {/* Spoken twin: "524 feet", not "five two four F T". */}
                     <span className={styles.visuallyHidden}>

@@ -67,6 +67,32 @@ export function CollapseIcon() {
   )
 }
 
+/** The share mark (box with an up arrow, the iOS-familiar form): sits
+ * inside SHARE_ROUTE's text. The box's top edge is split so the arrow's
+ * shaft passes through the gap instead of crossing a stroke. The head is
+ * narrower than the gap on purpose — a first draft put the wing tips at
+ * the same x as the stub ends and they read as touching (user catch,
+ * 2026-09-03); at 2-unit wings and 3.5-unit stubs the closest inks keep
+ * ~0.6 units of daylight. Shaft stops a unit short of the apex, or its
+ * square cap corners out past the head (RouteStats' glyph rule #1). */
+export function ShareIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <path d="M5.5 6 H3.5 V15.5 H14.5 V6 H12.5" />
+      <line x1="9" y1="3.5" x2="9" y2="11" />
+      <polyline points="7,4.5 9,2.5 11,4.5" />
+    </svg>
+  )
+}
+
 /** The per-field clear ✕. */
 export function ClearIcon() {
   return (
