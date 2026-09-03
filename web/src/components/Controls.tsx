@@ -913,11 +913,11 @@ export function Controls({
             {comparison && (
               <p className={styles.comparisonLine}>
                 <span aria-hidden="true">
-                  <span className={styles.promptSymbol}>&gt;</span>+{' '}
+                  <span className={styles.promptSymbol}>&gt;</span><span className={styles.plusSign}>+</span>
                   <span className={styles.numberHighlight}>{comparison.extraShadePct}</span>% shade
-                  <span className={styles.sep}>|</span>+{' '}
+                  <span className={styles.sep}>|</span><span className={styles.plusSign}>+</span>
                   <span className={styles.numberHighlight}>{comparison.extraMinutes}</span> min
-                  <span className={styles.sep}>|</span>+{' '}
+                  <span className={styles.sep}>|</span><span className={styles.plusSign}>+</span>
                   {highlightNumber(formatDistance(comparison.extraLengthM))}
                 </span>
                 {/* Spoken twin: full words, no glyph soup (VoiceOver pass). */}

@@ -378,6 +378,12 @@
   margin: 0 0.45em;
 }
 
+/* Margin instead of a space character: mono's full cell read too wide,
+   zero too tight — this is the exact-gap knob. */
+.plusSign {
+  margin-right: 3px;
+}
+
 .numberHighlight {
   color: var(--text);
   font-weight: 600;
