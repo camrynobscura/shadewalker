@@ -54,14 +54,14 @@ MemoryMax=1700M
 # the public komoot instance) — nothing else moves:
 # Environment=SHADEWALKER_PHOTON_URL=http://127.0.0.1:2322
 
-# Hardening. The service only needs to read its own tree and to write ONE
-# file: the coverage cache at data/export/.coverage_cache.json
-# (graph_store.py:559). Everything else is read-only.
+# Hardening. The service only READS its own tree — it writes nothing
+# (the one write it ever had, the coverage cache, died with the map's
+# coverage outline on 2026-09-03), so no ReadWritePaths at all:
+# ProtectSystem=strict leaves the whole filesystem read-only to it.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/shadewalker/data/export
 
 [Install]
 WantedBy=multi-user.target
