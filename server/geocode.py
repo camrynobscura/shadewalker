@@ -77,6 +77,8 @@ def search(q: str, limit: int) -> tuple[dict, ...]:
     data = _get("/api", {"q": q, "limit": limit, "lang": "en", "bbox": _CITY_BBOX})
     results = []
     for feature in data.get("features", []):
+        if not _in_nyc(feature.get("properties", {})):
+            continue
         parsed = _parse_search_feature(feature)
         if parsed is not None:
             results.append(parsed)
@@ -93,6 +95,29 @@ def reverse(lat: float, lon: float) -> str | None:
     if not features:
         return None
     return _reverse_label(features[0].get("properties", {}))
+
+
+def _in_nyc(props: dict) -> bool:
+    """Drop forward-search results outside the five boroughs. The bbox is a
+    rectangle around boroughs that aren't one, so it admits Hoboken/Jersey
+    City, southern Westchester, and western Nassau — all dead ends here,
+    since /route rejects anything outside coverage anyway (user report
+    2026-09-02: Hoboken addresses in autocomplete; "45 Charles Street"
+    ranking Alden Manor first).
+
+    Photon derives `city` from the OSM admin hierarchy, not addr:city, so
+    every five-borough result carries city "New York" — verified live
+    2026-09-02 across addresses, POIs, parks, and bridges in Manhattan,
+    Brooklyn, Queens, and Staten Island (Queens postal cities like Astoria
+    do NOT leak into the field), while Hoboken / Valley Stream /
+    New Rochelle results carry their own city. The state check is belt and
+    braces for any other US "New York" hamlet the bbox might graze.
+
+    Search only: reverse() stays unfiltered, because a point already IN
+    hand (a geolocation fix just outside the city, say) deserves its honest
+    nearest name over a silent coordinate fallback.
+    """
+    return props.get("city") == "New York" and props.get("state") == "New York"
 
 
 def _parse_search_feature(feature: dict) -> dict | None:

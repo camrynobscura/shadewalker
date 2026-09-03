@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode 
 import { flushSync } from 'react-dom'
 import { geocode, reverseGeocode, type GeocodeResult, type Point, type RouteFeature } from '../api'
 import { formatCoords, formatDistance, spokenDistance } from '../format'
-import type { GeoPosition } from '../hooks/useGeolocation'
+import type { LocationFillStatus } from '../hooks/useLocationFill'
 import { useGeocodeSuggestions } from '../hooks/useGeocodeSuggestions'
 import { MOBILE_LAYOUT_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
 import { ClearIcon, CrosshairIcon } from './icons'
@@ -44,16 +44,33 @@ type FieldStatus = 'idle' | 'searching' | 'notfound' | 'found'
  * a new object with the same lat/lon -- reference equality would treat
  * that as "a new point," and redundantly reverse-geocode text that's
  * already better than anything reverse-geocoding would produce. */
-function useAddressField(onResolve: (p: Point | null) => void, externalPoint: Point | null) {
-  const [query, setQuery] = useState('')
-  const [status, setStatus] = useState<FieldStatus>('idle')
+function useAddressField(
+  onResolve: (p: Point | null) => void,
+  externalPoint: Point | null,
+  /** Reports the display text whenever it settles into representing the
+   * resolved point — a picked suggestion's label, resolved typed text, a
+   * reverse-geocode name. App mirrors it to the URL beside the point, so
+   * a reload shows the SAME text instead of re-deriving a (often
+   * different) name from the bare coordinate. */
+  onLabel: (label: string) => void,
+  /** The label a reload restored for `externalPoint` (from the URL) —
+   * read once, at mount: with it, the field starts out already showing
+   * the stored text and the reverse-geocode round trip never happens. */
+  initialLabel: string | null,
+) {
+  const restored = initialLabel !== null && externalPoint !== null
+  const [query, setQuery] = useState(restored ? initialLabel : '')
+  const [status, setStatus] = useState<FieldStatus>(restored ? 'found' : 'idle')
   // Suggestions are wanted only while the current text is something the
   // user TYPED -- a suggestion pick, a submit, or a programmatic fill
   // (map click, reverse geocode) all turn this off, so the dropdown never
   // reopens over text this code wrote itself.
   const [suggestOn, setSuggestOn] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
-  const shownPointRef = useRef<Point | null>(null)
+  // Starts as the restored point when a label came back from the URL —
+  // that's what stops the mount effect below from reverse-geocoding over
+  // the restored text.
+  const shownPointRef = useRef<Point | null>(restored ? externalPoint : null)
   // Previous externalPoint, so the effect below can tell a point being
   // CLEARED (value -> null) from the steady "no point yet" state while
   // someone types a fresh address.
@@ -84,6 +101,7 @@ function useAddressField(onResolve: (p: Point | null) => void, externalPoint: Po
     setStatus('found')
     shownPointRef.current = { lat: suggestion.lat, lon: suggestion.lon }
     onResolve({ lat: suggestion.lat, lon: suggestion.lon })
+    onLabel(suggestion.label)
   }
 
   function closeSuggestions() {
@@ -146,6 +164,9 @@ function useAddressField(onResolve: (p: Point | null) => void, externalPoint: Po
       setStatus('found')
       shownPointRef.current = { lat: result.lat, lon: result.lon }
       onResolve({ lat: result.lat, lon: result.lon })
+      // The field keeps showing the TYPED text after a resolve (not the
+      // geocoder's label), so that text is what the URL must restore.
+      onLabel(query)
     } else {
       setStatus('notfound')
     }
@@ -186,9 +207,16 @@ function useAddressField(onResolve: (p: Point | null) => void, externalPoint: Po
       // superseded this one -- shownPointRef.current would no longer be
       // this exact object in either case. Without this check, a slow
       // response landing late could stomp on something newer.
-      if (label && shownPointRef.current === externalPoint) setQuery(label)
+      if (label && shownPointRef.current === externalPoint) {
+        setQuery(label)
+        // Into the URL too: a reload then restores THIS name instantly
+        // instead of re-asking the geocoder, whose nearest-thing answer
+        // isn't stable call to call (and whose failure mode is showing
+        // raw coordinates).
+        onLabel(label)
+      }
     })
-  }, [externalPoint])
+  }, [externalPoint, onLabel])
 
   return {
     query,
@@ -223,6 +251,7 @@ function AddressField({
   example,
   field,
   accessory,
+  notice,
 }: {
   label: string
   example: string
@@ -231,6 +260,10 @@ function AddressField({
    * or the start field's ⌖ (2026-09-02, replacing the button row).
    * Composed by Controls, which owns the field state the choice hangs on. */
   accessory?: ReactNode
+  /** Extra content for the status line — the location error, composed by
+   * Controls. The field's own NOT_FOUND wins when both apply: it's the
+   * answer to the more recent action (typing beats a parked error). */
+  notice?: ReactNode
 }) {
   // useId generates a unique, SSR-safe id so <label htmlFor> can point at
   // the input even when the component appears twice on the page.
@@ -457,13 +490,18 @@ function AddressField({
           result without stealing focus. Nothing shown for 'searching' —
           the Find_route button's own "FINDING…" label already covers that,
           and showing it here too just flickered on and off per field. */}
-      <p className={field.status === 'notfound' ? styles.addressStatus : styles.addressStatusEmpty} role="status">
-        {field.status === 'notfound' && (
+      <p
+        className={field.status === 'notfound' || notice ? styles.addressStatus : styles.addressStatusEmpty}
+        role="status"
+      >
+        {field.status === 'notfound' ? (
           <>
             <span aria-hidden="true">// NOT_FOUND:</span>
             <span className={styles.visuallyHidden}>NOT FOUND:</span>
             {' '}try adding a borough
           </>
+        ) : (
+          notice
         )}
       </p>
     </div>
@@ -506,9 +544,19 @@ interface ControlsProps {
   end: Point | null
   onSetStart: (p: Point | null) => void
   onSetEnd: (p: Point | null) => void
-  position: GeoPosition | null
-  locationEnabled: boolean
-  onEnableLocation: () => void
+  /** URL-restored display text for start/end — read once, at mount (the
+   * fields own their text after that); see useAddressField's
+   * initialLabel. */
+  initialStartLabel: string | null
+  initialEndLabel: string | null
+  /** Report the display text that now represents the start/end point, for
+   * the URL mirror. */
+  onStartLabel: (label: string) => void
+  onEndLabel: (label: string) => void
+  /** The ⌖ accessory's whole world: what state to draw, and the one thing
+   * a tap does (App owns the arming/gating — see useLocationFill). */
+  locationStatus: LocationFillStatus
+  onUseLocation: () => void
   /** The currently selected Shade_priority preset's route. */
   selected: RouteFeature | null
   /** The NONE (tree_weight=0) route -- the baseline `selected` is compared
@@ -529,9 +577,12 @@ export function Controls({
   end: endPoint,
   onSetStart,
   onSetEnd,
-  position,
-  locationEnabled,
-  onEnableLocation,
+  initialStartLabel,
+  initialEndLabel,
+  onStartLabel,
+  onEndLabel,
+  locationStatus,
+  onUseLocation,
   selected,
   baseline,
   error,
@@ -547,42 +598,70 @@ export function Controls({
   // the dial up and watch whether the warning goes away.
   const lowShade = selected !== null && selected.properties.shade_fraction < LOW_SHADE_FRACTION
 
-  const start = useAddressField(onSetStart, startPoint)
-  const end = useAddressField(onSetEnd, endPoint)
+  const start = useAddressField(onSetStart, startPoint, onStartLabel, initialStartLabel)
+  const end = useAddressField(onSetEnd, endPoint, onEndLabel, initialEndLabel)
 
   /* The start field's empty-state accessory is the location control
      (2026-09-02, replacing the USE_LOCATION button row): "use my location"
      is a start-point affordance, so it lives in the start field — same
-     slot the ✕ takes over once there's text to clear. Three states mirror
-     the old button row's: not yet enabled (tap = permission prompt on a
-     user gesture), fix in hand (tap = set start), and acquiring (disabled;
-     the eternal-ACQUIRING failure UX is `use-location-ux`'s job, not
-     this reposition's). Same ⌖ glyph as the map's own locate button. */
-  const locationAccessory = !locationEnabled ? (
-    <button
-      type="button"
-      className={styles.fieldAccessory}
-      aria-label="Use location"
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onEnableLocation}
-    >
-      <CrosshairIcon />
-    </button>
-  ) : position ? (
-    <button
-      type="button"
-      className={styles.fieldAccessory}
-      aria-label="Set start point to my location"
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => onSetStart(position)}
-    >
-      <CrosshairIcon />
-    </button>
-  ) : (
-    <button type="button" className={styles.fieldAccessory} aria-label="Acquiring location" disabled>
-      <CrosshairIcon />
-    </button>
-  )
+     slot the ✕ takes over once there's text to clear. One tap does the
+     whole job since the same day's use-location-ux pass: enable, wait for
+     a fix that clears the accuracy gate, fill start, recenter the map —
+     the old enable-then-tap-again dance is gone (App's useLocationFill
+     owns all of that; this button just reports the tap). Disabled only
+     while a fill is actually pending; an error state stays tappable —
+     that's the retry — with the explanation in the field's status line
+     below. Same ⌖ glyph as the map's own locate button. */
+  const locationAccessory =
+    locationStatus === 'acquiring' ? (
+      <button type="button" className={styles.fieldAccessory} aria-label="Acquiring location" disabled>
+        <CrosshairIcon />
+      </button>
+    ) : (
+      <button
+        type="button"
+        className={styles.fieldAccessory}
+        aria-label={locationStatus === 'ready' ? 'Set start point to my location' : 'Use location'}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onUseLocation}
+      >
+        <CrosshairIcon />
+      </button>
+    )
+
+  /* The failure half of the location story (useGeolocation swallowed
+     every error into a stuck "acquiring" until 2026-09-02). Rendered in
+     the start field's status line — the same live region NOT_FOUND uses,
+     right under the ⌖ the answer is about. Lives and dies WITH the ⌖:
+     once the field has text, the ✕ has taken the slot and location advice
+     is stale noise (user call 2026-09-02 — "once you input an address,
+     that error should go away"); clearing the field brings both back. */
+  const locationNotice =
+    start.query !== '' ? null : locationStatus === 'acquiring' ? (
+      /* The accuracy gate can wait up to 10s for a location worth
+         trusting, and the only other signal is the ⌖ greying out — this
+         line makes the silence read as progress, not a hang (the "nothing
+         seemed to happen" report, 2026-09-02). */
+      <>
+        <span aria-hidden="true">{'// ACQUIRING:'}</span>
+        <span className={styles.visuallyHidden}>Acquiring:</span> pinpointing your location…
+      </>
+    ) : locationStatus === 'denied' ? (
+      <>
+        <span aria-hidden="true">{'// LOCATION_OFF:'}</span>
+        <span className={styles.visuallyHidden}>Location off:</span> allow location for this site in
+        your browser settings
+      </>
+    ) : locationStatus === 'unavailable' ? (
+      <>
+        <span aria-hidden="true">{'// NO_LOCATION:'}</span>
+        {/* No ⌖ glyph in copy — it's tofu in iOS's mono fallback (the
+            whole reason icons.tsx exists). "Location", never "fix" — GPS
+            jargon (user call 2026-09-02). */}
+        <span className={styles.visuallyHidden}>No location:</span> couldn&#39;t find your location —
+        tap the location button to retry
+      </>
+    ) : null
 
   return (
     <>
@@ -631,6 +710,7 @@ export function Controls({
             example="Washington Square Park"
             field={start}
             accessory={start.query !== '' ? <ClearFieldButton field={start} spokenLabel="start point" /> : locationAccessory}
+            notice={locationNotice}
           />
           <AddressField
             label="End_point"

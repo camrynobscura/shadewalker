@@ -101,9 +101,13 @@ export function useRouteQuery(
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return // superseded, not an error
         // RouteError = the server responded with a specific, useful reason
-        // (e.g. outside coverage) — show that. Anything else (dead server,
-        // no network) gets the generic fallback instead of a raw fetch error.
-        setError(err instanceof RouteError ? err.message : 'Could not find a route — is the server running?')
+        // (e.g. outside coverage) — show that. Anything else (no network,
+        // a dropped request) gets the generic fallback instead of a raw
+        // fetch error. Worded for the person on a phone, not the developer
+        // — "is the server running?" shipped to a real user's screen via a
+        // flaky tunnel (2026-09-02). Controls' error slot prefixes
+        // "// ERROR:", so this reads as its sentence body.
+        setError(err instanceof RouteError ? err.message : "couldn't load the route — check your connection and try again")
         setSnappedStart(null)
         setSnappedEnd(null)
         setLoading(false)
