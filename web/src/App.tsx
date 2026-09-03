@@ -6,6 +6,7 @@ import { Header } from './components/Header'
 import { MapView } from './components/MapView'
 import { RouteStats } from './components/RouteStats'
 import { useGeolocation } from './hooks/useGeolocation'
+import { MOBILE_LAYOUT_QUERY, useMediaQuery } from './hooks/useMediaQuery'
 import { useRouteQuery } from './hooks/useRouteQuery'
 import styles from './App.module.css'
 
@@ -56,6 +57,32 @@ export default function App() {
   const [locationEnabled, setLocationEnabled] = useState(false)
   const position = useGeolocation(locationEnabled)
 
+  /* Mobile full-screen map (user, 2026-09-02: the 45vh mobile map "feels
+     really cramped", worst right when a route exists and the panel matters
+     least). The toggle hides the panel AND the header (user call
+     2026-09-02) — iPhone Safari has no element fullscreen API, so this is
+     a layout mode, not the Fullscreen API. Mobile-only: the desktop
+     two-column layout already gives the map most of the screen.
+     `mapExpanded` is derived, not stored, so resizing/rotating past the
+     breakpoint restores the full layout on its own — the raw flag just
+     waits, harmlessly, for the next mobile-width render. */
+  const isMobile = useMediaQuery(MOBILE_LAYOUT_QUERY)
+  const [wantMapExpanded, setWantMapExpanded] = useState(false)
+  const mapExpanded = wantMapExpanded && isMobile
+
+  // Escape backs out of the expanded map, matching every other dismissable
+  // state in the app. Window-level and expanded-only: the panel (where the
+  // search overlay has its own Escape handling) is display:none while this
+  // listener exists, so the two can never both be live.
+  useEffect(() => {
+    if (!mapExpanded) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setWantMapExpanded(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [mapExpanded])
+
   const [coverage, setCoverage] = useState<CoverageFeature | null>(null)
   // Fetched once, not tied to any route request. Purely a visual aid — the
   // server enforces real coverage on every /route call regardless of
@@ -87,17 +114,34 @@ export default function App() {
 
   return (
     <div className={styles.app}>
-      {/* Skip link: first thing keyboard focus reaches, jumps past the map. */}
-      <a href="#controls" className={styles.skipLink}>
-        Skip to route controls
-      </a>
+      {/* Skip link: first thing keyboard focus reaches, jumps past the map.
+          Gone while the map is expanded — its target is display:none, so a
+          link to it would be a silent no-op. */}
+      {!mapExpanded && (
+        <a href="#controls" className={styles.skipLink}>
+          Skip to route controls
+        </a>
+      )}
 
       {/* The shared header component — About renders the same one; every
-          header comment lives in Header.tsx now. */}
-      <Header page="map" />
+          header comment lives in Header.tsx now. Unmounted (not hidden)
+          while the map is expanded: it holds no state worth preserving —
+          the cursor-blink once-per-tab memo is module-level in Header.tsx,
+          so a remount can't re-fire it. */}
+      {!mapExpanded && <Header page="map" />}
 
       <div className={styles.layout}>
         <main className={styles.mapArea}>
+          {/* The wordmark <h1> left with the header, and a page with zero
+              headings is a real hole in the a11y tree (axe caught it:
+              page-has-heading-one), not a formality — so expanded mode
+              keeps the page's one h1, visually hidden since the mode's
+              whole point is spending no pixels on chrome, and inside main
+              (all content belongs to a landmark). Plain "Shade Walker",
+              not the underscored wordmark: there's nothing visual here to
+              theme, and VoiceOver reads "Shade_walker" as one mushed word
+              (the reason Header.tsx's link carries the same spoken form). */}
+          {mapExpanded && <h1 className={styles.visuallyHidden}>Shade Walker</h1>}
           <MapView
             start={snappedStart ?? start}
             end={snappedEnd ?? end}
@@ -106,10 +150,21 @@ export default function App() {
             coverage={coverage}
             position={position}
             onMapClick={handleMapClick}
+            expanded={mapExpanded}
+            onToggleExpanded={isMobile ? () => setWantMapExpanded((v) => !v) : null}
           />
         </main>
 
-        <aside id="controls" tabIndex={-1} className={styles.panel} aria-label="Route controls and details">
+        {/* Stays MOUNTED while the map is expanded, unlike the header:
+            display:none (panelHidden) keeps the address fields' typed-but-
+            unresolved text and the aria-live regions alive, while still
+            removing the panel from the a11y tree and tab order. */}
+        <aside
+          id="controls"
+          tabIndex={-1}
+          className={mapExpanded ? `${styles.panel} ${styles.panelHidden}` : styles.panel}
+          aria-label="Route controls and details"
+        >
           <Controls
             treeWeight={treeWeight}
             onTreeWeightChange={setTreeWeight}

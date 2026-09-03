@@ -27,6 +27,46 @@ export function CrosshairIcon() {
   )
 }
 
+/** Expand-map arrows: two diagonals pointing out to opposite corners. */
+export function ExpandIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <polyline points="11,2.5 15.5,2.5 15.5,7" />
+      <line x1="15.5" y1="2.5" x2="10" y2="8" />
+      <polyline points="7,15.5 2.5,15.5 2.5,11" />
+      <line x1="2.5" y1="15.5" x2="8" y2="10" />
+    </svg>
+  )
+}
+
+/** Collapse-map arrows: the same two diagonals pointing back inward. */
+export function CollapseIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <line x1="16" y1="2" x2="10.5" y2="7.5" />
+      <polyline points="10.5,3.5 10.5,7.5 14.5,7.5" />
+      <line x1="2" y1="16" x2="7.5" y2="10.5" />
+      <polyline points="7.5,14.5 7.5,10.5 3.5,10.5" />
+    </svg>
+  )
+}
+
 /** The per-field clear ✕. */
 export function ClearIcon() {
   return (

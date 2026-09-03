@@ -13,7 +13,7 @@ import {
 } from 'react-leaflet'
 import type { CoverageFeature, Point, RouteFeature } from '../api'
 import type { GeoPosition } from '../hooks/useGeolocation'
-import { CrosshairIcon } from './icons'
+import { CollapseIcon, CrosshairIcon, ExpandIcon } from './icons'
 import styles from './MapView.module.css'
 
 // Where the map opens before any route exists: Washington Square, framing
@@ -149,6 +149,24 @@ function ClickHandler({ onMapClick }: { onMapClick: (p: Point) => void }) {
   return null
 }
 
+/** Repaints the map whenever its CONTAINER resizes. Leaflet only watches
+ * window resize (trackResize), so a container that changes size while the
+ * window doesn't — the expand toggle hiding the panel and header — leaves
+ * the newly revealed strip unpainted (grey, tile-less) until
+ * invalidateSize runs. A ResizeObserver on the container covers every such
+ * case structurally — this toggle and anything future — instead of syncing
+ * a call to one specific state flip. animate:false: a mode flip should
+ * repaint instantly, not slide. */
+function InvalidateOnResize() {
+  const map = useMap()
+  useEffect(() => {
+    const observer = new ResizeObserver(() => map.invalidateSize({ animate: false }))
+    observer.observe(map.getContainer())
+    return () => observer.disconnect()
+  }, [map])
+  return null
+}
+
 /** Keeps the whole route in view as start/end/the selected preset change --
  * without this, the map's viewport never moves on its own (PILOT_CENTER is
  * only ever applied once, at mount), so with all 5 boroughs live, an
@@ -180,16 +198,19 @@ function RouteFraming({
         ...(route ? toLatLngs(route) : []),
       ]
       // Uneven padding, not a uniform one: the legend (bottom-left, up to
-      // ~163x88px with all 3 rows shown) and the Locate-me button
-      // (bottom-right) both float over the map itself, so a plain 48px on
-      // every side still let a fitted point land right behind one of them.
-      // paddingTopLeft's x covers the legend's width; paddingBottomRight's
-      // y covers whichever of the two overlays is taller -- that alone
-      // keeps every fitted point out of the bottom strip entirely, so it
-      // doesn't matter which corner it's actually closer to.
+      // ~163x88px with all 3 rows shown), the Locate-me button
+      // (bottom-right), and on mobile the expand toggle (top-right, 44px
+      // ending 54px from each edge) all float over the map itself, so a
+      // plain 48px on every side still let a fitted point land right
+      // behind one of them. paddingTopLeft's x covers the legend's width
+      // and its y clears the expand toggle's depth; paddingBottomRight's
+      // x clears the toggle's width and its y covers whichever bottom
+      // overlay is taller -- that alone keeps every fitted point out of
+      // the bottom strip entirely, so it doesn't matter which corner it's
+      // actually closer to.
       map.fitBounds(points, {
-        paddingTopLeft: [190, 48],
-        paddingBottomRight: [48, 100],
+        paddingTopLeft: [190, 60],
+        paddingBottomRight: [60, 100],
         maxZoom: 17,
         animate,
       })
@@ -269,9 +290,26 @@ interface MapViewProps {
   coverage: CoverageFeature | null
   position: GeoPosition | null
   onMapClick: (p: Point) => void
+  /** Whether the mobile full-screen map mode is on — flips the toggle's
+   * icon and pressed state. The layout change itself (hiding the header
+   * and panel) is App's, not this component's. */
+  expanded: boolean
+  /** null = don't render the toggle at all (desktop — the two-column
+   * layout already gives the map most of the screen). */
+  onToggleExpanded: (() => void) | null
 }
 
-export function MapView({ start, end, selected, baseline, coverage, position, onMapClick }: MapViewProps) {
+export function MapView({
+  start,
+  end,
+  selected,
+  baseline,
+  coverage,
+  position,
+  onMapClick,
+  expanded,
+  onToggleExpanded,
+}: MapViewProps) {
   return (
     <div className={styles.mapRegion} role="region" aria-label="Map">
       {/* A landmark's aria-label is re-read every time a screen reader user
@@ -315,6 +353,7 @@ export function MapView({ start, end, selected, baseline, coverage, position, on
           maxZoom={20}
         />
         <ClickHandler onMapClick={onMapClick} />
+        <InvalidateOnResize />
         <RouteFraming start={start} end={end} selected={selected} baseline={baseline} />
 
         {/* Drawn first (and non-interactive) so the route lines and markers
@@ -384,6 +423,21 @@ export function MapView({ start, end, selected, baseline, coverage, position, on
           accessibility tree entirely. */}
       <div className={styles.scanlines} aria-hidden="true" />
       <Legend hasRoute={Boolean(selected || baseline)} hasCoverage={Boolean(coverage)} />
+      {/* Mobile full-screen toggle, top-right — the one free corner
+          (Locate me bottom-right, zoom top-left, legend bottom-left).
+          A toggle button, so the accessible name stays "Expand map" in
+          both states and aria-pressed carries which one it's in. */}
+      {onToggleExpanded && (
+        <button
+          type="button"
+          className={styles.expandButton}
+          aria-label="Expand map"
+          aria-pressed={expanded}
+          onClick={onToggleExpanded}
+        >
+          {expanded ? <CollapseIcon /> : <ExpandIcon />}
+        </button>
+      )}
     </div>
   )
 }

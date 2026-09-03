@@ -118,6 +118,30 @@
   background: var(--line);
 }
 
+/* The mobile full-screen toggle — top-right, the one corner nothing else
+   claims (zoom top-left, legend bottom-left, Locate me bottom-right).
+   Icon-only, so the box itself is the full 44px touch target. */
+.expandButton {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000; /* above Leaflet's map panes, same tier as .locateButton */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: var(--panel-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.expandButton:hover {
+  background: var(--line);
+}
+
 /* The Greenhouse scanlines: green print-texture lines over a thin jade
    wash — together they tint CARTO's grey-white tiles toward the mockup's
    mint map ground. pointer-events: none means clicks pass straight through
