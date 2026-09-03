@@ -54,6 +54,35 @@ test('loading a shared route URL fills in the address fields via reverse geocodi
   await expect(page.getByRole('combobox', { name: 'End point' })).toHaveValue('3rd Ave')
 })
 
+test('the About link survives every width, icon form included', async ({ page }) => {
+  // ≤720px the header's ABOUT swaps its word for the ⓘ icon (2026-09-03)
+  // — one link, two CSS-toggled forms. The risk this guards: both forms
+  // hidden at some width leaves phones with NO path to About, and the
+  // swap regressing the zoomed-phone wrap (the whole reason the word
+  // left) would put ABOUT below the wordmark again. 320px is the reflow
+  // floor and the tightest fit for wordmark + icon on one row.
+  await page.setViewportSize({ width: 320, height: 667 })
+  await page.goto('/')
+  const about = page.getByRole('link', { name: 'About Shade Walker' })
+  await expect(about).toBeVisible()
+  // Same row as the wordmark: the icon's top edge must sit above the
+  // wordmark's bottom, or it has wrapped below it.
+  const wordmark = page.getByRole('link', { name: 'Shade Walker, home' })
+  const [aboutBox, wordmarkBox] = [await about.boundingBox(), await wordmark.boundingBox()]
+  expect(aboutBox!.y).toBeLessThan(wordmarkBox!.y + wordmarkBox!.height)
+
+  await about.click()
+  await expect(page).toHaveURL(/about\.html/)
+  // About's own header keeps its MAP text link — the way back — at
+  // every width; only the map page's link has an icon form.
+  await expect(page.locator('header').getByRole('link', { name: 'MAP', exact: true })).toBeVisible()
+
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto('/')
+  await expect(about).toBeVisible()
+  await expect(about).toContainText('ABOUT') // the word form, not the icon
+})
+
 test('the About page is a scrollable document', async ({ page }) => {
   // Regression: about.css imports index.css for the tokens, and the app's
   // fixed-viewport guard there (html/body overflow:hidden, 2026-08-31)
