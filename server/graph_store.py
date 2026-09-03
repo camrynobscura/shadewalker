@@ -1093,10 +1093,11 @@ class GraphStore:
         source to every listed target in a single run (that's inherent to
         how Dijkstra works, not a batching trick), so each start endpoint
         covers both end endpoints at once. Worth it at citywide scale —
-        each run's fixed cost grows with the graph, measured around 13ms
-        on a 203k-node component (a straight-line distance thing, not a
-        constant), so halving the run count matters more here than it did
-        at pilot-fixture scale.
+        each run's cost grows with how much graph Dijkstra explores
+        (re-profiled 2026-09-01 on the citywide graph: ~25ms/run on the
+        dev Mac, ~110ms/run on the production droplet; per-route-length
+        numbers in pipeline/config.py's cap note), so halving the run
+        count matters more here than it did at pilot-fixture scale.
 
         When start and end land on the same edge, also try cutting
         straight between them along it — otherwise two nearby clicks on

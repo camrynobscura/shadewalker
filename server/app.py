@@ -236,9 +236,12 @@ def route(
         raise HTTPException(status_code=400, detail="month must be 1-12")
     if not tree_weights:
         raise HTTPException(status_code=400, detail="tree_weights must include at least one value")
-    # Each weight is a real ~13ms Dijkstra pass on a worker thread; the
-    # frontend sends 4. Uncapped, one request with hundreds of weights
-    # blocks a worker for seconds (FIXES item 7 / audit §2.1).
+    # Each weight costs two real Dijkstra runs on a worker thread
+    # (~25ms/run on the dev Mac, ~110ms on the droplet, profiled
+    # 2026-09-01); the frontend sends 4. Uncapped, one request with
+    # hundreds of weights blocks a worker for seconds (FIXES item 7 /
+    # audit §2.1) — see pipeline/config.py's note on the cap for the
+    # per-route-length numbers.
     if len(tree_weights) > config.MAX_TREE_WEIGHTS_PER_REQUEST:
         raise HTTPException(
             status_code=400,
