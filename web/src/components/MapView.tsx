@@ -5,13 +5,12 @@ import {
   CircleMarker,
   MapContainer,
   Marker,
-  Polygon,
   Polyline,
   TileLayer,
   useMap,
   useMapEvents,
 } from 'react-leaflet'
-import type { CoverageFeature, Point, RouteFeature } from '../api'
+import type { Point, RouteFeature } from '../api'
 import type { GeoPosition } from '../hooks/useGeolocation'
 import { CollapseIcon, CrosshairIcon, ExpandIcon } from './icons'
 import styles from './MapView.module.css'
@@ -58,84 +57,6 @@ function toLatLngs(feature: RouteFeature): [number, number][] {
   return feature.geometry.coordinates.map(([lon, lat]) => [lat, lon])
 }
 
-/** A ring well outside every coverage piece in every direction. Paired
- * with the coverage rings as a Polygon's outer boundary + holes, Leaflet
- * fills only the area *between* them — everything outside coverage gets
- * dimmed, each coverage piece stays a clear "hole". Sized off every
- * piece's combined bounds rather than a hardcoded NYC box, so this keeps
- * working unchanged as more pieces (Governors Island, Staten Island) get
- * added. */
-function maskRing(coverageRings: [number, number][][]): [number, number][] {
-  const points = coverageRings.flat()
-  const lons = points.map(([lon]) => lon)
-  const lats = points.map(([, lat]) => lat)
-  const margin = 0.5 // degrees (~55 km) — comfortably beyond any zoom-out
-  // a user would realistically reach in an NYC-scoped app, and bigger than
-  // Stage 2's eventual citywide coverage extent too
-  const lonMin = Math.min(...lons) - margin
-  const lonMax = Math.max(...lons) + margin
-  const latMin = Math.min(...lats) - margin
-  const latMax = Math.max(...lats) + margin
-  return [
-    [lonMin, latMin],
-    [lonMax, latMin],
-    [lonMax, latMax],
-    [lonMin, latMax],
-    [lonMin, latMin],
-  ]
-}
-
-/** The offshore frame (FIXES 12, redesigned with the user 2026-08-18):
- * ONE generous dashed boundary drawn through the WATER around the whole
- * routable world — never tracing coastlines — with the outside dim
- * feathering in over two steps (~800m) instead of starting hard at the
- * line. The frame geometry comes from the server
- * (server/coverage_frame.py: coverage buffered offshore, closed across
- * the harbor, clipped to political geometry incl. three user-designed
- * corridors); the true click-acceptance region stays
- * coverage.geometry, which the server checks — the frame is
- * deliberately more generous, and the water inside it isn't clickable
- * anyway.
- *
- * Three stacked dim masks make the feather: each dims a little more the
- * further outside the frame you are (0.06 + 0.05 + 0.05 = the old 0.16
- * full strength past ~800m). The line itself is soft on purpose —
- * lighter and thinner than any route line, so the map's subject stays
- * the route (the user's design review picked soft over the old 3px). */
-function CoverageOverlay({ coverage }: { coverage: CoverageFeature }) {
-  const { frame, frame_feather_350, frame_feather_800 } = coverage.properties
-  const outer = maskRing(frame_feather_800.length ? frame_feather_800 : frame)
-  const toLatLng = ([lon, lat]: [number, number]): [number, number] => [lat, lon]
-
-  // Hole rings have to wind opposite the outer ring — Leaflet's SVG
-  // paths use the default (nonzero) fill-rule, which fills straight
-  // through a same-direction inner ring instead of punching a hole.
-  // Reversing point order flips winding without changing the shape.
-  const dim = (holes: [number, number][][], opacity: number) => (
-    <Polygon
-      positions={[outer.map(toLatLng), ...holes.map((ring) => [...ring].reverse().map(toLatLng))]}
-      pathOptions={{ stroke: false, fillColor: '#0b2418', fillOpacity: opacity }}
-      interactive={false}
-    />
-  )
-
-  return (
-    <>
-      {dim(frame, 0.06)}
-      {dim(frame_feather_350, 0.05)}
-      {dim(frame_feather_800, 0.05)}
-      <Polygon
-        // Dashed like the fastest route's pink line but green, thinner,
-        // and quieter — reads as "a line in that family" without
-        // competing with the routes. Array-of-arrays: each frame piece
-        // (there's normally exactly one) is its own closed shape.
-        positions={frame.map((ring) => [ring.map(toLatLng)])}
-        pathOptions={{ color: '#00a86b', weight: 1.5, dashArray: '6 8', opacity: 0.45, fill: false }}
-        interactive={false}
-      />
-    </>
-  )
-}
 
 const reducedMotion = () =>
   window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -225,14 +146,14 @@ function RouteFraming({
   return null
 }
 
+
 /** Explains the map's line styles. Real text (not just aria-hidden swatches)
  * so the meaning doesn't depend on noticing the color/dash difference —
  * screen readers get it too, since it's plain content in reading order,
- * not decoration. Route rows only once a route exists; the coverage row
- * as soon as the boundary itself has loaded, independent of that — it's
- * meant to help *before* someone tries a route, not just explain one after. */
-function Legend({ hasRoute, hasCoverage }: { hasRoute: boolean; hasCoverage: boolean }) {
-  if (!hasRoute && !hasCoverage) return null
+ * not decoration. Rendered only once a route exists — there's nothing
+ * to explain on an empty map. */
+function Legend({ hasRoute }: { hasRoute: boolean }) {
+  if (!hasRoute) return null
   return (
     // Named: an unnamed grouping announces as "list, 3 items" with no
     // clue what the list IS (2026-08-30 tree-read finding).
@@ -248,12 +169,6 @@ function Legend({ hasRoute, hasCoverage }: { hasRoute: boolean; hasCoverage: boo
             fastest route
           </li>
         </>
-      )}
-      {hasCoverage && (
-        <li className={styles.legendRow}>
-          <span className={`${styles.legendSwatch} ${styles.legendSwatchCoverage}`} aria-hidden="true" />
-          coverage area
-        </li>
       )}
     </ul>
   )
@@ -302,7 +217,6 @@ interface MapViewProps {
    * comparison -- identical to `selected` when NONE itself is the
    * selected preset, same as before this was named `green`/`shortest`. */
   baseline: RouteFeature | null
-  coverage: CoverageFeature | null
   position: GeoPosition | null
   /** Imperative pan target — see PanTo. */
   panTo: Point | null
@@ -321,7 +235,6 @@ export function MapView({
   end,
   selected,
   baseline,
-  coverage,
   position,
   panTo,
   onMapClick,
@@ -374,10 +287,6 @@ export function MapView({
         <InvalidateOnResize />
         <PanTo point={panTo} />
         <RouteFraming start={start} end={end} selected={selected} baseline={baseline} />
-
-        {/* Drawn first (and non-interactive) so the route lines and markers
-            always sit visually on top of it, never the other way round. */}
-        {coverage && <CoverageOverlay coverage={coverage} />}
 
         {/* Baseline first so the selected route draws on top of it. Routes
             are told apart by pattern (dashed vs solid), not color alone.
@@ -441,7 +350,7 @@ export function MapView({
       {/* Purely decorative texture; aria-hidden keeps it out of the
           accessibility tree entirely. */}
       <div className={styles.scanlines} aria-hidden="true" />
-      <Legend hasRoute={Boolean(selected || baseline)} hasCoverage={Boolean(coverage)} />
+      <Legend hasRoute={Boolean(selected || baseline)} />
       {/* Mobile full-screen toggle, top-right — the one free corner
           (Locate me bottom-right, zoom top-left, legend bottom-left).
           A toggle button, so the accessible name stays "Expand map" in

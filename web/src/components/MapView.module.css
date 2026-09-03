@@ -88,12 +88,6 @@
   border-top: 3px dashed var(--magenta);
 }
 
-/* Same dash weight/spacing as the fastest-route swatch above — green
-   instead of magenta, matching the boundary line drawn on the map. */
-.legendSwatchCoverage {
-  border-top: 3px dashed var(--green);
-}
-
 .locateButton {
   position: absolute;
   right: 10px;

@@ -17,7 +17,6 @@ import gzip
 import json
 
 import pytest
-from shapely.geometry import LinearRing, Point, Polygon
 
 from pipeline import config
 from server.graph_store import GraphStore
@@ -29,8 +28,8 @@ MAIN_NODES = {
     "m4": [-73.9900, 40.6820],
 }
 # ~2.5km from the main cluster -- well past twice MAX_SNAP_DISTANCE_M
-# (200m), so the two components' buffered coverage footprints stay
-# genuinely disjoint rather than merging into one piece.
+# (200m), so the two components stay genuinely out of snap range of each
+# other.
 ISLAND_NODES = {
     "i1": [-74.0170, 40.6890],
     "i2": [-74.0150, 40.6890],
@@ -132,26 +131,6 @@ def test_load_keeps_packed_geometry_aligned_with_endpoints(multi_component_store
         endpoints = {tuple(multi_component_store._node_lonlat[u]), tuple(multi_component_store._node_lonlat[v])}
         assert {tuple(coords[0]), tuple(coords[-1])} == endpoints
 
-
-def test_coverage_includes_both_components_as_separate_pieces(multi_component_store):
-    # The user-facing point of relaxing pruning: a genuinely disconnected
-    # real place (this fixture stands in for Governors Island) gets its
-    # own visible boundary now, instead of being silently left off the map
-    # while still being fully routable.
-    rings = multi_component_store.coverage_rings()
-    assert len(rings) == 2
-
-    m1_lon, m1_lat = MAIN_NODES["m1"]
-    i1_lon, i1_lat = ISLAND_NODES["i1"]
-    polys = [Polygon(ring) for ring in rings]
-    assert any(poly.contains(Point(m1_lon, m1_lat)) for poly in polys)
-    assert any(poly.contains(Point(i1_lon, i1_lat)) for poly in polys)
-
-    # Each piece is closed and CCW -- the frontend's hole-punch contract
-    # (MapView reverses each ring to cut a hole in the dimming mask).
-    for ring in rings:
-        assert ring[0] == ring[-1]
-        assert LinearRing(ring).is_ccw
 
 
 def test_routing_works_within_each_component(multi_component_store):

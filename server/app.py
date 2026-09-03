@@ -19,7 +19,6 @@ at /docs.
 
 Endpoints:
     GET /health
-    GET /coverage
     GET /route?from_lat=..&from_lon=..&to_lat=..&to_lon=..[&tree_weights=..&tree_weights=..][&month=..]
     GET /geocode?q=..[&limit=..]
     GET /geocode/reverse?lat=..&lon=..
@@ -37,8 +36,9 @@ tiles load once at startup and there is deliberately NO live-reload
 path. The refresh cadence is monthly (a tree re-score; the source
 dataset only updates biweekly), so the refresh story is: re-run the
 pipeline (exports are atomic, tmp+rename — a running server can never
-read a half-written tile), then restart the server (~15s + a coverage
-recompute when the tile set changed). Building a safe in-flight reload
+read a half-written tile), then restart the server (load measured 5.9s
+on the laptop, 2026-09-03 — down from ~15s once the coverage-ring
+compute was deleted with the map's coverage outline). Building a safe in-flight reload
 mechanism costs real threading care and buys nothing at that cadence;
 revisit only if the hosting platform's restart story turns out to be
 painful or the refresh cadence tightens dramatically.
@@ -101,8 +101,8 @@ app = FastAPI(title="Shade Walker", lifespan=lifespan,
 # being testable in-process. Keyed by the real client IP: Caddy passes it
 # as X-Real-IP (header_up, so a client can't spoof it); with no proxy in
 # front (dev) we fall back to the socket peer. Limits live as decorators on
-# the endpoints below -- /health, /coverage and the static mount stay
-# unlimited, since monitoring and page loads must never be throttled.
+# the endpoints below -- /health and the static mount stay unlimited,
+# since monitoring and page loads must never be throttled.
 def _client_ip(request: Request) -> str:
     return request.headers.get("X-Real-IP") or get_remote_address(request)
 
@@ -146,37 +146,6 @@ async def security_headers(request: Request, call_next):
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
-
-
-@app.get("/coverage")
-def coverage() -> dict:
-    """The loaded data's actual outline as a GeoJSON MultiPolygon, so the
-    frontend can draw it on the map — computed from whatever tiles are
-    loaded, no server code change needed as Stage 2 adds more. A
-    buffered-streets footprint, not a bounding box: with Brooklyn-sized
-    coverage, a box claimed water and Lower Manhattan as clickable area
-    that /route would then reject — the drawn line should be one users
-    can trust. MultiPolygon (not Polygon) because GraphStore.load() keeps
-    every real connected component now, not just the largest — Governors
-    Island and eventually Staten Island get their own separate piece
-    rather than being silently left off the map while still routable."""
-    frame = store.coverage_frame()
-    return {
-        "type": "Feature",
-        "geometry": {
-            "type": "MultiPolygon",
-            "coordinates": [[ring] for ring in store.coverage_rings()],
-        },
-        # The offshore frame (FIXES item 12): what the frontend actually
-        # DRAWS -- one generous dashed boundary through the water plus a
-        # two-step feathered dim -- while the geometry above remains the
-        # true click-acceptance region. See server/coverage_frame.py.
-        "properties": {
-            "frame": frame.get("frame", []),
-            "frame_feather_350": frame.get("feather_350", []),
-            "frame_feather_800": frame.get("feather_800", []),
-        },
-    }
 
 
 @app.get("/geocode")
@@ -261,12 +230,12 @@ def route(
     if not store.in_coverage(from_lat, from_lon):
         raise HTTPException(
             status_code=422,
-            detail="Start point is outside our current coverage area — pick a point on land inside the dashed frame shown on the map.",
+            detail="Start point is outside our current coverage area — pick a point on land in New York City.",
         )
     if not store.in_coverage(to_lat, to_lon):
         raise HTTPException(
             status_code=422,
-            detail="End point is outside our current coverage area — pick a point on land inside the dashed frame shown on the map.",
+            detail="End point is outside our current coverage area — pick a point on land in New York City.",
         )
 
     pair = store.snap_pair(from_lat, from_lon, to_lat, to_lon)
