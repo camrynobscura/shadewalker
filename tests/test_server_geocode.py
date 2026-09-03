@@ -130,6 +130,36 @@ def test_search_drops_unusable_features():
     assert geocode._parse_search_feature(feature({})) is None  # nothing displayable
 
 
+# --- the five-borough filter ---------------------------------------------
+
+def test_search_drops_results_outside_the_city(monkeypatch):
+    # The bbox rectangle admits Hoboken, Nassau, and Westchester; the
+    # city/state filter is what actually keeps autocomplete to the five
+    # boroughs (user report 2026-09-02). Photon's admin-hierarchy `city`
+    # is "New York" for every borough result, verified live the same day.
+    patch_upstream(monkeypatch, photon_body(
+        feature({"name": "Citi Bike - 11 St", "street": "11th Street",
+                 "city": "Hoboken", "state": "New Jersey"}),
+        feature({"housenumber": "45", "street": "Charles Street",
+                 "city": "Valley Stream", "state": "New York",
+                 "district": "Alden Manor"}),
+        feature({"housenumber": "45", "street": "Charles Street",
+                 "city": "New York", "state": "New York",
+                 "district": "Manhattan"}),
+    ))
+    results = geocode.search("45 charles street", 5)
+    assert [r["label"] for r in results] == ["45 Charles Street, Manhattan"]
+
+
+def test_search_requires_city_to_be_present(monkeypatch):
+    # A feature with no admin hierarchy at all can't prove it's in the
+    # city — it goes, same as a wrong one.
+    patch_upstream(monkeypatch, photon_body(
+        feature({"name": "Somewhere", "state": "New York"}),
+    ))
+    assert geocode.search("somewhere", 5) == ()
+
+
 # --- upstream plumbing ---------------------------------------------------
 
 def test_search_pins_bbox_and_language(monkeypatch):
@@ -167,7 +197,8 @@ def test_network_failure_raises_upstream_error(monkeypatch):
 # --- the cache -----------------------------------------------------------
 
 def test_repeat_search_hits_cache_not_upstream(monkeypatch):
-    calls = patch_upstream(monkeypatch, photon_body(feature({"name": "Court Street"})))
+    calls = patch_upstream(monkeypatch, photon_body(
+        feature({"name": "Court Street", "city": "New York", "state": "New York"})))
     first = geocode.search("court st", 1)
     second = geocode.search("court st", 1)
     assert first == second
@@ -180,8 +211,9 @@ def test_failures_are_never_cached(monkeypatch):
     patch_upstream(monkeypatch, {}, status_code=503)
     with pytest.raises(geocode.UpstreamError):
         geocode.search("smith st", 1)
-    calls = patch_upstream(monkeypatch, photon_body(feature({"name": "Smith Street"})))
-    assert geocode.search("smith st", 1)[0]["label"] == "Smith Street"
+    calls = patch_upstream(monkeypatch, photon_body(
+        feature({"name": "Smith Street", "city": "New York", "state": "New York"})))
+    assert geocode.search("smith st", 1)[0]["label"] == "Smith Street, New York"
     assert len(calls) == 1
 
 
@@ -189,7 +221,8 @@ def test_failures_are_never_cached(monkeypatch):
 
 def test_geocode_endpoint_shape(monkeypatch):
     patch_upstream(monkeypatch, photon_body(
-        feature({"name": "Court Street", "city": "New York"}, lon=-73.998, lat=40.68)))
+        feature({"name": "Court Street", "city": "New York", "state": "New York"},
+                lon=-73.998, lat=40.68)))
     resp = client.get("/geocode", params={"q": "court st"})
     assert resp.status_code == 200
     assert resp.json() == {"results": [
