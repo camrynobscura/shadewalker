@@ -4,11 +4,6 @@
   width: 100%;
 }
 
-/* The standard "visually hidden but still in the accessibility tree"
-   technique -- display:none or visibility:hidden would remove content
-   from screen readers too, which is the opposite of what this is for.
-   1x1px + clipped + nowrap, not just opacity:0, so it never takes up
-   layout space or becomes visible/interactable by any means. */
 .visuallyHidden {
   position: absolute;
   width: 1px;
@@ -25,15 +20,8 @@
   position: relative; /* anchors the .scanlines overlay */
 }
 
-/* A/B markers: both neon magenta, both circles -- told apart by their
-   letter, which is what WCAG's use-of-color rule actually requires (color
-   must not be the ONLY differentiator; it isn't, since the letter is
-   always legible on its own). Used to also differ by shape (circle vs
-   square) for an at-a-glance distinction beyond reading the letter, but
-   the square fought the app's otherwise zero-corner-radius rule and read
-   as arbitrary rather than intentional -- dropped in favor of just the
-   letter. Flat and borderless like the Greenhouse mockup; a faint shadow
-   keeps them separable from busy tiles without reading as an outline. */
+/* A/B markers are told apart by their letter, never by color alone
+   (WCAG use-of-color). */
 .marker {
   display: flex;
   align-items: center;
@@ -52,8 +40,6 @@
   background: var(--magenta);
 }
 
-/* Bottom-left, mirroring the locate button's bottom-right slot so neither
-   ever competes with the other for space. */
 .legend {
   position: absolute;
   left: 10px;
@@ -93,13 +79,12 @@
   right: 10px;
   bottom: 24px;
   z-index: 1000; /* above Leaflet's map panes */
-  /* Seats the SVG crosshair on the text's centerline — an inline svg
-     rides the baseline and looks dropped otherwise. */
+  /* inline-flex seats the SVG on the text's centerline, not the baseline. */
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
   padding: var(--space-sm) 14px;
-  min-height: 44px; /* comfortable touch target */
+  min-height: 44px;
   background: var(--panel-raised);
   color: var(--text);
   border: 1px solid var(--border);
@@ -112,9 +97,6 @@
   background: var(--line);
 }
 
-/* The mobile full-screen toggle — top-right, the one corner nothing else
-   claims (zoom top-left, legend bottom-left, Locate me bottom-right).
-   Icon-only, so the box itself is the full 44px touch target. */
 .expandButton {
   position: absolute;
   top: 10px;
@@ -136,28 +118,12 @@
   background: var(--line);
 }
 
-/* The Greenhouse scanlines: green print-texture lines over a thin jade
-   wash — together they tint CARTO's grey-white tiles toward the mockup's
-   mint map ground. pointer-events: none means clicks pass straight through
-   to the map, and z-index 450 slots it above the route lines (Leaflet's
-   overlay pane, 400) but below the A/B markers (600) and controls (1000).
-   The line pattern is a small tile, repeated via background-size +
-   background-repeat rather than one repeating-linear-gradient stretched
-   across the whole map height -- a single huge repeating gradient has to
-   rasterize every one of its (possibly 200+) cycles in one pass, and at
-   non-100% browser zoom the per-cycle rounding doesn't land the same way
-   twice, producing visible seams. Tiling a small pre-rasterized cycle
-   fixes the worst of that. Two further attempts at fixing the remaining,
-   more subtle zoom seam both caused real regressions instead of
-   improvements -- widening the tile to 2px/6px didn't meaningfully help,
-   and swapping to an inline SVG bitmap tile (in place of this
-   repeating-linear-gradient) fixed the seam but broke rendering in real
-   Safari entirely for reasons never pinned down. Reverted to this
-   version -- the original 1px/3px spacing, plain CSS gradient, no SVG --
-   as the one confirmed to render correctly everywhere; the residual
-   zoom-seam artifact is a known, accepted browser-rendering quirk, not
-   worth chasing further given how faint this effect already is (0.08
-   opacity) and how low-stakes it is decoratively. */
+/* Greenhouse scanlines. z-index 450: above the route lines (overlay
+   pane, 400), below markers (600) and controls (1000). Tiled as a small
+   pre-rasterized cycle, NOT one huge repeating gradient (per-cycle
+   rounding at non-100% zoom produces seams). An SVG bitmap tile fixed
+   the residual seam but broke real Safari outright — don't retry; the
+   faint remaining artifact is accepted. */
 .scanlines {
   position: absolute;
   inset: 0;
