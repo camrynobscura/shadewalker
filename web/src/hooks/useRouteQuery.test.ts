@@ -90,7 +90,7 @@ describe('useRouteQuery', () => {
     const { result } = renderHook(() => useRouteQuery(START, END, 15))
 
     await waitFor(() => expect(result.current.error).not.toBeNull())
-    expect(result.current.error).toBe('Could not find a route — is the server running?')
+    expect(result.current.error).toBe("couldn't load the route — check your connection and try again")
   })
 
   it('setStart clears a stale snappedStart immediately, before the next fetch resolves', async () => {
