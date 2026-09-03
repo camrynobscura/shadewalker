@@ -44,16 +44,33 @@ type FieldStatus = 'idle' | 'searching' | 'notfound' | 'found'
  * a new object with the same lat/lon -- reference equality would treat
  * that as "a new point," and redundantly reverse-geocode text that's
  * already better than anything reverse-geocoding would produce. */
-function useAddressField(onResolve: (p: Point | null) => void, externalPoint: Point | null) {
-  const [query, setQuery] = useState('')
-  const [status, setStatus] = useState<FieldStatus>('idle')
+function useAddressField(
+  onResolve: (p: Point | null) => void,
+  externalPoint: Point | null,
+  /** Reports the display text whenever it settles into representing the
+   * resolved point — a picked suggestion's label, resolved typed text, a
+   * reverse-geocode name. App mirrors it to the URL beside the point, so
+   * a reload shows the SAME text instead of re-deriving a (often
+   * different) name from the bare coordinate. */
+  onLabel: (label: string) => void,
+  /** The label a reload restored for `externalPoint` (from the URL) —
+   * read once, at mount: with it, the field starts out already showing
+   * the stored text and the reverse-geocode round trip never happens. */
+  initialLabel: string | null,
+) {
+  const restored = initialLabel !== null && externalPoint !== null
+  const [query, setQuery] = useState(restored ? initialLabel : '')
+  const [status, setStatus] = useState<FieldStatus>(restored ? 'found' : 'idle')
   // Suggestions are wanted only while the current text is something the
   // user TYPED -- a suggestion pick, a submit, or a programmatic fill
   // (map click, reverse geocode) all turn this off, so the dropdown never
   // reopens over text this code wrote itself.
   const [suggestOn, setSuggestOn] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
-  const shownPointRef = useRef<Point | null>(null)
+  // Starts as the restored point when a label came back from the URL —
+  // that's what stops the mount effect below from reverse-geocoding over
+  // the restored text.
+  const shownPointRef = useRef<Point | null>(restored ? externalPoint : null)
   // Previous externalPoint, so the effect below can tell a point being
   // CLEARED (value -> null) from the steady "no point yet" state while
   // someone types a fresh address.
@@ -84,6 +101,7 @@ function useAddressField(onResolve: (p: Point | null) => void, externalPoint: Po
     setStatus('found')
     shownPointRef.current = { lat: suggestion.lat, lon: suggestion.lon }
     onResolve({ lat: suggestion.lat, lon: suggestion.lon })
+    onLabel(suggestion.label)
   }
 
   function closeSuggestions() {
@@ -146,6 +164,9 @@ function useAddressField(onResolve: (p: Point | null) => void, externalPoint: Po
       setStatus('found')
       shownPointRef.current = { lat: result.lat, lon: result.lon }
       onResolve({ lat: result.lat, lon: result.lon })
+      // The field keeps showing the TYPED text after a resolve (not the
+      // geocoder's label), so that text is what the URL must restore.
+      onLabel(query)
     } else {
       setStatus('notfound')
     }
@@ -186,9 +207,16 @@ function useAddressField(onResolve: (p: Point | null) => void, externalPoint: Po
       // superseded this one -- shownPointRef.current would no longer be
       // this exact object in either case. Without this check, a slow
       // response landing late could stomp on something newer.
-      if (label && shownPointRef.current === externalPoint) setQuery(label)
+      if (label && shownPointRef.current === externalPoint) {
+        setQuery(label)
+        // Into the URL too: a reload then restores THIS name instantly
+        // instead of re-asking the geocoder, whose nearest-thing answer
+        // isn't stable call to call (and whose failure mode is showing
+        // raw coordinates).
+        onLabel(label)
+      }
     })
-  }, [externalPoint])
+  }, [externalPoint, onLabel])
 
   return {
     query,
@@ -506,6 +534,15 @@ interface ControlsProps {
   end: Point | null
   onSetStart: (p: Point | null) => void
   onSetEnd: (p: Point | null) => void
+  /** URL-restored display text for start/end — read once, at mount (the
+   * fields own their text after that); see useAddressField's
+   * initialLabel. */
+  initialStartLabel: string | null
+  initialEndLabel: string | null
+  /** Report the display text that now represents the start/end point, for
+   * the URL mirror. */
+  onStartLabel: (label: string) => void
+  onEndLabel: (label: string) => void
   position: GeoPosition | null
   locationEnabled: boolean
   onEnableLocation: () => void
@@ -529,6 +566,10 @@ export function Controls({
   end: endPoint,
   onSetStart,
   onSetEnd,
+  initialStartLabel,
+  initialEndLabel,
+  onStartLabel,
+  onEndLabel,
   position,
   locationEnabled,
   onEnableLocation,
@@ -547,8 +588,8 @@ export function Controls({
   // the dial up and watch whether the warning goes away.
   const lowShade = selected !== null && selected.properties.shade_fraction < LOW_SHADE_FRACTION
 
-  const start = useAddressField(onSetStart, startPoint)
-  const end = useAddressField(onSetEnd, endPoint)
+  const start = useAddressField(onSetStart, startPoint, onStartLabel, initialStartLabel)
+  const end = useAddressField(onSetEnd, endPoint, onEndLabel, initialEndLabel)
 
   /* The start field's empty-state accessory is the location control
      (2026-09-02, replacing the USE_LOCATION button row): "use my location"

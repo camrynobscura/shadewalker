@@ -33,6 +33,16 @@ function initialTreeWeight(params: URLSearchParams): number {
 
 const initialParams = new URLSearchParams(window.location.search)
 
+/* A label param (`fromq`/`toq`) is display text for the matching point —
+   only meaningful when that point parsed. Without it, reload used to
+   reverse-geocode the bare coordinate, and the nearest-thing name that
+   came back could differ from what was typed ("Court Street" reloading as
+   a Montague Street address — user report 2026-09-02) or, when the lookup
+   failed, stay raw coordinates. */
+function initialLabel(params: URLSearchParams, labelKey: string, pointKey: string): string | null {
+  return parsePoint(params.get(pointKey)) ? params.get(labelKey) : null
+}
+
 export default function App() {
   const {
     start,
@@ -53,6 +63,30 @@ export default function App() {
     parsePoint(initialParams.get('to')),
     initialTreeWeight(initialParams),
   )
+
+  /* The fields' display labels, mirrored to the URL beside the points so a
+     reload (or a shared link) shows the same text the fields showed — not
+     a fresh reverse-geocode of the coordinate (see initialLabel above).
+     Cleared whenever the matching point changes; the new text is reported
+     back up by Controls once it exists. */
+  const [startLabel, setStartLabel] = useState<string | null>(() =>
+    initialLabel(initialParams, 'fromq', 'from'),
+  )
+  const [endLabel, setEndLabel] = useState<string | null>(() =>
+    initialLabel(initialParams, 'toq', 'to'),
+  )
+
+  // The safety net against a stale label outliving its point: every path
+  // that moves a point goes through these, and label-reporting (Controls)
+  // happens after. React batches the pair, so the URL never sees the gap.
+  function setStart(p: Point | null) {
+    setStartLabel(null)
+    updateStart(p)
+  }
+  function setEnd(p: Point | null) {
+    setEndLabel(null)
+    updateEnd(p)
+  }
 
   const [locationEnabled, setLocationEnabled] = useState(false)
   const position = useGeolocation(locationEnabled)
@@ -93,22 +127,25 @@ export default function App() {
       .catch(() => {})
   }, [])
 
-  // Mirror state → URL.
+  // Mirror state → URL (labels included — the point is the truth, the
+  // label is what the field showed for it).
   useEffect(() => {
     const params = new URLSearchParams()
     if (start) params.set('from', formatPoint(start))
+    if (start && startLabel) params.set('fromq', startLabel)
     if (end) params.set('to', formatPoint(end))
+    if (end && endLabel) params.set('toq', endLabel)
     params.set('w', String(treeWeight))
     window.history.replaceState(null, '', `?${params}`)
-  }, [start, end, treeWeight])
+  }, [start, end, treeWeight, startLabel, endLabel])
 
   // Map clicks fill A, then B, then start a fresh route.
   function handleMapClick(p: Point) {
     if (!start || (start && end)) {
-      updateStart(p)
-      updateEnd(null)
+      setStart(p)
+      setEnd(null)
     } else {
-      updateEnd(p)
+      setEnd(p)
     }
   }
 
@@ -170,8 +207,12 @@ export default function App() {
             onTreeWeightChange={setTreeWeight}
             start={start}
             end={end}
-            onSetStart={updateStart}
-            onSetEnd={updateEnd}
+            onSetStart={setStart}
+            onSetEnd={setEnd}
+            initialStartLabel={startLabel}
+            initialEndLabel={endLabel}
+            onStartLabel={setStartLabel}
+            onEndLabel={setEndLabel}
             position={position}
             locationEnabled={locationEnabled}
             onEnableLocation={() => setLocationEnabled(true)}
