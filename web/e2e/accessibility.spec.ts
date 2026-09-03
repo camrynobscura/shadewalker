@@ -43,6 +43,29 @@ test('an open autocomplete listbox has no violations', async ({ page }) => {
   expect(results.violations).toEqual([])
 })
 
+test('an open recents listbox has no violations', async ({ page }) => {
+  // Distinct from the autocomplete state above: the recents list carries
+  // a non-option header row (role="presentation" + aria-hidden), which is
+  // exactly the shape axe's listbox required-children rule exists to
+  // police — prove the exemption actually holds.
+  await mockGeocode(page)
+  await page.goto('/')
+  const start = page.getByRole('combobox', { name: 'Start point' })
+  await start.fill('250 Court St')
+  await page.keyboard.press('Enter')
+  await page.getByRole('combobox', { name: 'End point' }).fill('3rd St & 3rd Ave')
+  await page.keyboard.press('Enter')
+  // Recents only exist once a route draws — commit rides route arrival.
+  await expect(page.getByText('distance', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Clear start point' }).click()
+  await start.click()
+  await expect(page.getByRole('listbox', { name: 'Start point recent addresses' })).toBeVisible()
+  await page.keyboard.press('ArrowDown') // active option: aria-activedescendant set
+
+  const results = await new AxeBuilder({ page }).analyze()
+  expect(results.violations).toEqual([])
+})
+
 test('the About page has no violations and links back', async ({ page }) => {
   // A static second page (no React) served from the same build -- easy
   // for regressions to hide on since no component test ever renders it.
