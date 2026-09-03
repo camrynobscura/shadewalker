@@ -149,6 +149,24 @@ function ClickHandler({ onMapClick }: { onMapClick: (p: Point) => void }) {
   return null
 }
 
+/** Repaints the map whenever its CONTAINER resizes. Leaflet only watches
+ * window resize (trackResize), so a container that changes size while the
+ * window doesn't — the expand toggle hiding the panel and header — leaves
+ * the newly revealed strip unpainted (grey, tile-less) until
+ * invalidateSize runs. A ResizeObserver on the container covers every such
+ * case structurally — this toggle and anything future — instead of syncing
+ * a call to one specific state flip. animate:false: a mode flip should
+ * repaint instantly, not slide. */
+function InvalidateOnResize() {
+  const map = useMap()
+  useEffect(() => {
+    const observer = new ResizeObserver(() => map.invalidateSize({ animate: false }))
+    observer.observe(map.getContainer())
+    return () => observer.disconnect()
+  }, [map])
+  return null
+}
+
 /** Keeps the whole route in view as start/end/the selected preset change --
  * without this, the map's viewport never moves on its own (PILOT_CENTER is
  * only ever applied once, at mount), so with all 5 boroughs live, an
@@ -315,6 +333,7 @@ export function MapView({ start, end, selected, baseline, coverage, position, on
           maxZoom={20}
         />
         <ClickHandler onMapClick={onMapClick} />
+        <InvalidateOnResize />
         <RouteFraming start={start} end={end} selected={selected} baseline={baseline} />
 
         {/* Drawn first (and non-interactive) so the route lines and markers
