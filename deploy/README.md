@@ -135,10 +135,36 @@ sudo systemctl reload caddy                   # picks up the Caddyfile; TLS auto
 
 ## 4. Monitoring
 
-Two UptimeRobot monitors:
-- **Alive:** HTTP(s) on `https://shadewalker.nyc/health`, keyword `ok`.
-- **Latency:** a fixed short `/route?...` URL with response-time alerting
-  (the live counterpart to the local latency canary).
+Three UptimeRobot **keyword** monitors — keyword, not plain HTTP,
+because a keyword monitor GETs the body and proves the app actually
+composed the page, while a plain monitor's probe only proves the socket
+answers (and its HEAD probes are what surfaced the HEAD-404 bug on
+2026-09-01):
+
+- **Homepage:** `https://shadewalker.nyc/` — keyword `Shade Walker`.
+- **Alive:** `https://shadewalker.nyc/health` — keyword `ok`.
+- **Latency:** a fixed short `/route?...` URL — keyword `routes`, with
+  response-time alerting (the live counterpart to the local latency
+  canary).
+
+### Crash investigation (per incident)
+
+The deploy user deliberately has NO standing journal access (decided
+2026-09-02) — crashes are investigated on request, not watched for. When
+one happens (UptimeRobot alerts), grant a one-time read as root:
+
+```bash
+sudo journalctl --since "-2 hours" -o short-iso | \
+  sudo tee /home/deploy/crash.log >/dev/null
+sudo chown deploy:deploy /home/deploy/crash.log
+```
+
+then read `/home/deploy/crash.log` over SSH as `deploy`; delete it when
+done. There's no rush and nothing leaks: the journal holds no visitor
+data on this box (uvicorn runs `--no-access-log`; Caddy's access log is
+a separate scrubbed file outside the journal), and crash evidence keeps —
+`Restart=always`/3s self-heals one-offs, and 3 failures in 10 minutes
+parks the unit failed, so the journal record persists either way.
 
 ## 5. Ongoing — monthly refresh → redeploy
 
