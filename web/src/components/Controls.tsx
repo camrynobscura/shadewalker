@@ -84,6 +84,11 @@ function useAddressField(
   // Not set on mount for URL-restored labels: a deliberate one was
   // already recorded when its route first drew.
   const pendingRecentRef = useRef<GeocodeResult | null>(null)
+  // Bumped whenever the text an in-flight resolve() was about stops
+  // being current (cleared, retyped) — the response is then stale and
+  // gets dropped instead of refilling the field (the ✕-mid-lookup
+  // resurrection, caught 2026-09-03).
+  const resolveSeqRef = useRef(0)
   // Previous externalPoint, so the effect below can tell a point being
   // CLEARED (value -> null) from the steady "no point yet" state while
   // someone types a fresh address.
@@ -110,6 +115,7 @@ function useAddressField(
     setStatus('idle')
     setSuggestOn(true)
     shownPointRef.current = null // free-typed text no longer matches any known point
+    resolveSeqRef.current++ // any in-flight lookup is about older text now
   }
 
   /** A picked suggestion already carries its point -- no second geocode
@@ -173,6 +179,7 @@ function useAddressField(
     setSuggestOn(false)
     shownPointRef.current = null
     pendingRecentRef.current = null
+    resolveSeqRef.current++ // a lookup still in flight is for cleared text — drop its answer
     onResolve(null)
   }
 
@@ -193,7 +200,12 @@ function useAddressField(
     setSuggestOn(false) // submitting is the end of the suggestion phase
     if (!query.trim() || status !== 'idle') return
     setStatus('searching')
+    const seq = resolveSeqRef.current
     const result = await geocode(query)
+    // The text this lookup was about is gone (✕, retyped, cleared from
+    // outside) — the late answer must not refill the field it was
+    // cleared out of.
+    if (seq !== resolveSeqRef.current) return
     // A point that landed while the lookup was in flight — a map tap, a
     // picked suggestion, USE_LOCATION — supersedes the typed text this
     // resolve started from; drop the response instead of stomping it.
@@ -235,6 +247,7 @@ function useAddressField(
         setStatus('idle')
         shownPointRef.current = null
         pendingRecentRef.current = null
+        resolveSeqRef.current++ // any in-flight lookup is for text that just got cleared
       }
       return
     }

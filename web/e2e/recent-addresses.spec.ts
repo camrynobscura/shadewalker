@@ -79,3 +79,29 @@ test('points arriving from outside the field record nothing', async ({ page }) =
   await page.getByRole('combobox', { name: 'Start point' }).click()
   await expect(page.getByRole('listbox')).toHaveCount(0)
 })
+
+test('clearing during an in-flight lookup drops the late answer', async ({ page }) => {
+  // The ✕-mid-lookup resurrection (caught 2026-09-03): a geocode answer
+  // arriving after its field was cleared used to refill the point.
+  // Delaying the geocode makes the sub-second race deterministic — this
+  // route registers after mockGeocode, so it runs first and hands the
+  // request back to the mock only after the field is long cleared.
+  await mockGeocode(page)
+  await page.route('**/geocode?*', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    await route.fallback()
+  })
+  await page.goto('/')
+
+  const start = page.getByRole('combobox', { name: 'Start point' })
+  await start.fill('250 Court St')
+  await page.keyboard.press('Enter')
+  await page.getByRole('button', { name: 'Clear start point' }).click()
+
+  // Give the delayed answer time to land, then prove it changed nothing:
+  // no text back in the field, no point in the URL, no recent recorded.
+  await page.waitForTimeout(900)
+  await expect(start).toHaveValue('')
+  await expect(page).not.toHaveURL(/from=/)
+  expect(await page.evaluate(() => localStorage.getItem('sw-recents'))).toBeNull()
+})
