@@ -5,7 +5,7 @@ import { DEFAULT_TREE_WEIGHT, snapToPreset } from './presets'
 import { Header } from './components/Header'
 import { MapView } from './components/MapView'
 import { RouteStats } from './components/RouteStats'
-import { useGeolocation } from './hooks/useGeolocation'
+import { useLocationFill } from './hooks/useLocationFill'
 import { MOBILE_LAYOUT_QUERY, useMediaQuery } from './hooks/useMediaQuery'
 import { useRouteQuery } from './hooks/useRouteQuery'
 import styles from './App.module.css'
@@ -88,8 +88,18 @@ export default function App() {
     updateEnd(p)
   }
 
-  const [locationEnabled, setLocationEnabled] = useState(false)
-  const position = useGeolocation(locationEnabled)
+  /* Where the map should pan, imperatively: set to the location fix when
+     it fills the start field, so the map visibly answers the tap even
+     though RouteFraming deliberately ignores single points (a user in
+     Brooklyn watched nothing move while the app stayed on the Village —
+     2026-09-02). A fresh object per fill, so re-tapping ⌖ pans again even
+     to the same spot. */
+  const [panTarget, setPanTarget] = useState<Point | null>(null)
+
+  const location = useLocationFill((fix) => {
+    setStart({ lat: fix.lat, lon: fix.lon })
+    setPanTarget({ lat: fix.lat, lon: fix.lon })
+  })
 
   /* Mobile full-screen map (user, 2026-09-02: the 45vh mobile map "feels
      really cramped", worst right when a route exists and the panel matters
@@ -185,7 +195,8 @@ export default function App() {
             selected={selected}
             baseline={baseline}
             coverage={coverage}
-            position={position}
+            position={location.position}
+            panTo={panTarget}
             onMapClick={handleMapClick}
             expanded={mapExpanded}
             onToggleExpanded={isMobile ? () => setWantMapExpanded((v) => !v) : null}
@@ -213,9 +224,8 @@ export default function App() {
             initialEndLabel={endLabel}
             onStartLabel={setStartLabel}
             onEndLabel={setEndLabel}
-            position={position}
-            locationEnabled={locationEnabled}
-            onEnableLocation={() => setLocationEnabled(true)}
+            locationStatus={location.status}
+            onUseLocation={location.request}
             error={error}
             selected={selected}
             baseline={baseline}

@@ -259,6 +259,21 @@ function Legend({ hasRoute, hasCoverage }: { hasRoute: boolean; hasCoverage: boo
   )
 }
 
+/** Pans to `point` whenever a NEW object arrives — the imperative "look
+ * here" channel, used when a location fix fills the start field so the
+ * map visibly answers the tap (RouteFraming deliberately ignores single
+ * points, so without this a far-from-viewport fix changed nothing on
+ * screen — user field report, 2026-09-02). Object identity is the
+ * trigger on purpose: re-requesting location pans again even when the
+ * fix lands on the same coordinates. */
+function PanTo({ point }: { point: Point | null }) {
+  const map = useMap()
+  useEffect(() => {
+    if (point) map.setView([point.lat, point.lon], 16, { animate: !reducedMotion() })
+  }, [point, map])
+  return null
+}
+
 /** "Locate me" — rendered inside the map so useMap() can pan it. */
 function LocateButton({ position }: { position: GeoPosition | null }) {
   const map = useMap()
@@ -289,6 +304,8 @@ interface MapViewProps {
   baseline: RouteFeature | null
   coverage: CoverageFeature | null
   position: GeoPosition | null
+  /** Imperative pan target — see PanTo. */
+  panTo: Point | null
   onMapClick: (p: Point) => void
   /** Whether the mobile full-screen map mode is on — flips the toggle's
    * icon and pressed state. The layout change itself (hiding the header
@@ -306,6 +323,7 @@ export function MapView({
   baseline,
   coverage,
   position,
+  panTo,
   onMapClick,
   expanded,
   onToggleExpanded,
@@ -354,6 +372,7 @@ export function MapView({
         />
         <ClickHandler onMapClick={onMapClick} />
         <InvalidateOnResize />
+        <PanTo point={panTo} />
         <RouteFraming start={start} end={end} selected={selected} baseline={baseline} />
 
         {/* Drawn first (and non-interactive) so the route lines and markers
