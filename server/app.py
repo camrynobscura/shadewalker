@@ -50,6 +50,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -355,6 +356,25 @@ def _describe(segments: list[dict]) -> str:
     return ", then ".join(parts) + "."
 
 
+def _mirror_head_on_get(app: FastAPI) -> None:
+    """Answer HEAD on every GET endpoint — restoring what plain Starlette
+    does by default (its Route.__init__ auto-adds HEAD to any GET route)
+    and FastAPI's APIRoute drops. Without this, HEAD to any API endpoint
+    missed the router entirely and fell through to the static mount as a
+    404 — found live by UptimeRobot's HEAD probes (2026-09-01). No body
+    handling needed here: the handler runs and uvicorn drops the body at
+    the protocol layer for a HEAD request (h11_impl:
+    `data = b"" if method == "HEAD" else body`), so the response carries
+    GET's exact headers, Content-Length included, per RFC 9110. A HEAD
+    therefore costs the same work as its GET (rate-limited identically);
+    fine — the monitors use keyword GETs anyway, this is HTTP
+    correctness. The static mount needs no help: StaticFiles answers
+    HEAD natively. Must run after every endpoint above is declared."""
+    for route in app.router.routes:
+        if isinstance(route, APIRoute) and "GET" in route.methods:
+            route.methods.add("HEAD")
+
+
 def _mount_frontend(app: FastAPI) -> None:
     """Serve the built frontend (web/dist) from the same process as the
     API — the serving shape decided 2026-08-30: `uvicorn server.app:app`
@@ -378,4 +398,5 @@ def _mount_frontend(app: FastAPI) -> None:
         logging.info("no frontend build at %s -- serving API only", config.WEB_DIST_DIR)
 
 
+_mirror_head_on_get(app)
 _mount_frontend(app)
