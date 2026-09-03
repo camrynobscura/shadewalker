@@ -14,13 +14,11 @@
   border: 1px solid var(--border);
 }
 
-/* Visible only while keyboard-focused — standard skip-link pattern. */
 .skipLink:focus {
   left: 0;
   top: 0;
 }
 
-/* Same visually-hidden technique as the other module.css copies. */
 .visuallyHidden {
   position: absolute;
   width: 1px;
@@ -32,9 +30,6 @@
   white-space: nowrap;
   border: 0;
 }
-
-/* Header styles live in components/Header.module.css since 2026-09-01 —
-   the header is a shared component rendered by both pages. */
 
 .layout {
   display: flex;
@@ -48,8 +43,6 @@
 }
 
 .panel {
-  /* 480px, was 460 until 2026-08-28: the directions list was wrapping a
-     good share of its lines by only a couple of characters. */
   width: 480px;
   overflow-y: auto;
   padding: var(--space-xl) var(--space-2xl);
@@ -57,17 +50,13 @@
   border-left: 1px solid var(--border);
 }
 
-/* Expanded (mobile full-screen map): the panel stays mounted so its React
-   state survives, but display:none takes it out of layout, the a11y tree,
-   and tab order all at once — exactly right while the map owns the screen.
-   The map then fills by pure flex fallout: header unmounted + panel gone
-   leaves .layout = just .mapArea, flex:1 all the way down. */
+/* Expanded mobile map: display:none keeps the panel's React state alive
+   while removing it from layout, the a11y tree, and tab order. */
 .panelHidden {
   display: none;
 }
 
-/* Mobile / narrow (and 200%-zoom reflow): stack map above panel. The
-   header's own slice of this breakpoint lives in Header.module.css. */
+/* Mobile / narrow (and 200%-zoom reflow): stack map above panel. */
 @media (max-width: 720px) {
   .layout {
     flex-direction: column;

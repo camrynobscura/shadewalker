@@ -1,13 +1,3 @@
-/* The div below (StatsBody) spaces every direct child with `gap` — so
-   each of those children declares `margin: 0` explicitly here rather
-   than leaning on a tag's default margin. --space-lg (was --space-md
-   until 2026-08-28, "still looks a little cramped" — user): the stat
-   row, the caution stamp and the directions list are distinct groups,
-   which is the lg token's own definition, not related lines within one
-   block. */
-/* Same visually-hidden technique as MapView.module.css's copy (CSS
-   Modules are per-file). Carries the spoken twins of the compact stat
-   units. */
 .visuallyHidden {
   position: absolute;
   width: 1px;
@@ -23,24 +13,13 @@
 .section {
   display: flex;
   flex-direction: column;
-  /* --space-lg, settled by eye (user, 2026-08-28): md read cramped, and
-     a 20px off-scale trial was walked back to the token. */
   gap: var(--space-lg);
 }
 
-/* Same style as Controls.module.css's .addressField label and its
-   .presetGroup legend -- one consistent "field/section label" look
-   reused a third time, not a new one. font-weight is explicit here even
-   though the other two never needed it: <h2> carries a bold browser
-   default that <label>/<legend> don't, so without this the title alone
-   would render bolder than the other two. margin-bottom, not the
-   .section flex container's gap, sets the tight title-to-content
-   spacing -- see the comment in RouteStats.tsx for why. */
+/* Explicit font-weight: <h2> carries a bold browser default that the
+   matching label/legend styles in Controls don't. */
 .sectionTitle {
   margin: 0 0 var(--space-sm);
-  /* 12px ink, up from the 10px muted sublabel size, so this section title
-     reads as a header above the stat sublabels below it (user call
-     2026-09-01). Kept in sync with Controls' field label + legend. */
   font-size: var(--section-label-size);
   font-weight: normal;
   text-transform: uppercase;
@@ -48,21 +27,12 @@
   color: var(--text);
 }
 
-/* The Directions subsection: a LIGHT break within the results, not a
-   top-level section (deliberately no hairline divider -- the stats and the
-   steps are both "your route"). It groups the caution lead-in and the step
-   list under their own heading, so the panel scans as summary -> steps and
-   screen readers can jump to the directions (user call 2026-09-01).
-   .section's gap sets the space above it; its own gap sets the inside. */
 .directionsGroup {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
 }
 
-/* The "Directions" heading (an h3 subsection): the same field/section-label
-   look as .sectionTitle, but margin-free since .directionsGroup's gap sets
-   its spacing. */
 .subTitle {
   margin: 0;
   font-size: var(--section-label-size);
@@ -72,14 +42,9 @@
   color: var(--text);
 }
 
-/* Applied to the aria-live wrapper only once it actually has content — see
-   the comment in RouteStats.tsx. The hairline marks the one conceptual
-   jump in the panel: from settings you choose (Controls, above) to
-   results the router gives back (this). */
+/* Padding-only, unlike Controls' margin-carrying twin: this wraps the
+   always-mounted aria-live region, whose spacing when empty must be zero. */
 .sectionDivider {
-  /* Deliberately padding-only, unlike Controls' margin-carrying twin --
-     this wraps the always-mounted aria-live region, whose spacing when
-     empty must be zero. */
   padding-top: var(--space-xl);
   border-top: 1px solid var(--line);
 }
@@ -87,33 +52,15 @@
 .statRow {
   display: flex;
   margin: 0;
-  /* Spec-sheet title block (redesign 2026-09-01, replacing the four
-     separate green-wash cards -- that row read like a generic dashboard,
-     user call): one framed readout of hairline-divided cells. The soft
-     green wash marks the whole block as a data READOUT, not something
-     clickable -- the deliberate opposite of the white Shade_priority
-     cells, which ARE buttons (white is the app's button ground). */
   border: 1px solid var(--green-dim);
-  /* Soft jade wash marking the block as a data readout. Settled on the
-     lighter 0.08 (= --green-wash) 2026-09-01, after briefly trying a
-     stronger 0.15. Never the full --green (#00a86b): a solid neon jade
-     would drop the dark-jade numbers + muted labels to green-on-green,
-     failing AA. */
   background: var(--green-wash);
 }
 
+/* Equal cells; min-width stays `auto` so an outgrowing stat widens its
+   box instead of clipping. */
 .stat {
-  /* Equal boxes (flex-basis 0), by design — content-sized boxes were
-     tried 2026-08-28 and rejected: uneven widths read worse than the
-     problem they solved. What actually made hour-scale ETAs fit was
-     shortening the units ("2h 19m", format.ts). min-width deliberately
-     stays at its `auto` default: a stat that somehow outgrows its equal
-     share widens its box instead of clipping, since the value below
-     never wraps. */
   flex: 1;
   padding: var(--space-sm) var(--control-pad-x);
-  /* Hairline dividers between cells now, not four separately-bordered
-     boxes -- the frame lives on .statRow (spec-sheet block, 2026-09-01). */
   border-left: 1px solid var(--line);
   line-height: 1.25;
 }
@@ -124,24 +71,11 @@
 
 .statVal {
   display: block;
-  margin: 0; /* it's a <dd> now -- zero the browser's inline-start indent */
-  /* Figures render in the app's mono, like the measurements on a real
-     drawing (spec-sheet redesign, user call 2026-09-01). This REVERSES the
-     2026-08-28 sans-serif exception: that call fixed a "gappy" decimal
-     point in monospace, which now only touches distance's single decimal
-     ("2.3"); inside the technical frame the mono figure reads as intended,
-     and tabular-nums keeps every digit fixed-width so the cells don't
-     jiggle between routes. (No font-family -- inherits the body mono.) */
+  margin: 0; /* zero the <dd> inline-start indent */
   font-size: 1.1875rem; /* 19px */
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  /* Dark jade figures (user call 2026-09-01): --green-dim is the data
-     colour against the soft-green readout wash, and at 19px/600 (large
-     text) clears WCAG's 3:1 bar comfortably (~5:1). */
   color: var(--green-dim);
-  /* One line, always — a wrapped stat reads as a layout bug. The short
-     ETA units ("2h 19m") are what keep the widest stat inside its equal
-     share; this is the guarantee it never wraps regardless. */
   white-space: nowrap;
 }
 
@@ -151,15 +85,33 @@
   color: var(--muted);
 }
 
+/* Very narrow screens: 2×2, because the cells refuse to clip (see .stat)
+   and an hour-scale ETA pushed the last cell out of the frame. */
+@media (max-width: 400px) {
+  .statRow {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .stat:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .stat:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
+
+  /* Three stats (tree count hidden): the odd last cell spans the bottom
+     row instead of leaving a bare quarter of frame. */
+  .stat:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
 .statLabel {
   display: block;
-  /* Sits ABOVE the value since 2026-08-28 (was below) — margin on the
-     bottom edge accordingly. */
   margin-bottom: 2px;
   font-size: var(--label-font-size);
-  /* Tighter tracking than the other label sites' 0.1em, on purpose:
-     these sit directly over large numerals and the wider spacing read
-     detached from them. */
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
@@ -172,19 +124,11 @@
   line-height: 1.55;
 }
 
-/* Steps render with turn glyphs and NO visible numbers: zero-padded jade
-   counters were tried alongside the glyphs and removed the same day —
-   two rails read cluttered (user call 2026-08-28). The <ol> still
-   carries the order for assistive tech, which announces each item's
-   position. list-style: none strips list semantics in Safari/VoiceOver,
-   so the <ol> carries an explicit role="list" -- do not remove one
-   without the other. */
+/* list-style: none strips list semantics in Safari/VoiceOver, so the
+   <ol> carries an explicit role="list" — don't remove one without the
+   other. */
 .directionsList {
-  font-size: var(--font-size-sm);
-  /* Full ink, not --muted (user call 2026-08-28): these are the
-     instructions someone follows mid-walk, not a caption — rendering
-     the whole list in caption gray was the real reason it read badly,
-     and it's why zebra striping was considered and set aside. */
+  font-size: var(--font-size-md);
   color: var(--text);
   margin: 0;
   padding-left: 0;
@@ -192,48 +136,41 @@
   line-height: 1.6;
 }
 
+/* Glyph rail + instruction; wrapped lines keep a hanging indent. */
 .directionsList li {
   display: grid;
-  /* Glyph rail + instruction; wrapped lines keep a hanging indent under
-     the text column. */
   grid-template-columns: max-content 1fr;
   column-gap: 6px;
-  /* Air between steps, so a wrapped two-line step reads as one unit and
-     its neighbor as another. 10px since the glyphs went to 18px — at
-     6px the arrows crowded the step below. */
   margin-bottom: 10px;
 }
 
 .directionsList li:last-child {
-  /* The section's own gap handles the space after the list. */
   margin-bottom: 0;
+}
+
+.stepMain {
+  display: block;
+}
+
+.stepDist {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--muted);
 }
 
 .stepGlyph {
   width: 18px;
   height: 18px;
-  /* Centers the 18px glyph on the first 13px/1.6 text line (~21px), so
-     the arrow rail stays aligned even when an instruction wraps. The
-     stroke thickens with the scale-up too (16-unit viewBox), which is
-     half of what makes the bigger size more legible. */
-  margin-top: 1px;
+  margin-top: 2px; /* centers on the first 14px/1.6 text line */
   color: var(--green-dim);
 }
 
-
-/* Same ink as the notice it sits in -- underline alone marks it, so the
-   caution reads as one sentence with an exit, not a callout with a
-   button. */
 .cautionLink {
   color: inherit;
   text-underline-offset: 2px;
 }
 
-/* The pending state. Loud on purpose: on the production box a route is
-   ~1-3s of real Dijkstra time (measured 2026-09-01), and the old single
-   muted line was designed against locally-instant responses — the user
-   had never even seen it. The 250ms fade-in delay keeps fast responses
-   from flashing it. */
+/* The 250ms delay keeps fast responses from flashing the pending state. */
 .loadingBlock {
   display: flex;
   flex-direction: column;
@@ -254,7 +191,6 @@
   overflow: hidden;
 }
 
-
 .vineSvg {
   position: absolute;
   inset: 0;
@@ -267,8 +203,7 @@
   stroke: var(--green-dim);
   stroke-width: 2;
   stroke-linecap: round;
-  /* 640 covers the path's real length with slack; the draw is the classic
-     dashoffset reveal. One cycle = grow (0-64%), hold, fade, regrow. */
+  /* 640 covers the path length with slack; classic dashoffset reveal. */
   stroke-dasharray: 640;
   animation: vine-draw 2.4s ease-in-out infinite;
 }
@@ -294,20 +229,14 @@
 
 .vineLeaf {
   fill: var(--green);
-  /* Scale each leaf about its own box, not the SVG origin. */
-  transform-box: fill-box;
-  /* NO shared animation shorthand here — a nameless `animation: 3.8s
-     ease-out infinite` is minifier-hostile: name=none, so the production
-     minifier collapses the whole thing to `animation:none`, deleting the
-     duration/easing longhands the .vl* rules relied on inheriting. The
-     leaves then "animated" at the default 0s and rendered full-size from
-     t=0 (caught live 2026-09-01, first prod deploy of the vine; dev's
-     unminified CSS masked it). Each .vl* below carries its complete
-     animation instead. */
+  transform-box: fill-box; /* scale about the leaf's own box */
+  /* NO shared animation shorthand here: a nameless `animation: 3.8s
+     ease-out infinite` gets minified to `animation:none`, killing the
+     timing the .vl* rules would inherit (broke in prod 2026-09-01; dev's
+     unminified CSS masks it). Each .vl* carries its full shorthand. */
 }
 
-/* Each leaf grows FROM its base on the vine, so the scale origin is the
-   bbox corner holding the anchor point (up-right leaf = bottom-left, etc). */
+/* Scale origin = the bbox corner holding the leaf's anchor on the vine. */
 .oBL { transform-origin: left bottom; }
 .oBR { transform-origin: right bottom; }
 .oTL { transform-origin: left top; }
@@ -317,8 +246,7 @@
   fill: var(--green-dim);
 }
 
-/* Each leaf pops as the drawing tip passes it, then shares the hold+fade
-   tail. Dedicated keyframes per leaf: CSS variables can't parameterize
+/* Dedicated keyframes per leaf: CSS variables can't parameterize
    keyframe selectors. */
 .vl1 { animation: vl1 2.4s ease-out infinite; }
 .vl2 { animation: vl2 2.4s ease-out infinite; }
@@ -386,12 +314,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /* Still clearly "busy", just still: the fully-grown vine with all its
-     leaves. The opacity fade-in on .loadingBlock stays — it's not
-     motion. Targets the .vl* classes (where the animations actually
-     live), not .vineLeaf — overriding via a different class on the same
-     element is order-dependent, the trap that broke the leaves in
-     production. */
+  /* Target the .vl* classes where the animations live — overriding via a
+     different class on the same element is order-dependent (the prod
+     leaf bug). The fully-grown vine still reads as "busy". */
   .vinePath,
   .vl1,
   .vl2,
@@ -405,15 +330,7 @@
   }
 }
 
-/* The standing route caution: muted-green italic text at normal size, no
-   box (user call 2026-09-01). No border, so it can't echo the framed
-   My_route readout above it; the italic + soft green set it apart as a
-   standing aside, and the "// CAUTION:" prefix stays bold. --muted (the
-   soft green-gray), NOT the deeper --green-dim, to match the B4 study. */
-/* The standing route caution, styled to read as part of the directions
-   list (user call 2026-09-01): a ">" marker in the same rail the turn
-   glyphs sit in, and the text in the directions' own ink/font, aligned with
-   the step text. Sits just above the list as a lead-in. */
+/* Lead-in caution, aligned with the step text under the glyph rail. */
 .disclaimer {
   margin: 0;
   display: grid;
@@ -424,29 +341,23 @@
   color: var(--text);
 }
 
-/* The ">" prompt, sized to the turn-glyph rail (18px) and coloured like the
-   glyphs, so the caution's text lines up with the step text. */
 .disclaimerMark {
   width: 18px;
   text-align: center;
   color: var(--green-dim);
 }
 
-/* Share row: the button plus its "link copied" confirmation. Lives at the
-   end of the results, after the directions -- the last thing you reach
-   once the route is in front of you. Button mirrors Controls'
-   .secondaryButton (per-file CSS Modules, so duplicated, not shared). */
 .share {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
 }
 
-/* Full-width, and identical to Controls' .secondaryButton (USE_LOCATION /
-   CLEAR_ROUTE) -- per-file CSS Modules, so duplicated, keep in sync.
-   Quarter-width looked stranded in this section (user call 2026-08-31). */
 .shareButton {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
   width: 100%;
   min-height: 44px;
   margin: 0;
@@ -463,7 +374,6 @@
   background: var(--line);
 }
 
-/* Sits below the full-width button; collapses to nothing when empty. */
 .shareStatus {
   font-size: var(--font-size-sm);
   color: var(--green-dim);

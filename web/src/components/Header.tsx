@@ -1,3 +1,4 @@
+import { InfoIcon } from './icons'
 import styles from './Header.module.css'
 
 /* Whether this page load gets the cursor's three-blink hello. Map page
@@ -84,11 +85,21 @@ export function Header({ page }: { page: 'map' | 'about' }) {
       {/* A real navigation, not a bare link: a full page of its own
           deserves the landmark. margin-left auto rides the header's
           flex row to the right edge. Reciprocal: each page links to the
-          other one. */}
+          other one. The map page's ABOUT renders both forms and CSS
+          swaps them at 720px (user call 2026-09-03): the word on
+          desktop, the ⓘ icon on phones — where the full word crowded
+          the wordmark (it wrapped below it at iOS 110% zoom) and a
+          panel-footer button was tried and read too strong. One link
+          either way; the aria-label names it at every width (and
+          contains the visible "About", per WCAG 2.5.3). About's MAP
+          link is a document's way back and stays text at every width. */}
       <nav className={styles.headerNav} aria-label="Site">
         {onMap ? (
-          <a className={styles.navLink} href="/about.html">
-            ABOUT
+          <a className={styles.navLink} href="/about.html" aria-label="About Shade Walker">
+            <span className={styles.navText}>ABOUT</span>
+            <span className={styles.navIcon}>
+              <InfoIcon />
+            </span>
           </a>
         ) : (
           <a className={styles.navLink} href="/">
