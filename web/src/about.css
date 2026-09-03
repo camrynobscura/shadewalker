@@ -97,3 +97,13 @@ body {
 .footer a {
   color: var(--green-dim);
 }
+
+/* Fragment-jump targets (AboutPage focuses location.hash's section after
+   render so the reading/tab position moves with the scroll): keep the
+   focus, hide the ring — a border around a whole prose section reads as
+   selection, not location (user call 2026-09-02). Only suppresses
+   script-focusable targets; real interactive elements keep index.css's
+   global :focus-visible ring. */
+[tabindex='-1']:focus-visible {
+  outline: none;
+}

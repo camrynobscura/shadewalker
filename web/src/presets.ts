@@ -26,11 +26,13 @@ export const TREE_PRESETS = [
   { value: 0, label: 'NONE', spoken: 'None', hint: 'fastest route, no detours for shade' },
   { value: 5, label: 'LOW', spoken: 'Low', hint: 'shadier only when it’s nearly free' },
   { value: 15, label: 'MED', spoken: 'Medium', hint: 'short detours for shadier blocks' },
-  // "longest detours for the most shade": completes NONE→LOW→MED's
-  // detour-size gradient, and — unlike the older "shadiest route, even if
-  // it takes longer" — keeps the whole "> mode:" line under the ~52
-  // monospace cells that fit one line in the panel (user call 2026-08-28).
-  { value: 40, label: 'MAX', spoken: 'Maximum', hint: 'longest detours for the most shade' },
+  // "longest detours for most shade": completes NONE→LOW→MED's
+  // detour-size gradient. No "the" — with it, the hint wrapped to a
+  // second line by exactly one word while the other three hints fit one
+  // line (user call 2026-09-02; the wording itself replaced the older
+  // "shadiest route, even if it takes longer" for the same
+  // fit-on-one-line reason, 2026-08-28).
+  { value: 40, label: 'MAX', spoken: 'Maximum', hint: 'longest detours for most shade' },
 ] as const
 
 // Looked up by label rather than array position — a moderate middle
