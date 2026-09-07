@@ -1,5 +1,5 @@
-import { divIcon } from 'leaflet'
-import { useEffect } from 'react'
+import { divIcon, type Map as LeafletMap } from 'leaflet'
+import { useEffect, useRef } from 'react'
 import {
   Circle,
   CircleMarker,
@@ -88,14 +88,45 @@ function InvalidateOnResize() {
   return null
 }
 
+/* One padded rectangle, used in both directions: what fitBounds aims the
+   route inside, and what the preset-switch guard in RouteFraming treats
+   as "already visible". Uneven padding, not a uniform one: the legend
+   (bottom-left, up to ~163x88px with all 3 rows shown), the Locate-me
+   button (bottom-right), and on mobile the expand toggle (top-right,
+   44px ending 54px from each edge) all float over the map itself, so a
+   plain 48px on every side still let a fitted point land right behind
+   one of them. paddingTopLeft's x covers the legend's width and its y
+   clears the expand toggle's depth; paddingBottomRight's x clears the
+   toggle's width and its y covers whichever bottom overlay is taller --
+   that alone keeps every fitted point out of the bottom strip entirely,
+   so it doesn't matter which corner it's actually closer to. */
+const FIT_PAD_TOP_LEFT: [number, number] = [190, 60]
+const FIT_PAD_BOTTOM_RIGHT: [number, number] = [60, 100]
+
+/** Whether every point already sits inside the current view's padded
+ * rectangle -- checked in screen pixels so the padding means exactly
+ * what it means to fitBounds. */
+function fullyVisible(map: LeafletMap, points: [number, number][]): boolean {
+  const size = map.getSize()
+  return points.every((point) => {
+    const px = map.latLngToContainerPoint(point)
+    return (
+      px.x >= FIT_PAD_TOP_LEFT[0] &&
+      px.y >= FIT_PAD_TOP_LEFT[1] &&
+      px.x <= size.x - FIT_PAD_BOTTOM_RIGHT[0] &&
+      px.y <= size.y - FIT_PAD_BOTTOM_RIGHT[1]
+    )
+  })
+}
+
 /** Keeps the whole route in view as start/end/the selected preset change --
- * without this, the map's viewport never moves on its own (PILOT_CENTER is
- * only ever applied once, at mount), so with all 5 boroughs live, an
+ * without this, the map's viewport never moves on its own (INITIAL_CENTER
+ * is only ever applied once, at mount), so with all 5 boroughs live, an
  * address search or click outside whatever's currently on screen would
  * compute and draw a real route the user can't actually see without
- * manually panning to find it. Reframes on every preset switch too, not
- * just the initial start/end pick, since a higher Shade_priority detour can
- * extend well past the bounds a lower one fit. */
+ * manually panning to find it. A preset switch only reframes when the
+ * newly selected route actually leaves the padded view -- see the guard
+ * below. */
 function RouteFraming({
   start,
   end,
@@ -108,35 +139,40 @@ function RouteFraming({
   baseline: RouteFeature | null
 }) {
   const map = useMap()
+  // The endpoint pair the map last framed, compared by VALUE: the same
+  // pair firing this effect again means only the preset (or a re-fetch)
+  // changed, which is the case the guard below may hold still.
+  const framedPairRef = useRef<string | null>(null)
 
   useEffect(() => {
-    const animate = !reducedMotion()
-    if (start && end) {
-      const route = selected ?? baseline
-      const points: [number, number][] = [
-        [start.lat, start.lon],
-        [end.lat, end.lon],
-        ...(route ? toLatLngs(route) : []),
-      ]
-      // Uneven padding, not a uniform one: the legend (bottom-left, up to
-      // ~163x88px with all 3 rows shown), the Locate-me button
-      // (bottom-right), and on mobile the expand toggle (top-right, 44px
-      // ending 54px from each edge) all float over the map itself, so a
-      // plain 48px on every side still let a fitted point land right
-      // behind one of them. paddingTopLeft's x covers the legend's width
-      // and its y clears the expand toggle's depth; paddingBottomRight's
-      // x clears the toggle's width and its y covers whichever bottom
-      // overlay is taller -- that alone keeps every fitted point out of
-      // the bottom strip entirely, so it doesn't matter which corner it's
-      // actually closer to.
-      map.fitBounds(points, {
-        paddingTopLeft: [190, 60],
-        paddingBottomRight: [60, 100],
-        maxZoom: 17,
-        animate,
-      })
+    if (!start || !end) {
+      // Route cleared: the next complete pair frames unconditionally.
+      framedPairRef.current = null
+      return
     }
-    // Deliberately no else-branch for "only one of start/end set": panning
+    const route = selected ?? baseline
+    const points: [number, number][] = [
+      [start.lat, start.lon],
+      [end.lat, end.lon],
+      ...(route ? toLatLngs(route) : []),
+    ]
+    const pair = `${start.lat},${start.lon}|${end.lat},${end.lon}`
+    // Preset switch with the new route already fully on screen: hold the
+    // camera. Refitting anyway nudged the map sideways on every
+    // Shade_priority flip (each preset's bounds differ slightly), which
+    // reads as jitter when flipping through routes to compare them
+    // (user, 2026-09-07). A route that escapes the current view -- e.g.
+    // switching to MAX while zoomed in on a MED detail -- still falls
+    // through to the fit, pan and zoom both.
+    if (pair === framedPairRef.current && fullyVisible(map, points)) return
+    map.fitBounds(points, {
+      paddingTopLeft: FIT_PAD_TOP_LEFT,
+      paddingBottomRight: FIT_PAD_BOTTOM_RIGHT,
+      maxZoom: 17,
+      animate: !reducedMotion(),
+    })
+    framedPairRef.current = pair
+    // Deliberately no handling for "only one of start/end set": panning
     // the instant point A lands was more disruptive than useful in
     // practice -- it re-centers/zooms the view around a point the user
     // likely just clicked while already looking straight at it. Wait for
@@ -253,7 +289,24 @@ export function MapView({
       <p className={styles.visuallyHidden}>
         Click to set your start and end points; you can also type addresses in the route controls.
       </p>
-      <MapContainer center={INITIAL_CENTER} zoom={15} className={styles.map}>
+      {/* zoomAnimation must be OFF under reduced motion, not just quick:
+          index.css's prefers-reduced-motion rule nulls every CSS
+          transition, and Leaflet's animated zoom waits on a transitionend
+          event to leave its "animating" state -- an event a nulled
+          transition may never fire. Stuck there, Leaflet silently ignores
+          every later setView/fitBounds: one click of the +/- control
+          could freeze route framing, PanTo and Locate-me for the rest of
+          the session (found via the steady-preset-camera e2e,
+          2026-09-07). Instant zoom is also simply what the preference
+          asks for. Mount-time read by design: react-leaflet map options
+          are immutable, and a mid-session OS toggle is rare enough to
+          not chase. */}
+      <MapContainer
+        center={INITIAL_CENTER}
+        zoom={15}
+        zoomAnimation={!reducedMotion()}
+        className={styles.map}
+      >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url={TILE_URL}
