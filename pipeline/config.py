@@ -290,21 +290,23 @@ MAX_TREE_WEIGHT = 40.0
 # once the API is public. 8 = double the frontend's four presets -- room
 # to experiment from a script without ever being a meaningful load.
 #
-# Cost re-measured on the sidewalk graph 2026-08-23 (386,576 nodes,
-# 488,538 loaded edges), median of 7 runs per pair, route() in-process
-# with no HTTP or serialization:
+# Cost re-measured on the sidewalk graph 2026-09-07 (386,611 nodes,
+# 488,603 loaded edges), median per weight, route() in-process with no
+# HTTP or serialization, dev Mac -- after graph_store.route()'s
+# memoryview weights fix removed most of the fixed per-run overhead
+# (the 2026-08-23 figures were ~2.3x these at the short end):
 #
-#     ~1km route     57ms per weight
-#     ~2km route     60ms
-#     ~10km route   140ms
-#     ~20km route   276ms
+#     ~1km route     24ms per weight
+#     ~5km route     45ms
+#     ~20km route   240ms
 #
-# The old comment here said ~13ms, measured on the deleted centerline
-# model. It is 4.6x that now at the median, and the cost scales with how
-# much graph Dijkstra explores -- so a long route is far worse than the
-# median suggests. At the cap of 8, a cross-borough request blocks a
-# worker for ~2.2 SECONDS. That strengthens the case for the cap rather
-# than weakening it; don't raise it without re-measuring the tail.
+# The cost scales with how much graph Dijkstra explores -- a long route
+# is far worse than the median suggests, and the production droplet runs
+# ~4x slower per core than the Mac (live-vs-local ratio measured
+# 2026-09-07). At the cap of 8, a cross-borough request still blocks a
+# worker for ~2 SECONDS locally, several times that on the box. That
+# strengthens the case for the cap rather than weakening it; don't raise
+# it without re-measuring the tail.
 MAX_TREE_WEIGHTS_PER_REQUEST = 8
 
 # --- Geocoding proxy (server/geocode.py) --------------------------------

@@ -928,11 +928,12 @@ class GraphStore:
         source to every listed target in a single run (that's inherent to
         how Dijkstra works, not a batching trick), so each start endpoint
         covers both end endpoints at once. Worth it at citywide scale —
-        each run's cost grows with how much graph Dijkstra explores
-        (re-profiled 2026-09-01 on the citywide graph: ~25ms/run on the
-        dev Mac, ~110ms/run on the production droplet; per-route-length
-        numbers in pipeline/config.py's cap note), so halving the run
-        count matters more here than it did at pilot-fixture scale.
+        each run pays ~9ms of fixed weight handling (the memoryview note
+        below) plus exploration that grows with route length (re-profiled
+        2026-09-07 on the citywide graph, dev Mac: ~10ms/run for a ~1km
+        route, ~115ms/run at ~20km; per-route-length numbers in
+        pipeline/config.py's cap note), so halving the run count matters
+        more here than it did at pilot-fixture scale.
 
         When start and end land on the same edge, also try cutting
         straight between them along it — otherwise two nearby clicks on
@@ -964,6 +965,14 @@ class GraphStore:
         end_options = [(end.node_u, end.dist_to_u_m), (end.node_v, end.dist_to_v_m)]
         end_nodes = [e_node for e_node, _ in end_options]
 
+        # Hand igraph the raw float64 buffer, not the ndarray: converting
+        # the ndarray inside get_shortest_paths cost ~26ms per call on this
+        # graph (Mac, 2026-09-07) -- more than a short route's entire
+        # search -- vs ~9ms via memoryview. Same doubles either way; epaths
+        # verified identical across every pair/weight/endpoint combination
+        # and the 800-pair seeded harness (routing_harness.py A/B).
+        costs_view = memoryview(costs)
+
         best_cost: float | None = None
         best_plan: tuple | None = None
         for s_node, s_dist_m in start_options:
@@ -980,7 +989,7 @@ class GraphStore:
             # than with a per-call warnings.catch_warnings(), which isn't
             # thread-safe and /route runs across Starlette's thread pool).
             edge_paths = self._graph.get_shortest_paths(
-                s_node, to=end_nodes, weights=costs, output="epath"
+                s_node, to=end_nodes, weights=costs_view, output="epath"
             )
             for (e_node, e_dist_m), edge_path in zip(end_options, edge_paths):
                 e_cost = e_dist_m / self._length[end.edge] * costs[end.edge]
