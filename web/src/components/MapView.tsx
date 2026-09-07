@@ -253,7 +253,24 @@ export function MapView({
       <p className={styles.visuallyHidden}>
         Click to set your start and end points; you can also type addresses in the route controls.
       </p>
-      <MapContainer center={INITIAL_CENTER} zoom={15} className={styles.map}>
+      {/* zoomAnimation must be OFF under reduced motion, not just quick:
+          index.css's prefers-reduced-motion rule nulls every CSS
+          transition, and Leaflet's animated zoom waits on a transitionend
+          event to leave its "animating" state -- an event a nulled
+          transition may never fire. Stuck there, Leaflet silently ignores
+          every later setView/fitBounds: one click of the +/- control
+          could freeze route framing, PanTo and Locate-me for the rest of
+          the session (found via the steady-preset-camera e2e,
+          2026-09-07). Instant zoom is also simply what the preference
+          asks for. Mount-time read by design: react-leaflet map options
+          are immutable, and a mid-session OS toggle is rare enough to
+          not chase. */}
+      <MapContainer
+        center={INITIAL_CENTER}
+        zoom={15}
+        zoomAnimation={!reducedMotion()}
+        className={styles.map}
+      >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url={TILE_URL}
