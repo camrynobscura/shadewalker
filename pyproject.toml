@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 # (verified 2026-08-31: none of the pipeline group below loads). The
 # production box installs ONLY these, via `uv sync --no-default-groups`.
 dependencies = [
-    "fastapi>=0.139.0",
+    "fastapi>=0.141.1",
     "ijson>=3.5.1",
     "numpy>=2.5.1",
     # Used directly by server/coverage_frame.py. It used to arrive
