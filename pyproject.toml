@@ -31,7 +31,7 @@ pipeline = [
     # dependency of the pipeline, not just of the tools/audit/ scripts it
     # started out serving.
     "osmium>=4.3.1",
-    "osmnx>=2.1.0",
+    "osmnx>=2.1.1",
     "rasterio>=1.5.1",
     "scipy>=1.18.1",
 ]
