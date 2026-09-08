@@ -32,7 +32,7 @@ pipeline = [
     # started out serving.
     "osmium>=4.3.1",
     "osmnx>=2.1.0",
-    "rasterio>=1.5.0",
+    "rasterio>=1.5.1",
     "scipy>=1.18.1",
 ]
 dev = [
