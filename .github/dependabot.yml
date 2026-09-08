@@ -13,6 +13,18 @@ updates:
     directory: "/web"
     schedule:
       interval: "weekly"
+    groups:
+      # react and react-dom must be the SAME version at runtime (react-dom
+      # refuses a mismatch), but react-dom's caret range always looks
+      # satisfied on paper, so solo dependabot updates ship broken pairs
+      # (the 19.2.8 PR did, twice -- recreate included). One group forces
+      # them, and their type stubs, into a single PR.
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
   - package-ecosystem: "github-actions" # keep the CI actions patched too
     directory: "/"
     schedule:
