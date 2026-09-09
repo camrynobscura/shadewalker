@@ -46,11 +46,15 @@ export function Header({ page }: { page: 'map' | 'about' }) {
             (no query params), the app's default state, which clears any
             route (user call 2026-08-31). A full navigation, not an
             in-place clear, so it also resets the map center and zoom to
-            default -- a true reset. aria-label: VoiceOver reads
-            "Shade_walker" as one mushed word; the label speaks it as two
-            while the screen keeps the underscore. */}
-        <a href="/" className={styles.homeLink} aria-label="Shade Walker, home">
-          Shade_walker
+            default -- a true reset. Twin spans, not aria-label: VoiceOver
+            reads "Shade_walker" as one mushed word, so the spoken form
+            drops the underscore while the screen keeps it — and an
+            aria-label here became the NAME OF THE PAGE'S H1 ("Shade
+            Walker, home" in every headings list; audit 2026-09-09).
+            Text content names the link and the heading the same way. */}
+        <a href="/" className={styles.homeLink}>
+          <span aria-hidden="true">Shade_walker</span>
+          <span className={styles.visuallyHidden}>Shade Walker</span>
           {/* Decorative terminal cursor — never announced. */}
           <span
             className={

@@ -15,7 +15,7 @@
   --bg: #e6f2e9;
   --panel: #eff8f1;
   --panel-raised: #ffffff;
-  --border: #9dc7ac;
+  --border: #5c9a78; /* 3.3:1 on white, 3.05:1 on --panel: non-text AA (was #9dc7ac, 1.9:1) */
   --line: #cfe5d6; /* hairlines between sections */
   --text: #0b2418;
   --muted: #4a7360;
@@ -120,6 +120,20 @@ textarea {
 :focus-visible {
   outline: 3px solid var(--cyan);
   outline-offset: 2px;
+}
+
+/* Leaflet's zoom links are 26px (30 with touch); the app's floor is 44. */
+.leaflet-bar a,
+.leaflet-touch .leaflet-bar a {
+  width: 44px;
+  height: 44px;
+  line-height: 44px;
+}
+
+/* Leaflet underlines attribution links only on hover: color alone, and
+   2.56:1 against the credit text beside them. */
+.leaflet-control-attribution a {
+  text-decoration: underline;
 }
 
 /* WCAG 2.3.3: users who ask the OS for less motion get none. */

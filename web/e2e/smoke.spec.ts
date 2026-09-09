@@ -67,7 +67,8 @@ test('the About link survives every width, icon form included', async ({ page })
   await expect(about).toBeVisible()
   // Same row as the wordmark: the icon's top edge must sit above the
   // wordmark's bottom, or it has wrapped below it.
-  const wordmark = page.getByRole('link', { name: 'Shade Walker, home' })
+  // exact: the ABOUT link's name also contains "Shade Walker".
+  const wordmark = page.getByRole('link', { name: 'Shade Walker', exact: true })
   const [aboutBox, wordmarkBox] = [await about.boundingBox(), await wordmark.boundingBox()]
   expect(aboutBox!.y).toBeLessThan(wordmarkBox!.y + wordmarkBox!.height)
 

@@ -58,6 +58,9 @@ test('reaches and operates every control in order via keyboard alone', async ({ 
   await clearStart.focus()
   await page.keyboard.press('Enter')
   await expect(page.getByRole('combobox', { name: 'Start point' })).toHaveValue('')
+  // The ✕ unmounts as it clears; a keyboard activation must land focus on
+  // the emptied input, not on <body> (audit 2026-09-09).
+  await expect(page.getByRole('combobox', { name: 'Start point' })).toBeFocused()
   await expect(page.getByText('distance', { exact: true })).toBeHidden()
   await expect(page.getByRole('button', { name: 'Use location' })).toBeVisible()
 })

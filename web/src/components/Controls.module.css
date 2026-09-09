@@ -222,6 +222,7 @@
 
 .cancelSearch {
   margin: 0;
+  min-height: 44px;
   padding: var(--space-sm);
   background: none;
   border: none;
@@ -304,9 +305,12 @@
   border-radius: 0;
 }
 
+/* cursor on the label, not only the input: WebKit renders the absolute
+   radio at its native 12px, so the input alone covers a corner. */
 .segment {
   flex: 1;
   position: relative;
+  cursor: pointer;
 }
 
 /* The real radio, invisible but stretched over the segment so clicks,
@@ -324,7 +328,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 40px;
+  min-height: 44px;
   border-radius: 0;
   font-size: var(--font-size-sm);
   color: var(--muted);
@@ -334,6 +338,15 @@
   background: var(--magenta);
   color: var(--text); /* ink on neon magenta: 5.6:1 — white would fail AA */
   font-weight: 600;
+}
+
+/* Forced colors strip the fill; weight alone can't carry checked state. */
+@media (forced-colors: active) {
+  .segmentInput:checked + .segmentText {
+    background: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
+  }
 }
 
 .segmentInput:focus-visible + .segmentText {

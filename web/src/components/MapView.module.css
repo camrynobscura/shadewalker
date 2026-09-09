@@ -40,6 +40,13 @@
   background: var(--magenta);
 }
 
+/* Forced colors drop the fill and shadow: a bare letter over tiles. */
+@media (forced-colors: active) {
+  .marker {
+    border: 2px solid CanvasText;
+  }
+}
+
 .legend {
   position: absolute;
   left: 10px;
