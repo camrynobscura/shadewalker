@@ -914,26 +914,28 @@ class GraphStore:
         """Cheapest path between two snapped points. None if unreachable.
 
         A SnapPoint sits partway along an edge, not on a real graph node,
-        so Dijkstra can't start there directly. Instead: try routing from
-        each of the edge's two real endpoints (up to 2 start options x 2
-        end options), add the cost of walking the partial edge to/from
-        that endpoint, and keep whichever total is cheapest. This is a
-        read-only evaluation — no graph mutation — because /route is a
-        sync FastAPI handler that Starlette runs across a thread pool, and
-        mutating the one shared igraph.Graph per request would need
-        locking that serializes every routing request.
+        so Dijkstra can't start there directly. The search starts at the
+        start edge's NEARER endpoint, and the far endpoint is folded in by
+        re-pricing that one edge in this request's own cost array (the
+        comment at the fold below says why that is exact); the end edge's
+        two endpoints are both covered because get_shortest_paths(v,
+        to=[...]) finds the cheapest path from one source to every listed
+        target in a single run (inherent to Dijkstra, not a batching
+        trick). Each candidate total adds the cost of walking the partial
+        start/end edge to its endpoint, and the cheapest wins. So each
+        weight costs exactly ONE Dijkstra run: it was two (one per start
+        endpoint) until 2026-09-09, and four before the one-to-many
+        targets. This is read-only on the graph — no mutation — because
+        /route is a sync FastAPI handler that Starlette runs across a
+        thread pool, and mutating the one shared igraph.Graph per request
+        would need locking that serializes every routing request.
 
-        The 2x2 combinations cost only 2 real Dijkstra runs, not 4:
-        get_shortest_paths(v, to=[...]) finds the cheapest path from one
-        source to every listed target in a single run (that's inherent to
-        how Dijkstra works, not a batching trick), so each start endpoint
-        covers both end endpoints at once. Worth it at citywide scale —
-        each run pays ~9ms of fixed weight handling (the memoryview note
-        below) plus exploration that grows with route length (re-profiled
-        2026-09-07 on the citywide graph, dev Mac: ~10ms/run for a ~1km
-        route, ~115ms/run at ~20km; per-route-length numbers in
-        pipeline/config.py's cap note), so halving the run count matters
-        more here than it did at pilot-fixture scale.
+        Run count is what matters at citywide scale: each run pays ~9ms
+        of fixed weight handling (the memoryview note below) plus
+        exploration that grows with route length (re-profiled 2026-09-07
+        on the citywide graph, dev Mac: ~10ms/run for a ~1km route,
+        ~115ms/run at ~20km; per-route-length numbers in
+        pipeline/config.py's cap note).
 
         When start and end land on the same edge, also try cutting
         straight between them along it — otherwise two nearby clicks on
@@ -961,51 +963,7 @@ class GraphStore:
             self._edge_density(month) / config.DENSITY_AT_FULL_COVERAGE, 1.0
         )
 
-        start_options = [(start.node_u, start.dist_to_u_m), (start.node_v, start.dist_to_v_m)]
-        end_options = [(end.node_u, end.dist_to_u_m), (end.node_v, end.dist_to_v_m)]
-        end_nodes = [e_node for e_node, _ in end_options]
-
-        # Hand igraph the raw float64 buffer, not the ndarray: converting
-        # the ndarray inside get_shortest_paths cost ~26ms per call on this
-        # graph (Mac, 2026-09-07) -- more than a short route's entire
-        # search -- vs ~9ms via memoryview. Same doubles either way; epaths
-        # verified identical across every pair/weight/endpoint combination
-        # and the 800-pair seeded harness (routing_harness.py A/B).
-        costs_view = memoryview(costs)
-
-        best_cost: float | None = None
-        best_plan: tuple | None = None
-        for s_node, s_dist_m in start_options:
-            s_cost = s_dist_m / self._length[start.edge] * costs[start.edge]
-            # output="epath" → the path as a list of edge positions, which
-            # is what we need to sum attributes and stitch geometry. One
-            # call covers both end_nodes (see this function's docstring).
-            # igraph's C layer warns here ("Couldn't reach some vertices")
-            # whenever s_node and a given e_node sit in different
-            # components -- snap_pair() keeps the real /route flow from
-            # ever reaching this with such a pair, so in practice this is
-            # now only a defense-in-depth path (see the module-scope
-            # filter comment above for why it's silenced there rather
-            # than with a per-call warnings.catch_warnings(), which isn't
-            # thread-safe and /route runs across Starlette's thread pool).
-            edge_paths = self._graph.get_shortest_paths(
-                s_node, to=end_nodes, weights=costs_view, output="epath"
-            )
-            for (e_node, e_dist_m), edge_path in zip(end_options, edge_paths):
-                e_cost = e_dist_m / self._length[end.edge] * costs[end.edge]
-                if not edge_path and s_node != e_node:
-                    continue  # disconnected via this pair of endpoints
-                total_cost = s_cost + float(costs[edge_path].sum()) + e_cost
-                if best_cost is None or total_cost < best_cost:
-                    best_cost = total_cost
-                    best_plan = ("via_nodes", s_node, s_dist_m, e_node, e_dist_m, edge_path)
-
-        if start.edge == end.edge:
-            direct_dist_m = abs(start.dist_to_u_m - end.dist_to_u_m)
-            direct_cost = direct_dist_m / self._length[start.edge] * costs[start.edge]
-            if best_cost is None or direct_cost < best_cost:
-                best_cost = direct_cost
-                best_plan = ("direct", direct_dist_m)
+        best_plan = self._best_plan(start, end, costs)
 
         if best_plan is None:
             # A legitimate outcome now, not a bug: load() keeps every
@@ -1134,3 +1092,99 @@ class GraphStore:
             ),
             "segments": build_steps(legs),
         }
+
+    def _best_plan(self, start: SnapPoint, end: SnapPoint, costs: np.ndarray) -> tuple | None:
+        """The cheapest way to connect two snap points under `costs`, as
+        a plan route() stitches: ("via_nodes", s_node, s_dist_m, e_node,
+        e_dist_m, edge_path) -- enter the network at s_node, walk
+        edge_path, leave it at e_node -- or ("direct", dist_m) along a
+        shared edge, or None when nothing connects. Its own method so the
+        one-run fold below can be checked against a two-run reference in
+        isolation (tests/test_route_search_fold.py). `costs` is this
+        request's own array: the fold re-prices one entry during the
+        search and restores it before returning.
+        """
+        end_options = [(end.node_u, end.dist_to_u_m), (end.node_v, end.dist_to_v_m)]
+        end_nodes = [e_node for e_node, _ in end_options]
+
+        # Fold the two start endpoints into ONE run. The search begins at
+        # the endpoint with the smaller lead-in (`near`), and the start
+        # edge is priced, in this request's own cost array, at
+        # far_cost - near_cost (>= 0). Dijkstra from near then settles
+        # every node x at min(d_near(x), (far_cost - near_cost) +
+        # d_far(x)); add near_cost and that is min(near_cost + d_near(x),
+        # far_cost + d_far(x)) -- exactly the cheaper of the two runs this
+        # used to make. The re-priced edge touches the source, so a
+        # shortest path can only ever use it as its FIRST hop; no other
+        # path's cost changes. Verified identical to the two-run search
+        # (cost and path) on 5 hand-picked pairs x 4 weights and 44 seeded
+        # random pairs, 2026-09-09. The array is route()'s own, built fresh
+        # by edge_costs() per call, so nothing shared moves and this stays
+        # lock-free.
+        start_edge_cost = float(costs[start.edge])
+        s_u_cost = start.dist_to_u_m / self._length[start.edge] * start_edge_cost
+        s_v_cost = start.dist_to_v_m / self._length[start.edge] * start_edge_cost
+        if s_u_cost <= s_v_cost:
+            near_node, near_dist_m, near_cost = start.node_u, start.dist_to_u_m, s_u_cost
+            far_node, far_dist_m, far_cost = start.node_v, start.dist_to_v_m, s_v_cost
+        else:
+            near_node, near_dist_m, near_cost = start.node_v, start.dist_to_v_m, s_v_cost
+            far_node, far_dist_m, far_cost = start.node_u, start.dist_to_u_m, s_u_cost
+        # A self-loop edge (u == v) has one endpoint to start from: nothing
+        # to fold, and its re-pricing would sit on a loop no shortest path
+        # walks. The cheaper lead-in still applies.
+        if near_node != far_node:
+            costs[start.edge] = far_cost - near_cost
+
+        # Hand igraph the raw float64 buffer, not the ndarray: converting
+        # the ndarray inside get_shortest_paths cost ~26ms per call on this
+        # graph (Mac, 2026-09-07) -- more than a short route's entire
+        # search -- vs ~9ms via memoryview. Same doubles either way; epaths
+        # verified identical across every pair/weight/endpoint combination
+        # and the 800-pair seeded harness (routing_harness.py A/B).
+        costs_view = memoryview(costs)
+        # output="epath" → the path as a list of edge positions, which
+        # is what we need to sum attributes and stitch geometry. One
+        # call covers both end_nodes (see this function's docstring).
+        # igraph's C layer warns here ("Couldn't reach some vertices")
+        # whenever near_node and a given e_node sit in different
+        # components -- snap_pair() keeps the real /route flow from
+        # ever reaching this with such a pair, so in practice this is
+        # now only a defense-in-depth path (see the module-scope
+        # filter comment above for why it's silenced there rather
+        # than with a per-call warnings.catch_warnings(), which isn't
+        # thread-safe and /route runs across Starlette's thread pool).
+        edge_paths = self._graph.get_shortest_paths(
+            near_node, to=end_nodes, weights=costs_view, output="epath"
+        )
+        costs[start.edge] = start_edge_cost  # the sums below want the real price
+
+        best_cost: float | None = None
+        best_plan: tuple | None = None
+        for (e_node, e_dist_m), edge_path in zip(end_options, edge_paths):
+            e_cost = e_dist_m / self._length[end.edge] * costs[end.edge]
+            # A path that begins by walking the start edge entered the
+            # network at the far endpoint: the lead-in runs from the snap
+            # point straight to `far`, and the edge is not walked end to
+            # end -- so it leaves the path, and the plan reads exactly as
+            # the old far-endpoint run would have written it.
+            if edge_path and edge_path[0] == start.edge:
+                s_node, s_dist_m, s_cost = far_node, far_dist_m, far_cost
+                edge_path = edge_path[1:]
+            else:
+                s_node, s_dist_m, s_cost = near_node, near_dist_m, near_cost
+            if not edge_path and s_node != e_node:
+                continue  # disconnected via this pair of endpoints
+            total_cost = s_cost + float(costs[edge_path].sum()) + e_cost
+            if best_cost is None or total_cost < best_cost:
+                best_cost = total_cost
+                best_plan = ("via_nodes", s_node, s_dist_m, e_node, e_dist_m, edge_path)
+
+        if start.edge == end.edge:
+            direct_dist_m = abs(start.dist_to_u_m - end.dist_to_u_m)
+            direct_cost = direct_dist_m / self._length[start.edge] * costs[start.edge]
+            if best_cost is None or direct_cost < best_cost:
+                best_cost = direct_cost
+                best_plan = ("direct", direct_dist_m)
+
+        return best_plan
