@@ -285,28 +285,30 @@ EVERGREEN_GENERA = {
 MAX_TREE_WEIGHT = 40.0
 
 # How many tree_weights one /route request may ask for (FIXES item 7,
-# audit §2.1). Each weight costs a synchronous two-Dijkstra pass that
+# audit §2.1). Each weight costs a synchronous Dijkstra run that
 # blocks a worker thread, so an uncapped list is a denial-of-service hole
 # once the API is public. 8 = double the frontend's four presets -- room
 # to experiment from a script without ever being a meaningful load.
 #
-# Cost re-measured on the sidewalk graph 2026-09-07 (386,611 nodes,
+# Cost re-measured on the sidewalk graph 2026-09-09 (386,611 nodes,
 # 488,603 loaded edges), median per weight, route() in-process with no
-# HTTP or serialization, dev Mac -- after graph_store.route()'s
-# memoryview weights fix removed most of the fixed per-run overhead
-# (the 2026-08-23 figures were ~2.3x these at the short end):
+# HTTP or serialization, dev Mac, 10 seeded pairs nearest each length x
+# 3 reps -- after graph_store._best_plan folded the start edge's second
+# endpoint into one Dijkstra run (the 2026-09-07 figures, two runs per
+# weight, were 24/45/240ms; the 2026-08-23 ones ~2.3x those at the short
+# end, before the memoryview weights fix):
 #
-#     ~1km route     24ms per weight
-#     ~5km route     45ms
-#     ~20km route   240ms
+#     ~1km route     14ms per weight
+#     ~5km route     23ms
+#     ~20km route    95ms
 #
 # The cost scales with how much graph Dijkstra explores -- a long route
 # is far worse than the median suggests, and the production droplet runs
 # ~4x slower per core than the Mac (live-vs-local ratio measured
 # 2026-09-07). At the cap of 8, a cross-borough request still blocks a
-# worker for ~2 SECONDS locally, several times that on the box. That
-# strengthens the case for the cap rather than weakening it; don't raise
-# it without re-measuring the tail.
+# worker for most of a second locally, several times that on the box.
+# That strengthens the case for the cap rather than weakening it; don't
+# raise it without re-measuring the tail.
 MAX_TREE_WEIGHTS_PER_REQUEST = 8
 
 # --- Geocoding proxy (server/geocode.py) --------------------------------
