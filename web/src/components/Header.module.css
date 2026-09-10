@@ -20,8 +20,24 @@
   margin-left: auto;
 }
 
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .navLink {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
   padding: var(--space-sm);
   font-size: var(--font-size-sm);
   letter-spacing: 0.1em;
@@ -123,6 +139,12 @@
 
   .navIcon {
     display: flex;
+  }
+
+  /* 44px hit box, 36px layout footprint: the full 44 wrapped the ⓘ
+     under the wordmark at 320px in WebKit (291px needed, 288 available). */
+  .navLink {
+    margin-inline: -4px;
   }
 }
 

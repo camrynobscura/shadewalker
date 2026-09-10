@@ -318,7 +318,7 @@ function AddressField({
   marker,
   example,
   field,
-  accessory,
+  emptyAccessory,
   notice,
 }: {
   label: string
@@ -332,10 +332,12 @@ function AddressField({
   marker: string
   example: string
   field: ReturnType<typeof useAddressField>
-  /** Icon button seated inside the input's right edge — the per-field ✕,
-   * or the start field's ⌖ (2026-09-02, replacing the button row).
-   * Composed by Controls, which owns the field state the choice hangs on. */
-  accessory?: ReactNode
+  /** Icon button seated inside the input's right edge WHILE THE FIELD IS
+   * EMPTY — the start field's ⌖ (2026-09-02, replacing the button row).
+   * Once there's text the slot is the per-field ✕, rendered here rather
+   * than composed by Controls because clearing has to hand focus back to
+   * the input, and the input's ref lives here. */
+  emptyAccessory?: ReactNode
   /** Extra content for the status line — the location error, composed by
    * Controls. The field's own NOT_FOUND wins when both apply: it's the
    * answer to the more recent action (typing beats a parked error). */
@@ -546,7 +548,33 @@ function AddressField({
             field.onBlur(abandoned)
           }}
         />
-        {accessory}
+        {field.query !== '' ? (
+          /* The in-field ✕ (2026-09-02, replacing CLEAR_ROUTE): clears one
+             field — and with it that field's point and marker. mousedown
+             preventDefault so a tap neither steals focus nor, on mobile,
+             reads as a reason to expand or collapse the search — clearing
+             is an edit, not a session boundary. That same preventDefault
+             means only a KEYBOARD activation ever has the button itself
+             focused, and that's the case that needs help: the button
+             unmounts as it clears, which dropped focus to <body> (audit
+             2026-09-09). Hand it back to the input; pointer users never
+             had it there, so nothing moves for them. */
+          <button
+            type="button"
+            className={styles.fieldAccessory}
+            aria-label={`Clear ${spokenLabel.toLowerCase()}`}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => {
+              const viaKeyboard = document.activeElement === e.currentTarget
+              field.clearField()
+              if (viaKeyboard) inputRef.current?.focus()
+            }}
+          >
+            <ClearIcon />
+          </button>
+        ) : (
+          emptyAccessory
+        )}
         {/* A FAKE placeholder: a real one is announced in the value slot
             before the label (skipping into the panel said "e.g. 250 Court
             St" instead of "Start_point"), and the user wants the example
@@ -616,31 +644,6 @@ function AddressField({
         )}
       </p>
     </div>
-  )
-}
-
-/** The in-field ✕ (2026-09-02, replacing CLEAR_ROUTE): clears one field —
- * and with it that field's point and marker. mousedown preventDefault so
- * the tap neither steals focus nor, on mobile, reads as a reason to
- * expand or collapse the search — clearing is an edit, not a session
- * boundary. */
-function ClearFieldButton({
-  field,
-  spokenLabel,
-}: {
-  field: ReturnType<typeof useAddressField>
-  spokenLabel: string
-}) {
-  return (
-    <button
-      type="button"
-      className={styles.fieldAccessory}
-      aria-label={`Clear ${spokenLabel}`}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => field.clearField()}
-    >
-      <ClearIcon />
-    </button>
   )
 }
 
@@ -730,7 +733,8 @@ export function Controls({
   /* The start field's empty-state accessory is the location control
      (2026-09-02, replacing the USE_LOCATION button row): "use my location"
      is a start-point affordance, so it lives in the start field — same
-     slot the ✕ takes over once there's text to clear. One tap does the
+     slot AddressField's own ✕ takes over once there's text to clear. One
+     tap does the
      whole job since the same day's use-location-ux pass: enable, wait for
      a fix that clears the accuracy gate, fill start, recenter the map —
      the old enable-then-tap-again dance is gone (App's useLocationFill
@@ -836,16 +840,10 @@ export function Controls({
             marker="A"
             example="Washington Square Park"
             field={start}
-            accessory={start.query !== '' ? <ClearFieldButton field={start} spokenLabel="start point" /> : locationAccessory}
+            emptyAccessory={locationAccessory}
             notice={locationNotice}
           />
-          <AddressField
-            label="End_point"
-            marker="B"
-            example="24 East 7th St"
-            field={end}
-            accessory={end.query !== '' ? <ClearFieldButton field={end} spokenLabel="end point" /> : undefined}
-          />
+          <AddressField label="End_point" marker="B" example="24 East 7th St" field={end} />
         </div>
       </div>
 

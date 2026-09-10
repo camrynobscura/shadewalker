@@ -154,6 +154,23 @@ test('header tagline and instructions meet AA text contrast', async ({ page }) =
   expect(await renderedContrast(instructions)).toBeGreaterThanOrEqual(4.5)
 })
 
+// Windows High Contrast (forced-colors) strips every author background,
+// which used to leave the checked Shade_priority segment marked by font
+// weight alone (audit 2026-09-09). Chromium is the only engine that
+// emulates the media feature, and it's the one project here.
+test.describe('forced colors', () => {
+  test.use({ forcedColors: 'active' })
+  test('the checked preset keeps a fill distinct from the canvas', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.getByRole('radio', { name: 'Medium' })).toBeChecked()
+    const [checkedBg, canvasBg] = await page.evaluate(() => [
+      getComputedStyle(document.querySelector('input[type=radio]:checked + span')!).backgroundColor,
+      getComputedStyle(document.body).backgroundColor,
+    ])
+    expect(checkedBg).not.toBe(canvasBg)
+  })
+})
+
 test('out-of-coverage rejection has no violations', async ({ page }) => {
   // Same reason as the "a drawn route" test above -- start/end from
   // routeUrl() now reverse-geocodes on load regardless of coverage.

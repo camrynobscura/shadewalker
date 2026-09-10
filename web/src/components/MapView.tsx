@@ -225,6 +225,28 @@ function PanTo({ point }: { point: Point | null }) {
   return null
 }
 
+/** Two things Leaflet's own DOM needs that react-leaflet can't set from
+ * props (audit 2026-09-09). The container is a keyboard tab stop (arrow
+ * keys pan, +/- zoom) that announced as nothing but its contents; it
+ * gets a role and a name that says how to drive it — a group, not a
+ * landmark, so it's read on focus and never in the landmark list. And
+ * the vector overlay's <svg> — the route lines — is hidden from AT: it
+ * read as a nameless image, and the directions list is the accessible
+ * route. The svg exists only once the first path is drawn, so this
+ * re-checks on every render (one querySelector); it must stay the LAST
+ * child of MapContainer so its effect runs after the Polylines' have
+ * added their layers. */
+function MapA11y() {
+  const map = useMap()
+  useEffect(() => {
+    const container = map.getContainer()
+    container.setAttribute('role', 'group')
+    container.setAttribute('aria-label', 'Map: arrow keys pan, plus and minus keys zoom')
+    map.getPane('overlayPane')?.querySelector('svg')?.setAttribute('aria-hidden', 'true')
+  })
+  return null
+}
+
 /** "Locate me" — rendered inside the map so useMap() can pan it. */
 function LocateButton({ position }: { position: GeoPosition | null }) {
   const map = useMap()
@@ -399,6 +421,7 @@ export function MapView({
         )}
 
         <LocateButton position={position} />
+        <MapA11y />
       </MapContainer>
       {/* Purely decorative texture; aria-hidden keeps it out of the
           accessibility tree entirely. */}
