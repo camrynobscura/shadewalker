@@ -21,6 +21,18 @@ shadewalker.nyc {
 	# can't spoof the header to dodge (or frame someone else for) a limit.
 	reverse_proxy 127.0.0.1:8000 {
 		header_up X-Real-IP {remote_host}
+
+		# Fail fast on a hung worker. Caddy's default is NO response
+		# timeout, so a request the app accepted but never answered
+		# held the edge connection open indefinitely (2026-09-09
+		# review). The browser client gives up at 10s on its own
+		# (web/src/hooks/useRouteQuery.ts); this is the backstop for
+		# everything else -- curl, monitors, the tunnel -- and it
+		# returns a 504 instead of a hang. Route compute is ~1s at
+		# the longest, so 30s is far from any real request.
+		transport http {
+			response_header_timeout 30s
+		}
 	}
 
 	# Compress text responses (route JSON, HTML, JS, CSS).
