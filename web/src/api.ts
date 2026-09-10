@@ -87,6 +87,16 @@ export interface RouteResponse {
  * dead server or no network throws a generic browser Error instead. */
 export class RouteError extends Error {}
 
+/** The one error shape our server speaks: FastAPI's `{"detail": "..."}`
+ * (the 429 handler in server/app.py matches it on purpose). Anything
+ * else in an error body — Caddy's or Vite's proxy page when uvicorn is
+ * down — is not a message for the user. */
+async function errorDetail(res: Response): Promise<string | null> {
+  const body: unknown = await res.json().catch(() => null)
+  if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') return body.detail
+  return null
+}
+
 export async function fetchRoute(
   from: Point,
   to: Point,
@@ -102,11 +112,25 @@ export async function fetchRoute(
   for (const weight of treeWeights) params.append('tree_weights', String(weight))
   const res = await fetch(`/route?${params}`, { signal })
   if (!res.ok) {
-    const body: { detail?: string } = await res.json().catch(() => ({}))
-    throw new RouteError(body.detail ?? `Routing failed (${res.status})`)
+    const detail = await errorDetail(res)
+    // A 4xx with our detail is the server explaining itself (outside
+    // coverage, no path, rate limited). A 5xx, or a body that isn't ours,
+    // is the server being broken -- a plain Error, so the caller shows
+    // its generic wording rather than "Routing failed (502)" (2026-09-09).
+    if (res.status < 500 && detail) throw new RouteError(detail)
+    // slowapi's stock 429 body has no detail; ours does, but keep the
+    // wait message even if that handler ever goes missing.
+    if (res.status === 429) throw new RouteError('too many routes at once — wait a moment and try again')
+    throw new Error(`route request failed (${res.status})`)
   }
   return res.json()
 }
+
+/** The address search itself couldn't answer — the proxy or Photon is
+ * down, or there's no network — as opposed to answering "no match".
+ * Thrown so a field can show SEARCH_DOWN instead of NOT_FOUND, which
+ * used to send people retyping an address that was fine (2026-09-09). */
+export class GeocodeUnavailableError extends Error {}
 
 export interface GeocodeResult extends Point {
   label: string
@@ -117,11 +141,18 @@ export interface GeocodeResult extends Point {
  * relative-URL pattern as /route: no CORS, no third-party call from the
  * visitor's browser, and the NYC bounding + label building live
  * server-side, so this stays a thin fetch. limit=1: an address field's
- * submit resolves to its single best match. */
+ * submit resolves to its single best match. Null means "no match";
+ * a failed request (any non-OK status, or fetch itself throwing with the
+ * network down) is GeocodeUnavailableError, never null. */
 export async function geocode(query: string): Promise<GeocodeResult | null> {
   const params = new URLSearchParams({ q: query, limit: '1' })
-  const res = await fetch(`/geocode?${params}`)
-  if (!res.ok) return null
+  let res: Response
+  try {
+    res = await fetch(`/geocode?${params}`)
+  } catch (err) {
+    throw new GeocodeUnavailableError(err instanceof Error ? err.message : 'network failure')
+  }
+  if (!res.ok) throw new GeocodeUnavailableError(`geocode answered ${res.status}`)
   const body: { results: GeocodeResult[] } = await res.json()
   return body.results[0] ?? null
 }
@@ -148,7 +179,12 @@ export async function suggest(query: string, signal: AbortSignal): Promise<Geoco
  * with the proxy: server/geocode.py's _reverse_label. */
 export async function reverseGeocode(point: Point): Promise<string | null> {
   const params = new URLSearchParams({ lat: String(point.lat), lon: String(point.lon) })
-  const res = await fetch(`/geocode/reverse?${params}`)
+  let res: Response
+  try {
+    res = await fetch(`/geocode/reverse?${params}`)
+  } catch {
+    return null // no network: the caller's coordinate fallback is the honest label
+  }
   if (!res.ok) return null
   const body: { label: string | null } = await res.json()
   return body.label

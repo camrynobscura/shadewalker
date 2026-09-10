@@ -4,6 +4,13 @@ import { TREE_PRESETS } from '../presets'
 
 const TREE_WEIGHTS = TREE_PRESETS.map((preset) => preset.value)
 
+/** How long one route request may take before the client gives up. The
+ * slowest live route measured after the 2026-09-09 fold was ~1s for
+ * 13km, and the box has one worker, so anything past 10s is a stuck
+ * worker or a queue of visitors, not a long walk (user call
+ * 2026-09-09). Without this, a hung server showed the vine forever. */
+export const ROUTE_TIMEOUT_MS = 10_000
+
 export interface UseRouteQueryResult {
   start: Point | null
   end: Point | null
@@ -89,6 +96,14 @@ export function useRouteQuery(
       return
     }
     const controller = new AbortController()
+    // The same controller serves both ends: cleanup aborts with the
+    // default AbortError (superseded, say nothing), the deadline aborts
+    // with a TimeoutError (say so). fetch rejects with the abort reason,
+    // so the catch below can tell them apart.
+    const deadline = setTimeout(
+      () => controller.abort(new DOMException('route request timed out', 'TimeoutError')),
+      ROUTE_TIMEOUT_MS,
+    )
     setLoading(true)
     setError(null)
     fetchRoute(start, end, TREE_WEIGHTS, controller.signal)
@@ -101,18 +116,27 @@ export function useRouteQuery(
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return // superseded, not an error
         // RouteError = the server responded with a specific, useful reason
-        // (e.g. outside coverage) — show that. Anything else (no network,
-        // a dropped request) gets the generic fallback instead of a raw
-        // fetch error. Worded for the person on a phone, not the developer
-        // — "is the server running?" shipped to a real user's screen via a
+        // (e.g. outside coverage) — show that. A timeout gets its own
+        // line. Anything else (no network, a dropped request, a 5xx from
+        // the proxy) gets the generic fallback instead of a raw fetch
+        // error. Worded for the person on a phone, not the developer —
+        // "is the server running?" shipped to a real user's screen via a
         // flaky tunnel (2026-09-02). Controls' error slot prefixes
-        // "// ERROR:", so this reads as its sentence body.
-        setError(err instanceof RouteError ? err.message : "couldn't load the route — check your connection and try again")
+        // "// ERROR:", so these read as its sentence body.
+        if (err instanceof DOMException && err.name === 'TimeoutError') {
+          setError('the server took too long — try again')
+        } else {
+          setError(err instanceof RouteError ? err.message : "couldn't load the route — check your connection and try again")
+        }
         setSnappedStart(null)
         setSnappedEnd(null)
         setLoading(false)
       })
-    return () => controller.abort()
+      .finally(() => clearTimeout(deadline))
+    return () => {
+      clearTimeout(deadline)
+      controller.abort()
+    }
   }, [start, end])
 
   const selected = route?.routes.find((r) => r.properties.tree_weight === treeWeight) ?? null

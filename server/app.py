@@ -45,14 +45,17 @@ painful or the refresh cadence tightens dramatically.
 """
 
 import logging
+import math
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
@@ -110,11 +113,33 @@ def _client_ip(request: Request) -> str:
 # No headers_enabled: that makes slowapi inject X-RateLimit-* headers into
 # each response, which requires the endpoint to return a Response object
 # (ours return plain dicts) -- and a private API with one client has no use
-# for advertising its remaining quota. The 429 (with Retry-After) still
-# fires from the exception handler regardless.
+# for advertising its remaining quota. It also gates slowapi's Retry-After
+# on the 429 (its _inject_headers is a no-op without it -- this comment
+# used to claim the opposite, disproved by test 2026-09-09), which is why
+# the handler below sets that one header itself.
 limiter = Limiter(key_func=_client_ip)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+def _rate_limited(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """slowapi's stock handler answers {"error": ...}; every other error
+    this server sends is FastAPI's {"detail": ...}, and the frontend reads
+    only that key (web/src/api.ts) -- the stock shape surfaced as a bare
+    "Routing failed (429)" (2026-09-09). One shape, one client contract.
+    The wording is the sentence body after the frontend's "// ERROR:"
+    prefix. Retry-After comes from the same window stats slowapi's own
+    injector would read -- (reset epoch seconds, remaining) -- floored at
+    one second, since the header is whole seconds."""
+    response = JSONResponse(
+        {"detail": "too many requests — wait a moment and try again"}, status_code=429,
+    )
+    limit, identifiers = request.state.view_rate_limit
+    reset_at, _remaining = request.app.state.limiter.limiter.get_window_stats(limit, *identifiers)
+    response.headers["Retry-After"] = str(max(1, math.ceil(reset_at - time.time())))
+    return response
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limited)
 
 # The Playwright tier (web/playwright.config.ts) drives many /route calls
 # from a single localhost IP in seconds, which would trip the production
