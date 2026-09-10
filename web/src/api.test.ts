@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { geocode, reverseGeocode } from './api'
+import { fetchRoute, geocode, GeocodeUnavailableError, reverseGeocode, RouteError } from './api'
 
 // Both functions are thin fetches against our own /geocode proxy since
 // 2026-08-30 — label building (including the address-not-POI reverse
@@ -7,12 +7,52 @@ import { geocode, reverseGeocode } from './api'
 // tests/test_server_geocode.py. What's left to test here is exactly what
 // this file owns: the response shapes and the null paths.
 
-function mockFetchOnce(body: unknown, ok = true) {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok, json: () => Promise.resolve(body) }))
+function mockFetchOnce(body: unknown, ok = true, status = ok ? 200 : 502) {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok, status, json: () => Promise.resolve(body) }))
+}
+
+/** A response whose body isn't JSON at all — Caddy's or Vite's proxy
+ * error page when uvicorn is down. */
+function mockFetchOnceHtml(status: number) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({ ok: false, status, json: () => Promise.reject(new SyntaxError('not json')) }),
+  )
 }
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+const A = { lat: 40.68, lon: -73.99 }
+const B = { lat: 40.686, lon: -73.984 }
+
+describe('fetchRoute errors', () => {
+  it("shows the server's detail for a 4xx that carries one", async () => {
+    mockFetchOnce({ detail: 'No path between these points' }, false, 422)
+    await expect(fetchRoute(A, B, [0], new AbortController().signal)).rejects.toThrow(
+      new RouteError('No path between these points'),
+    )
+  })
+
+  it('treats a 5xx as a broken server, not a message (a plain Error, so the caller uses its generic wording)', async () => {
+    mockFetchOnceHtml(502)
+    const failure = fetchRoute(A, B, [0], new AbortController().signal)
+    await expect(failure).rejects.toThrow(Error)
+    await expect(failure).rejects.not.toBeInstanceOf(RouteError)
+  })
+
+  it('treats a 4xx without our detail the same way', async () => {
+    mockFetchOnceHtml(404)
+    await expect(fetchRoute(A, B, [0], new AbortController().signal)).rejects.not.toBeInstanceOf(RouteError)
+  })
+
+  it('has a wait message for a 429 even without a detail body', async () => {
+    mockFetchOnce({ error: 'Rate limit exceeded: 30 per 1 minute' }, false, 429)
+    await expect(fetchRoute(A, B, [0], new AbortController().signal)).rejects.toThrow(
+      new RouteError('too many routes at once — wait a moment and try again'),
+    )
+  })
 })
 
 describe('geocode', () => {
@@ -27,9 +67,14 @@ describe('geocode', () => {
     expect(await geocode('zzzzzz')).toBeNull()
   })
 
-  it('returns null when the request fails (proxy down, upstream 502)', async () => {
-    mockFetchOnce({}, false)
-    expect(await geocode('Court St')).toBeNull()
+  it('throws GeocodeUnavailableError when the request fails (proxy down, upstream 502) -- never null, which means "no match"', async () => {
+    mockFetchOnce({ detail: 'Geocoding is temporarily unavailable' }, false, 502)
+    await expect(geocode('Court St')).rejects.toBeInstanceOf(GeocodeUnavailableError)
+  })
+
+  it('throws GeocodeUnavailableError when fetch itself throws (no network)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    await expect(geocode('Court St')).rejects.toBeInstanceOf(GeocodeUnavailableError)
   })
 })
 
@@ -48,6 +93,11 @@ describe('reverseGeocode', () => {
 
   it('returns null when the request itself fails', async () => {
     mockFetchOnce({}, false)
+    expect(await reverseGeocode({ lat: 40.68, lon: -73.99 })).toBeNull()
+  })
+
+  it('returns null when fetch throws (no network) -- the coordinate fallback stays, nothing rejects unhandled', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
     expect(await reverseGeocode({ lat: 40.68, lon: -73.99 })).toBeNull()
   })
 })

@@ -109,6 +109,13 @@ def test_geocode_over_its_limit_returns_429(monkeypatch, rate_limiter_on):
         assert r.status_code == 200, f"request {i} was {r.status_code}, expected 200"
     over = client.get("/geocode", params={"q": "one too many"}, headers=ip)
     assert over.status_code == 429
+    # Our handler, not slowapi's: the same {"detail": ...} shape as every
+    # other error, which is the only key the frontend reads (api.ts), plus
+    # slowapi's own Retry-After.
+    assert over.json() == {"detail": "too many requests — wait a moment and try again"}
+    # Whole seconds until the window resets; never 0 (a client would retry
+    # instantly and hit the limit again).
+    assert int(over.headers["retry-after"]) >= 1
 
 
 def test_geocode_forward_and_reverse_share_one_budget(monkeypatch, rate_limiter_on):

@@ -2,7 +2,7 @@ import { cleanup, renderHook, waitFor } from '@testing-library/react'
 import { act } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RouteError, type RouteFeature, type RouteResponse } from '../api'
-import { useRouteQuery } from './useRouteQuery'
+import { ROUTE_TIMEOUT_MS, useRouteQuery } from './useRouteQuery'
 
 const { fetchRoute } = vi.hoisted(() => ({ fetchRoute: vi.fn() }))
 vi.mock('../api', async (importOriginal) => ({
@@ -91,6 +91,52 @@ describe('useRouteQuery', () => {
 
     await waitFor(() => expect(result.current.error).not.toBeNull())
     expect(result.current.error).toBe("couldn't load the route — check your connection and try again")
+  })
+
+  it('gives up on a request that never answers after ROUTE_TIMEOUT_MS, with its own message', async () => {
+    vi.useFakeTimers()
+    try {
+      // A hung server: the promise settles only when the signal aborts,
+      // and then with the abort reason -- exactly what fetch() does.
+      fetchRoute.mockImplementation(
+        (_from, _to, _weights, signal: AbortSignal) =>
+          new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason))),
+      )
+      const { result } = renderHook(() => useRouteQuery(START, END, 15))
+      expect(result.current.loading).toBe(true)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ROUTE_TIMEOUT_MS - 1)
+      })
+      expect(result.current.loading).toBe(true)
+      expect(result.current.error).toBeNull()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1)
+      })
+      expect(result.current.loading).toBe(false)
+      expect(result.current.error).toBe('the server took too long — try again')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a superseded request (cleanup abort) stays silent -- no error, no timeout later', async () => {
+    vi.useFakeTimers()
+    try {
+      fetchRoute.mockImplementation(
+        (_from, _to, _weights, signal: AbortSignal) =>
+          new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason))),
+      )
+      const { result, unmount } = renderHook(() => useRouteQuery(START, END, 15))
+      unmount()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ROUTE_TIMEOUT_MS + 1)
+      })
+      expect(result.current.error).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('setStart clears a stale snappedStart immediately, before the next fetch resolves', async () => {

@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
-import { geocode, reverseGeocode, type GeocodeResult, type Point, type RouteFeature } from '../api'
+import { geocode, GeocodeUnavailableError, reverseGeocode, type GeocodeResult, type Point, type RouteFeature } from '../api'
 import { formatCoords, formatDistance, spokenDistance } from '../format'
 import type { LocationFillStatus } from '../hooks/useLocationFill'
 import { useGeocodeSuggestions } from '../hooks/useGeocodeSuggestions'
@@ -27,7 +27,10 @@ function highlightNumber(text: string) {
   )
 }
 
-type FieldStatus = 'idle' | 'searching' | 'notfound' | 'found'
+/** 'unavailable' = the search itself failed (proxy/Photon down, no
+ * network) — a different sentence from 'notfound', which is the search
+ * working and finding nothing. */
+type FieldStatus = 'idle' | 'searching' | 'notfound' | 'unavailable' | 'found'
 
 /** Owns one address field's query/status and how to resolve it. A hook,
  * not a component, because Controls needs two independent copies (start,
@@ -193,15 +196,27 @@ function useAddressField(
     setSuggestOn(true)
   }
 
-  // `status !== 'idle'` blocks a repeat: onChange resets status back to
+  // The status guard blocks a repeat: onChange resets status back to
   // 'idle' on every keystroke, so this only re-fires once there's actually
-  // new text to resolve — not every time "find route" is pressed again.
+  // new text to resolve — not every time Enter is pressed again. The one
+  // exception is 'unavailable': an outage is worth retrying on the same
+  // text, so Enter (or a blur) tries again without retyping.
   async function resolve() {
     setSuggestOn(false) // submitting is the end of the suggestion phase
-    if (!query.trim() || status !== 'idle') return
+    if (!query.trim() || (status !== 'idle' && status !== 'unavailable')) return
     setStatus('searching')
     const seq = resolveSeqRef.current
-    const result = await geocode(query)
+    let result: GeocodeResult | null
+    try {
+      result = await geocode(query)
+    } catch (err) {
+      if (!(err instanceof GeocodeUnavailableError)) throw err
+      // Same staleness checks as the success path below: an answer about
+      // text that's gone, or a point that landed meanwhile, changes nothing.
+      if (seq !== resolveSeqRef.current || shownPointRef.current) return
+      setStatus('unavailable')
+      return
+    }
     // The text this lookup was about is gone (✕, retyped, cleared from
     // outside) — the late answer must not refill the field it was
     // cleared out of.
@@ -630,7 +645,11 @@ function AddressField({
           the Find_route button's own "FINDING…" label already covers that,
           and showing it here too just flickered on and off per field. */}
       <p
-        className={field.status === 'notfound' || notice ? styles.addressStatus : styles.addressStatusEmpty}
+        className={
+          field.status === 'notfound' || field.status === 'unavailable' || notice
+            ? styles.addressStatus
+            : styles.addressStatusEmpty
+        }
         role="status"
       >
         {field.status === 'notfound' ? (
@@ -638,6 +657,12 @@ function AddressField({
             <span aria-hidden="true">// NOT_FOUND:</span>
             <span className={styles.visuallyHidden}>NOT FOUND:</span>
             {' '}try adding a borough
+          </>
+        ) : field.status === 'unavailable' ? (
+          <>
+            <span aria-hidden="true">// SEARCH_DOWN:</span>
+            <span className={styles.visuallyHidden}>Search down:</span>
+            {' '}address search is temporarily unavailable — tap the map instead
           </>
         ) : (
           notice
