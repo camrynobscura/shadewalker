@@ -74,7 +74,8 @@ sudo chmod 440 /etc/sudoers.d/shadewalker-deploy
 
 Put the config in place. `deploy.sh` deliberately does NOT ship `deploy/`
 (the box gets code + dist + export only), so the two files travel by scp.
-From the laptop:
+From the laptop (`root@` works ONLY on this first pass, before the
+hardening above closes root login — for every later change see §6):
 
 ```bash
 scp deploy/Caddyfile deploy/shadewalker.service root@<droplet-ip>:/tmp/
@@ -179,3 +180,43 @@ HOST=<deploy-user>@<droplet-ip> ./deploy/deploy.sh
 
 Data refresh = restart, by design — there is no live reload (see
 `server/app.py`'s module docstring).
+
+## 6. Changing the Caddyfile or the service unit later
+
+`deploy.sh` never touches these — they are root-owned config outside
+`/opt/shadewalker`, read by other services — so a merged change to
+`deploy/Caddyfile` or `deploy/shadewalker.service` is NOT live until
+this is done by hand. Everything below is as `deploy`, never `root@`:
+root login is closed after §1's hardening, and a `root@` attempt is a
+failed authentication that fail2ban counts — on 2026-09-09 one such
+attempt (plus the retry that followed) banned the laptop's IP for the
+default 10 minutes, port 22 connection-refused, and the DigitalOcean web
+console fails the same way because it also logs in as root. The
+`deploy` user's passwordless sudo covers only `systemctl restart
+shadewalker`; each command below prompts for the deploy account's
+password once.
+
+From the laptop, repo root, `main` at the merged commit:
+
+```bash
+scp deploy/Caddyfile deploy@<droplet-ip>:/tmp/
+ssh deploy@<droplet-ip>
+```
+
+On the box:
+
+```bash
+sudo cp /tmp/Caddyfile /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile  # syntax check BEFORE touching the running config
+sudo chown -R caddy:caddy /var/log/caddy   # validate-as-root leaves a root-owned log file the service can't open (§2)
+sudo systemctl reload caddy                 # reload, not restart: no downtime, TLS untouched
+curl -sS https://shadewalker.nyc/health     # still {"status":"ok"}
+rm /tmp/Caddyfile
+```
+
+If `validate` fails, stop: the running config stays in effect until the
+reload, so nothing is broken yet. The service unit is the same shape
+(`sudo cp /tmp/shadewalker.service /etc/systemd/system/ && sudo
+systemctl daemon-reload && sudo systemctl restart shadewalker`) — that
+one IS a restart, so it costs the export reload (502s from Caddy while
+uvicorn comes up — ~25s measured on the 2026-09-09 deploy).
