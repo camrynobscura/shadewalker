@@ -194,18 +194,14 @@ function Legend({ hasRoute }: { hasRoute: boolean }) {
     // Named: an unnamed grouping announces as "list, 3 items" with no
     // clue what the list IS (2026-08-30 tree-read finding).
     <ul className={styles.legend} aria-label="Map legend">
-      {hasRoute && (
-        <>
-          <li className={styles.legendRow}>
-            <span className={styles.legendSwatch} aria-hidden="true" />
-            shadiest route
-          </li>
-          <li className={styles.legendRow}>
-            <span className={`${styles.legendSwatch} ${styles.legendSwatchDashed}`} aria-hidden="true" />
-            fastest route
-          </li>
-        </>
-      )}
+      <li className={styles.legendRow}>
+        <span className={styles.legendSwatch} aria-hidden="true" />
+        shadiest route
+      </li>
+      <li className={styles.legendRow}>
+        <span className={`${styles.legendSwatch} ${styles.legendSwatchDashed}`} aria-hidden="true" />
+        fastest route
+      </li>
     </ul>
   )
 }

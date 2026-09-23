@@ -131,7 +131,7 @@ function StepGlyph({ action }: { action: RouteStep['action'] }) {
 /** When at least this share of the route's tree score is park-canopy AREA
  * credit (not countable trees), hide the "trees: N" stat -- the count
  * can't see area credit, so it undersells exactly the routes with the
- * most real cover ("83% shaded, 3 trees", FIXES item 4).
+ * most real cover ("83% shaded, 3 trees").
  *
  * 0.25, user decision 2026-08-28: the count is flavor, so it should be
  * accurate or absent. Because canopy credit shares units with per-tree
@@ -249,10 +249,10 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
           </div>
         </>
       )}
-      {/* A rejected route's error message lives in App.tsx's header now,
-          not here -- see the comment there. This component only ever
-          rendered it when a route successfully loaded anyway, so there's
-          nothing route-specific left for this component to say about it. */}
+      {/* A rejected route's error message is Controls' alert slot, right
+          above the address fields (its `error` prop) -- not here. This
+          component only ever rendered it when a route successfully loaded
+          anyway, so there's nothing route-specific left for it to say. */}
       {route && !loading && !priorityHinted && (
         <p className={styles.visuallyHidden}>
           Tip: the Shade priority setting above these results chooses how far
@@ -332,13 +332,12 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
           gets a heading's own navigation benefit (screen readers can jump
           between headings) instead of a label/legend's control-naming
           role, which wouldn't apply here. Kept as a plain sibling of
-          .section, not a child of it, so its own margin-bottom controls
-          the title-to-content gap directly -- a child of .section would
-          pick up that flex container's uniform --space-md gap instead,
-          which is right for the *other* gaps inside .section (stat row to
-          directions list) but too loose for a title hugging its own
-          content, the same tight relationship .presetGroup legend's
-          margin-bottom already gets. */}
+          .routeBody, not a child of it, so its own margin-bottom controls
+          the title-to-content gap directly -- a child would pick up that
+          flex container's uniform --space-lg gap instead, which is right
+          for the *other* gaps inside it (stat row to directions list) but
+          too loose for a title hugging its own content, the same tight
+          relationship the Shade_priority legend's margin-bottom gets. */}
       {/* Content split, not aria-label: inside the aria-live wrapper a
           label AND the text can both be announced -- "My route" twice
           (VoiceOver pass). aria-hidden text is excluded from both the
@@ -347,7 +346,7 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
         <span aria-hidden="true">My_route</span>
         <span className={styles.visuallyHidden}>My route</span>
       </h2>
-      <div className={styles.section}>
+      <div className={styles.routeBody}>
         {/* Label above value (user call 2026-08-28), eta leading — the
             question a walker asks first. A plain named list, not a <dl>:
             it WAS a definition list (2026-08-30 to 2026-09-09), but every

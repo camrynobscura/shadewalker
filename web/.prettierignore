@@ -1,0 +1,7 @@
+# Build and test output (node_modules is ignored by default).
+dist
+playwright-report
+test-results
+blob-report
+# Static assets, never hand-formatted.
+public

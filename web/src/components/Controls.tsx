@@ -248,9 +248,10 @@ function useAddressField(
     prevExternalRef.current = externalPoint
 
     if (!externalPoint) {
-      // Point cleared from outside (CLEAR_ROUTE, or this field emptied and
-      // blurred) -- empty the text so field and map never disagree (user
-      // report 2026-08-31: CLEAR_ROUTE left the addresses behind). Guarded
+      // Point cleared from outside (a map tap starting a fresh pair drops
+      // the end point; the ✕; this field emptied and blurred) -- empty the
+      // text so field and map never disagree (the old CLEAR_ROUTE button
+      // once left the addresses behind, user report 2026-08-31). Guarded
       // on `prev` so it fires only on the value->null transition, never on
       // the steady no-point state while a fresh address is being typed.
       // suggestOn is left alone: a blurred field already has it off, and
@@ -381,6 +382,7 @@ function AddressField({
   const [focused, setFocused] = useState(false)
   const expanded = focused && isMobile
   const inputRef = useRef<HTMLInputElement>(null)
+  const fieldRef = useRef<HTMLDivElement>(null)
 
   /* While the overlay is open the correct window scroll is EXACTLY 0 —
      the input is pinned to the top by design, and nothing at the document
@@ -433,10 +435,20 @@ function AddressField({
 
   /** Collapse the overlay (and the on-screen keyboard with it).
    * `abandon` marks the blur as a walk-away, so half-typed text isn't
-   * geocoded on the way out. */
+   * geocoded on the way out.
+   *
+   * The blur is what closes the keyboard, so focus can't go back to the
+   * input — that would reopen both. It goes to the field's own box
+   * instead (tabIndex -1: script-focusable, never a tab stop): a div
+   * summons no keyboard, so the reading/tab position stays at the field
+   * just edited rather than dropping to <body>, where the next Tab
+   * restarted from the top of the page and VoiceOver lost its place
+   * (craftsmanship review 2026-09-23). preventScroll: the panel must
+   * not jump as the overlay leaves. */
   function collapse(abandon = false) {
     abandonRef.current = abandon
     inputRef.current?.blur()
+    fieldRef.current?.focus({ preventScroll: true })
   }
 
   /* Expand BEFORE focus, not in response to it. On focus, Safari computes
@@ -492,6 +504,8 @@ function AddressField({
 
   return (
     <div
+      ref={fieldRef}
+      tabIndex={-1} /* collapse() parks focus here — see it for why */
       className={expanded ? `${styles.addressField} ${styles.fieldExpanded}` : styles.addressField}
       /* While expanded, a press on the overlay's DEAD SPACE must not
          steal focus and collapse the session — the same preventDefault
@@ -646,9 +660,10 @@ function AddressField({
         )}
       </div>
       {/* role="status" = a polite live region: screen readers announce the
-          result without stealing focus. Nothing shown for 'searching' —
-          the Find_route button's own "FINDING…" label already covers that,
-          and showing it here too just flickered on and off per field. */}
+          result without stealing focus. Nothing shown for 'searching': a
+          lookup is sub-second, and a per-field "searching" line just
+          flickered on and off (it also once duplicated the old FIND_ROUTE
+          button's own pending label). */}
       <p
         className={
           field.status === 'notfound' || field.status === 'unavailable' || notice
@@ -709,8 +724,8 @@ interface ControlsProps {
   /** A rejected route (out of coverage, no path found, server down) --
    * shown right above the address fields since that's what it's actually
    * about, and it's where a user's attention already is right after
-   * submitting Find_route or tapping the map (the map sits directly above
-   * this panel, not down near RouteStats where this used to live). */
+   * pressing Enter on an address or tapping the map (the map sits directly
+   * above this panel, not down near RouteStats where this used to live). */
   error: string | null
 }
 

@@ -110,7 +110,7 @@
 @media (max-width: 720px) {
   .header {
     padding: var(--space-lg);
-    /* Row gap 2px: user-specified literal (nearest token is 4px).
+    /* Row gap 2px on purpose: the 4px token read too loose here.
        Column gap down from 2xl — its 30px of minimum width wrapped the
        ⓘ below the wordmark at the 320px reflow floor (smoke.spec
        asserts the one-row fit there). */

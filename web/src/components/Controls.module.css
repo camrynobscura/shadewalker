@@ -46,6 +46,15 @@
   margin: 0;
 }
 
+/* The field box takes focus by script when the mobile overlay closes
+   (AddressField's collapse). Keep the focus, hide the ring: an outline
+   around the whole field reads as selection, not location — same call
+   as About's fragment targets. Real controls inside keep the global
+   ring. */
+.addressField:focus-visible {
+  outline: none;
+}
+
 .fieldLabel {
   composes: sectionLabel from '../shared.module.css';
   display: block;

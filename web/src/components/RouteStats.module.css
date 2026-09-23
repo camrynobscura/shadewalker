@@ -2,7 +2,8 @@
   composes: visuallyHidden from '../shared.module.css';
 }
 
-.section {
+/* Everything under the My_route heading: stat row, directions, share. */
+.routeBody {
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
@@ -233,7 +234,7 @@
   transform-box: fill-box; /* scale about the leaf's own box */
   /* NO shared animation shorthand here: a nameless `animation: 3.8s
      ease-out infinite` gets minified to `animation:none`, killing the
-     timing the .vl* rules would inherit (broke in prod 2026-09-01; dev's
+     timing the .vl* rules would inherit (it shipped broken once; dev's
      unminified CSS masks it). Each .vl* carries its full shorthand. */
 }
 
