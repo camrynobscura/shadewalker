@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "lint": "oxlint",
     "preview": "vite preview",
     "test:e2e": "playwright test",
@@ -31,6 +33,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "jsdom": "^29.1.1",
     "oxlint": "^1.80.0",
+    "prettier": "^3.9.9",
     "typescript": "~7.0.2",
     "vite": "^8.2.2",
     "vitest": "^5.0.0"

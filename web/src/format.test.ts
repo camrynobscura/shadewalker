@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { formatCoords, formatDistance, formatDistanceParts, formatEtaParts, spokenDistance, spokenEta } from './format'
+import {
+  formatCoords,
+  formatDistance,
+  formatDistanceParts,
+  formatEtaParts,
+  spokenDistance,
+  spokenEta,
+} from './format'
 
 describe('formatDistance', () => {
   it('rounds a short distance to whole feet', () => {

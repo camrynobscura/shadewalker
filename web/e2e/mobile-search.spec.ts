@@ -53,6 +53,30 @@ test('CANCEL collapses the overlay and keeps the typed text', async ({ page }) =
   // CANCEL abandons the search, not the text — blur only clears a field
   // that was emptied (useAddressField.onBlur's existing contract).
   await expect(start).toHaveValue('court')
+  // Focus parks on the field's own box (the nearest script-focusable
+  // ancestor), not <body>: the next Tab / VoiceOver swipe continues from
+  // the field just edited (2026-09-23). Never the input — that would
+  // reopen the keyboard and the overlay with it.
+  await expect(start.locator('xpath=ancestor::*[@tabindex="-1"][1]')).toBeFocused()
+  await expect(start).not.toBeFocused()
+})
+
+test('Escape collapses the overlay the same way, keeping text and parking focus on the field', async ({
+  page,
+}) => {
+  await mockGeocode(page)
+  await page.goto('/')
+
+  const start = page.getByRole('combobox', { name: 'Start point' })
+  await start.tap()
+  await start.pressSequentially('court', { delay: 30 })
+  // First Escape closes the suggestion list, second the overlay.
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+
+  await expect(page.getByRole('button', { name: 'CANCEL' })).toBeHidden()
+  await expect(start).toHaveValue('court')
+  await expect(start.locator('xpath=ancestor::*[@tabindex="-1"][1]')).toBeFocused()
 })
 
 test('the expanded overlay has no axe violations', async ({ page }) => {

@@ -17,14 +17,7 @@ export interface Point {
  * stretch a walker experiences as one instruction. */
 export interface RouteStep {
   /** What to do at the start of this stretch. */
-  action:
-    | 'depart'
-    | 'continue'
-    | 'left'
-    | 'right'
-    | 'sharp_left'
-    | 'sharp_right'
-    | 'cross_side'
+  action: 'depart' | 'continue' | 'left' | 'right' | 'sharp_left' | 'sharp_right' | 'cross_side'
   /** Street name, or "unnamed path". */
   name: string
   /** Which side of the street this stretch walks — 'north'/'south'/
@@ -93,7 +86,8 @@ export class RouteError extends Error {}
  * down — is not a message for the user. */
 async function errorDetail(res: Response): Promise<string | null> {
   const body: unknown = await res.json().catch(() => null)
-  if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') return body.detail
+  if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string')
+    return body.detail
   return null
 }
 

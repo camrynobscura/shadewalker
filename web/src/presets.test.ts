@@ -6,7 +6,15 @@ function feature(lengthM: number, minutes: number, treeCount: number, shadeFract
   return {
     type: 'Feature',
     geometry: { type: 'LineString', coordinates: [] },
-    properties: { tree_weight: 0, length_m: lengthM, minutes, tree_count: treeCount, shade_fraction: shadeFraction, park_canopy_share: 0, segments: [] },
+    properties: {
+      tree_weight: 0,
+      length_m: lengthM,
+      minutes,
+      tree_count: treeCount,
+      shade_fraction: shadeFraction,
+      park_canopy_share: 0,
+      segments: [],
+    },
   }
 }
 

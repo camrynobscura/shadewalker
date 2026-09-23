@@ -126,7 +126,11 @@ export function useRouteQuery(
         if (err instanceof DOMException && err.name === 'TimeoutError') {
           setError('the server took too long — try again')
         } else {
-          setError(err instanceof RouteError ? err.message : "couldn't load the route — check your connection and try again")
+          setError(
+            err instanceof RouteError
+              ? err.message
+              : "couldn't load the route — check your connection and try again",
+          )
         }
         setSnappedStart(null)
         setSnappedEnd(null)

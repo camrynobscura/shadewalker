@@ -14,11 +14,7 @@ export const RECENTS_CAP = 5
 function isRecent(value: unknown): value is GeocodeResult {
   if (typeof value !== 'object' || value === null) return false
   const entry = value as Record<string, unknown>
-  return (
-    typeof entry.label === 'string' &&
-    typeof entry.lat === 'number' &&
-    typeof entry.lon === 'number'
-  )
+  return typeof entry.label === 'string' && typeof entry.lat === 'number' && typeof entry.lon === 'number'
 }
 
 /** Newest first, at most RECENTS_CAP. Anything unreadable — storage

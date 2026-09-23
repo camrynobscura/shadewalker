@@ -1,0 +1,34 @@
+/* Rules more than one component composes. Each *.module.css pulls what it
+   needs with `composes: name from './shared.module.css'`, so the call
+   sites keep their own `styles.x` names and the declarations live once. */
+
+/* Off-screen but still read by assistive tech. */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The small-caps "section/field title" look: Start_point, Shade_priority,
+   My_route, Directions. */
+.sectionLabel {
+  font-size: var(--section-label-size);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text);
+}
+
+/* Hairline above each of the panel's lower two sections. Composers add
+   their own margins (or none — RouteStats' wraps an always-mounted live
+   region whose empty footprint must be zero). Never on a <fieldset>: a
+   fieldset with any border renders its <legend> straddling the line. */
+.sectionDivider {
+  padding-top: var(--space-xl);
+  border-top: 1px solid var(--line);
+}

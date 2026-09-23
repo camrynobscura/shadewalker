@@ -102,12 +102,7 @@ const GLYPH_PATHS: Record<Exclude<RouteStep['action'], 'depart'>, string> = {
  * .stepGlyph's CSS color is the single ink knob. */
 function StepGlyph({ action }: { action: RouteStep['action'] }) {
   return (
-    <svg
-      className={styles.stepGlyph}
-      viewBox="0 0 16 16"
-      aria-hidden="true"
-      focusable="false"
-    >
+    <svg className={styles.stepGlyph} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
       {action === 'depart' ? (
         <rect x="5.5" y="5.5" width="5" height="5" fill="currentColor" />
       ) : (
@@ -127,11 +122,10 @@ function StepGlyph({ action }: { action: RouteStep['action'] }) {
   )
 }
 
-
 /** When at least this share of the route's tree score is park-canopy AREA
  * credit (not countable trees), hide the "trees: N" stat -- the count
  * can't see area credit, so it undersells exactly the routes with the
- * most real cover ("83% shaded, 3 trees", FIXES item 4).
+ * most real cover ("83% shaded, 3 trees").
  *
  * 0.25, user decision 2026-08-28: the count is flavor, so it should be
  * accurate or absent. Because canopy credit shares units with per-tree
@@ -208,7 +202,16 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
                 label overlaid, above, and colored): the vine alone is the
                 pending state -- motion with a direction reads as work, and
                 the visually-hidden sentence above keeps the spoken
-                announcement intact. */}
+                announcement intact. The ONE exception is reduced motion,
+                where there is no motion to read as work and a still vine
+                is just decoration: CSS swaps the vine for this plain line
+                (user call 2026-09-23; until then the block sat at
+                opacity 0 for the whole wait, a static opacity the
+                cancelled animation never lifted). aria-hidden with the
+                rest of the block — the sentence above is the spoken one. */}
+            <p className={styles.loadingText}>
+              <span>&gt; </span>finding your route…
+            </p>
             <div className={styles.vineStage}>
               <svg viewBox="0 0 520 64" preserveAspectRatio="none" className={styles.vineSvg}>
                 {/* One vine (tried three 2026-09-01, walked back same day —
@@ -227,27 +230,51 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
                   className={styles.vinePath}
                   d="M4 32 C 44 16, 84 48, 124 32 S 204 16, 244 32 S 324 48, 364 32 S 444 16, 484 32 C 494 36, 504 38.5, 518 39"
                 />
-                <path className={`${styles.vineLeaf} ${styles.oBL} ${styles.vl1}`} d="M34 27.5 Q 39 11.5, 54 14.5 Q 48 28.5, 34 27.5 Z" />
-                <path className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oTR} ${styles.vl2}`} d="M94 36.5 Q 89 52.5, 74 49.5 Q 80 35.5, 94 36.5 Z" />
-                <path className={`${styles.vineLeaf} ${styles.oBR} ${styles.vl6}`} d="M154 23 Q 149 7, 134 10 Q 140 24, 154 23 Z" />
-                <path className={`${styles.vineLeaf} ${styles.oBL} ${styles.vl3}`} d="M184 20 Q 189 4, 204 7 Q 198 21, 184 20 Z" />
-                <path className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oTL} ${styles.vl4}`} d="M304 44 Q 309 60, 324 57 Q 318 43, 304 44 Z" />
-                <path className={`${styles.vineLeaf} ${styles.oTL} ${styles.vl7}`} d="M334 41 Q 339 57, 354 54 Q 348 40, 334 41 Z" />
-                <path className={`${styles.vineLeaf} ${styles.oBR} ${styles.vl5}`} d="M424 20 Q 419 4, 404 7 Q 410 21, 424 20 Z" />
-                <path className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oBL} ${styles.vl8}`} d="M454 23 Q 459 7, 474 10 Q 468 24, 454 23 Z" />
+                <path
+                  className={`${styles.vineLeaf} ${styles.oBL} ${styles.vl1}`}
+                  d="M34 27.5 Q 39 11.5, 54 14.5 Q 48 28.5, 34 27.5 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oTR} ${styles.vl2}`}
+                  d="M94 36.5 Q 89 52.5, 74 49.5 Q 80 35.5, 94 36.5 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.oBR} ${styles.vl6}`}
+                  d="M154 23 Q 149 7, 134 10 Q 140 24, 154 23 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.oBL} ${styles.vl3}`}
+                  d="M184 20 Q 189 4, 204 7 Q 198 21, 184 20 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oTL} ${styles.vl4}`}
+                  d="M304 44 Q 309 60, 324 57 Q 318 43, 304 44 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.oTL} ${styles.vl7}`}
+                  d="M334 41 Q 339 57, 354 54 Q 348 40, 334 41 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.oBR} ${styles.vl5}`}
+                  d="M424 20 Q 419 4, 404 7 Q 410 21, 424 20 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oBL} ${styles.vl8}`}
+                  d="M454 23 Q 459 7, 474 10 Q 468 24, 454 23 Z"
+                />
               </svg>
             </div>
           </div>
         </>
       )}
-      {/* A rejected route's error message lives in App.tsx's header now,
-          not here -- see the comment there. This component only ever
-          rendered it when a route successfully loaded anyway, so there's
-          nothing route-specific left for this component to say about it. */}
+      {/* A rejected route's error message is Controls' alert slot, right
+          above the address fields (its `error` prop) -- not here. This
+          component only ever rendered it when a route successfully loaded
+          anyway, so there's nothing route-specific left for it to say. */}
       {route && !loading && !priorityHinted && (
         <p className={styles.visuallyHidden}>
-          Tip: the Shade priority setting above these results chooses how far
-          the route detours for extra shade.
+          Tip: the Shade priority setting above these results chooses how far the route detours for extra
+          shade.
         </p>
       )}
       {route && !loading && <StatsBody route={route} description={description} />}
@@ -286,12 +313,7 @@ function ShareButton() {
 
   return (
     <div className={styles.share}>
-      <button
-        type="button"
-        className={styles.shareButton}
-        onClick={onShare}
-        aria-label="Share route"
-      >
+      <button type="button" className={styles.shareButton} onClick={onShare} aria-label="Share route">
         {/* Icon is decoration (user ask 2026-09-03) — the aria-label
             above stays the whole spoken name. */}
         <ShareIcon />
@@ -323,13 +345,12 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
           gets a heading's own navigation benefit (screen readers can jump
           between headings) instead of a label/legend's control-naming
           role, which wouldn't apply here. Kept as a plain sibling of
-          .section, not a child of it, so its own margin-bottom controls
-          the title-to-content gap directly -- a child of .section would
-          pick up that flex container's uniform --space-md gap instead,
-          which is right for the *other* gaps inside .section (stat row to
-          directions list) but too loose for a title hugging its own
-          content, the same tight relationship .presetGroup legend's
-          margin-bottom already gets. */}
+          .routeBody, not a child of it, so its own margin-bottom controls
+          the title-to-content gap directly -- a child would pick up that
+          flex container's uniform --space-lg gap instead, which is right
+          for the *other* gaps inside it (stat row to directions list) but
+          too loose for a title hugging its own content, the same tight
+          relationship the Shade_priority legend's margin-bottom gets. */}
       {/* Content split, not aria-label: inside the aria-live wrapper a
           label AND the text can both be announced -- "My route" twice
           (VoiceOver pass). aria-hidden text is excluded from both the
@@ -338,24 +359,27 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
         <span aria-hidden="true">My_route</span>
         <span className={styles.visuallyHidden}>My route</span>
       </h2>
-      <div className={styles.section}>
+      <div className={styles.routeBody}>
         {/* Label above value (user call 2026-08-28), eta leading — the
-            question a walker asks first. DOM order matches visual order,
-            so screen readers also announce label-then-value. A real
-            <dl> since 2026-08-30: these are key-value pairs, and dt/dd
-            gives AT the term-to-value association the old spans only
-            implied by proximity (each pair wrapped in a div, which HTML
-            allows inside <dl> exactly for this styling shape). */}
-        <dl className={styles.statRow}>
-          <div className={styles.stat}>
-            {/* All four dt labels are aria-hidden: each dd speaks a
-                self-contained phrase ("74 percent shaded"), so the stats
-                announce as one clean stream instead of label-number
-                fragments (VoiceOver pass, 2026-08-31). */}
-            <dt className={styles.statLabel} aria-hidden="true">eta</dt>
+            question a walker asks first. A plain named list, not a <dl>:
+            it WAS a definition list (2026-08-30 to 2026-09-09), but every
+            <dt> was aria-hidden, so the term-to-value pairing a <dl>
+            promises never reached AT — each value speaks a self-contained
+            phrase ("74 percent shaded") instead, a VoiceOver-pass call
+            (2026-08-31: "eta" read as a word, and the values stand on
+            their own). The markup now claims exactly that: four items.
+            role="list" because .statRow sets list-style: none, which
+            strips the role in Safari (same as the directions list). */}
+        <ul className={styles.statRow} role="list" aria-label="Route stats">
+          <li className={styles.stat}>
+            {/* The visible labels are aria-hidden (see above); each value
+                carries its own spoken twin with full words. */}
+            <span className={styles.statLabel} aria-hidden="true">
+              eta
+            </span>
             {/* The compact visual ("2 hr 9 min") is aria-hidden; the
                 sr-only twin speaks full words. Same pattern on distance. */}
-            <dd className={styles.statVal}>
+            <span className={styles.statVal}>
               <span aria-hidden="true">
                 {formatEtaParts(stats.minutes).map((part, i) => (
                   <Fragment key={part.unit}>
@@ -366,23 +390,27 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
                 ))}
               </span>
               <span className={styles.visuallyHidden}>{spokenEta(stats.minutes)}</span>
-            </dd>
-          </div>
-          <div className={styles.stat}>
+            </span>
+          </li>
+          <li className={styles.stat}>
             {/* Unit in the same lighter <small> the eta box's "min" gets --
                 the value is the datum, the unit is context. */}
-            <dt className={styles.statLabel} aria-hidden="true">distance</dt>
-            <dd className={styles.statVal}>
+            <span className={styles.statLabel} aria-hidden="true">
+              distance
+            </span>
+            <span className={styles.statVal}>
               <span aria-hidden="true">
                 {dist.value}
                 <small> {dist.unit}</small>
               </span>
               <span className={styles.visuallyHidden}>{spokenDistance(stats.length_m)}</span>
-            </dd>
-          </div>
-          <div className={styles.stat}>
-            <dt className={styles.statLabel} aria-hidden="true">shaded</dt>
-            <dd className={styles.statVal}>
+            </span>
+          </li>
+          <li className={styles.stat}>
+            <span className={styles.statLabel} aria-hidden="true">
+              shaded
+            </span>
+            <span className={styles.statVal}>
               {/* Same <small> treatment AND same leading space as eta's
                   "min" and distance's "mi" -- the unit gap matches across
                   all three boxes (user call, 2026-08-31). */}
@@ -391,21 +419,22 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
                 <small> %</small>
               </span>
               <span className={styles.visuallyHidden}>{shownShadePct} percent shaded</span>
-            </dd>
-          </div>
+            </span>
+          </li>
           {stats.park_canopy_share < CANOPY_SHARE_HIDES_TREE_COUNT && (
-            <div className={styles.stat}>
-              <dt className={styles.statLabel} aria-hidden="true">trees</dt>
-              <dd className={styles.statVal}>
+            <li className={styles.stat}>
+              <span className={styles.statLabel} aria-hidden="true">
+                trees
+              </span>
+              <span className={styles.statVal}>
                 <span aria-hidden="true">{stats.tree_count}</span>
                 <span className={styles.visuallyHidden}>
                   {`${stats.tree_count} ${stats.tree_count === 1 ? 'tree' : 'trees'}`}
                 </span>
-              </dd>
-            </div>
+              </span>
+            </li>
           )}
-        </dl>
-
+        </ul>
 
         <div className={styles.directionsGroup}>
           <h3 className={styles.subTitle}>Directions</h3>
@@ -416,7 +445,9 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
               uncertainty about street names is disclosed structurally,
               per-step, as "unnamed path", not by a blanket note. */}
           <p className={styles.disclaimer}>
-            <span className={styles.disclaimerMark} aria-hidden="true">&gt;</span>
+            <span className={styles.disclaimerMark} aria-hidden="true">
+              &gt;
+            </span>
             <span>
               {/* sr-only label: the ">" is decorative, so screen readers still
                   get the "caution" framing the visible text no longer states. */}

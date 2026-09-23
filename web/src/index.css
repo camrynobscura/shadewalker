@@ -1,147 +1,35 @@
-/* Global theme + accessibility baseline. Component-specific styles live in
-   *.module.css files next to their components.
-
-   Theme: "Greenhouse" — Glitch Garden with the lights on. Mint-tinted paper,
-   deep forest ink, jade + magenta accents, everything monospace, zero corner
-   radius. Light ground chosen on purpose: this app is used outdoors at noon,
-   where dark UIs glare and wash out. */
-
-:root {
-  /* Light theme tuned for AA contrast: --text on --panel is ~15:1,
-     --muted on --panel is ~5:1. Where a neon carries text it pairs with a
-     color that passes: jade deepens to #007a4d (5.4:1 with white), the
-     bright glitch magenta keeps its full #ff2bd6 punch by carrying INK
-     text instead of white (5.6:1), cyan deepens to #0077a3 (4.7:1). */
-  --bg: #e6f2e9;
-  --panel: #eff8f1;
-  --panel-raised: #ffffff;
-  --border: #5c9a78; /* 3.3:1 on white, 3.05:1 on --panel: non-text AA (was #9dc7ac, 1.9:1) */
-  --line: #cfe5d6; /* hairlines between sections */
-  --text: #0b2418;
-  --muted: #4a7360;
-  --green: #00a86b; /* jade: route line, markers, graphics (3:1+ vs map) */
-  --green-dim: #007a4d; /* button bg; 5.4:1 with white text (AA) */
-  --magenta: #ff2bd6; /* Glitch Garden neon: selected state + end marker; pair with --text, never white */
-  --cyan: #0077a3; /* tagline + small accents; 4.7:1 on --panel */
-  --focus: #0077a3;
-  --danger: #a70e06; /* 6:1+ on --panel */
-
-  /* Vertical rhythm scale for the control panel. Every gap between blocks
-     should be one of these five, via a flex container's `gap` — not a
-     one-off margin on whichever element happened to need spacing that day. */
-  --space-xs: 4px; /* a caption/label bound tightly to its own control */
-  --space-sm: 8px; /* compact control padding (buttons, inputs, stat boxes) —
-                       between a label's own tight spacing and a full block gap */
-  --space-md: 12px; /* between related lines within one info block */
-  --space-lg: 16px; /* between distinct field groups within one section */
-  --space-xl: 24px; /* between the panel's three top-level sections
-                        (address entry / shade priority / results), and
-                        the panel's own top/bottom edge */
-  --space-2xl: 30px; /* one step past --space-xl, for a gap that needs to
-                         read as more generous than the top-level section
-                         spacing itself */
-
-  /* Horizontal inset for boxed controls and readouts (inputs, stat
-     boxes, the legend, notices). Sits between sm and md on purpose --
-     8px read cramped against a border, 12px read airy; before this
-     token existed the same 10px was hand-repeated in six rules across
-     four files, a step the scale had without naming it. */
-  --control-pad-x: 10px;
-
-  /* The translucent jade wash marking "data readout, not clickable"
-     (stat boxes, the mode/comparison hint). One token so it moves with
-     --green if that ever changes. */
-  --green-wash: rgba(0, 168, 107, 0.08);
-
-  /* The small-caps-style "field/section label" look (Start_point,
-     Shade_priority, My_route) is the same size everywhere it's used --
-     one token instead of repeating the literal value in every
-     *.module.css file that needs it. */
-  --label-font-size: 0.625rem; /* 10px */
-
-  /* One step up from --label-font-size, for the section/field TITLES
-     (Start_point, End_point, Shade_priority, My_route) so they outrank the
-     10px sublabels beneath them -- user call 2026-09-01. The sublabels keep
-     --label-font-size; that decoupling is what creates the hierarchy. */
-  --section-label-size: 0.75rem; /* 12px */
-
-  /* Body/caption text-size scale. Distinct from --label-font-size above:
-     that one names a specific look (the small-caps field-label style),
-     these name steps on a general size scale, the same relationship
-     --space-* has to a one-off spacing value. Originally three steps
-     (12/13/14px), collapsed to two -- a 1px-apart third step wasn't
-     visually distinct enough to earn its own name, so 13px literals were
-     folded into 12px instead of kept as their own tier. */
-  --font-size-sm: 0.75rem; /* 12px */
-  --font-size-md: 0.875rem; /* 14px */
-}
-
-* {
-  box-sizing: border-box;
-}
+/* The map app's shell: what the fixed-viewport page needs on top of the
+   shared tokens + baseline in base.css. About imports base.css directly
+   and never sees any of this. Component-specific styles live in
+   *.module.css files next to their components. */
+@import './base.css';
 
 html,
 body,
 #root {
   height: 100%;
-  margin: 0;
   /* Fixed-viewport app: the header, map, and panel fill the screen and each
      manage their OWN scrolling (the panel via overflow-y:auto, the map by
      panning). Nothing is meant to scroll at the document level, so hide it
      here. Without this, a stray or transient child overflow (Leaflet reflows
      on load/zoom are a classic one) makes the document taller than the
-     viewport and leaves a phantom margin below the whole app on scroll
-     (user report 2026-09-01; every layout box measured correctly at
-     viewport height, so this is the right guard, not a clip of real
-     content -- the panel keeps its own scroll). */
+     viewport and leaves a phantom margin below the whole app on scroll;
+     every layout box measured correctly at viewport height, so this is
+     the right guard, not a clip of real content -- the panel keeps its
+     own scroll. */
   overflow: hidden;
-}
-
-body {
-  background: var(--bg);
-  color: var(--text);
-  /* ui-monospace resolves to SF Mono on macOS; the rest is the fallback
-     chain for other platforms. Mono everywhere is the theme's voice. */
-  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
-  line-height: 1.45;
-}
-
-/* Form controls don't inherit font-family by default — without this, buttons
-   and inputs would silently stay in the system font. */
-button,
-input,
-select,
-textarea {
-  font-family: inherit;
-}
-
-/* One loud, consistent focus indicator everywhere. :focus-visible fires for
-   keyboard focus but not mouse clicks — exactly what WCAG wants. */
-:focus-visible {
-  outline: 3px solid var(--cyan);
-  outline-offset: 2px;
 }
 
 /* Leaflet's zoom links are 26px (30 with touch); the app's floor is 44. */
 .leaflet-bar a,
 .leaflet-touch .leaflet-bar a {
-  width: 44px;
-  height: 44px;
-  line-height: 44px;
+  width: var(--target-min);
+  height: var(--target-min);
+  line-height: var(--target-min);
 }
 
 /* Leaflet underlines attribution links only on hover: color alone, and
    2.56:1 against the credit text beside them. */
 .leaflet-control-attribution a {
   text-decoration: underline;
-}
-
-/* WCAG 2.3.3: users who ask the OS for less motion get none. */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation: none !important;
-    transition: none !important;
-  }
 }

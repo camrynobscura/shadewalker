@@ -21,7 +21,7 @@ test('expanding hides header and panel, fills the screen; collapsing restores bo
 
   await expect(toggle).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByRole('banner')).toBeHidden()
-  await expect(page.getByRole('complementary', { name: 'Route controls and details' })).toBeHidden()
+  await expect(page.getByRole('region', { name: 'Route controls and details' })).toBeHidden()
   // The point of the mode: the map region owns the whole viewport.
   const box = await page.getByRole('region', { name: 'Map' }).boundingBox()
   expect(box).not.toBeNull()
@@ -30,7 +30,7 @@ test('expanding hides header and panel, fills the screen; collapsing restores bo
   await toggle.tap()
   await expect(toggle).toHaveAttribute('aria-pressed', 'false')
   await expect(page.getByRole('banner')).toBeVisible()
-  await expect(page.getByRole('complementary', { name: 'Route controls and details' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Route controls and details' })).toBeVisible()
 })
 
 test('Escape collapses the expanded map', async ({ page }) => {

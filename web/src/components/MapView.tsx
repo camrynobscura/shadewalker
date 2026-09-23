@@ -1,5 +1,5 @@
 import { divIcon, type Map as LeafletMap } from 'leaflet'
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import {
   Circle,
   CircleMarker,
@@ -21,7 +21,7 @@ import styles from './MapView.module.css'
 // there returned near-identical routes across every preset; Village blocks
 // vary enough that the presets visibly diverge, which is the actual demo.
 // (Was Midtown 2026-08-31; Carroll Gardens, the pilot area, before that.)
-const INITIAL_CENTER: [number, number] = [40.7320, -73.9985]
+const INITIAL_CENTER: [number, number] = [40.732, -73.9985]
 
 /* CARTO started watermarking keyless raster tile requests in 2026-08
    ("API KEY REQUIRED" repeated across the map). The key is a build-time
@@ -32,8 +32,7 @@ const INITIAL_CENTER: [number, number] = [40.7320, -73.9985]
    no local setup. Key mechanics: docs.carto.com/faqs/carto-basemaps. */
 const CARTO_KEY = import.meta.env.VITE_CARTO_KEY
 const TILE_URL =
-  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png' +
-  (CARTO_KEY ? `?key=${CARTO_KEY}` : '')
+  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png' + (CARTO_KEY ? `?key=${CARTO_KEY}` : '')
 
 /* Markers as labeled divIcons: start and end are told apart by their letter,
    not color -- both render the same magenta (see MapView.module.css), so
@@ -57,9 +56,7 @@ function toLatLngs(feature: RouteFeature): [number, number][] {
   return feature.geometry.coordinates.map(([lon, lat]) => [lat, lon])
 }
 
-
-const reducedMotion = () =>
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 /** Invisible helper: react-leaflet hooks only work in children of
  * MapContainer, so map-click handling lives in its own tiny component. */
@@ -182,7 +179,6 @@ function RouteFraming({
   return null
 }
 
-
 /** Explains the map's line styles. Real text (not just aria-hidden swatches)
  * so the meaning doesn't depend on noticing the color/dash difference —
  * screen readers get it too, since it's plain content in reading order,
@@ -194,18 +190,14 @@ function Legend({ hasRoute }: { hasRoute: boolean }) {
     // Named: an unnamed grouping announces as "list, 3 items" with no
     // clue what the list IS (2026-08-30 tree-read finding).
     <ul className={styles.legend} aria-label="Map legend">
-      {hasRoute && (
-        <>
-          <li className={styles.legendRow}>
-            <span className={styles.legendSwatch} aria-hidden="true" />
-            shadiest route
-          </li>
-          <li className={styles.legendRow}>
-            <span className={`${styles.legendSwatch} ${styles.legendSwatchDashed}`} aria-hidden="true" />
-            fastest route
-          </li>
-        </>
-      )}
+      <li className={styles.legendRow}>
+        <span className={styles.legendSwatch} aria-hidden="true" />
+        shadiest route
+      </li>
+      <li className={styles.legendRow}>
+        <span className={`${styles.legendSwatch} ${styles.legendSwatchDashed}`} aria-hidden="true" />
+        fastest route
+      </li>
     </ul>
   )
 }
@@ -228,20 +220,23 @@ function PanTo({ point }: { point: Point | null }) {
 /** Two things Leaflet's own DOM needs that react-leaflet can't set from
  * props (audit 2026-09-09). The container is a keyboard tab stop (arrow
  * keys pan, +/- zoom) that announced as nothing but its contents; it
- * gets a role and a name that says how to drive it — a group, not a
- * landmark, so it's read on focus and never in the landmark list. And
- * the vector overlay's <svg> — the route lines — is hidden from AT: it
- * read as a nameless image, and the directions list is the accessible
- * route. The svg exists only once the first path is drawn, so this
- * re-checks on every render (one querySelector); it must stay the LAST
- * child of MapContainer so its effect runs after the Polylines' have
- * added their layers. */
-function MapA11y() {
+ * gets a role and a short name — a group, not a landmark, so it's read
+ * on focus and never in the landmark list — and `describedBy` points at
+ * MapView's hidden instructions, so the keys are announced once on
+ * focus rather than repeated inside the name (a name is read every
+ * time; a description once). And the vector overlay's <svg> — the route
+ * lines — is hidden from AT: it read as a nameless image, and the
+ * directions list is the accessible route. The svg exists only once the
+ * first path is drawn, so this re-checks on every render (one
+ * querySelector); it must stay the LAST child of MapContainer so its
+ * effect runs after the Polylines' have added their layers. */
+function MapA11y({ describedBy }: { describedBy: string }) {
   const map = useMap()
   useEffect(() => {
     const container = map.getContainer()
     container.setAttribute('role', 'group')
-    container.setAttribute('aria-label', 'Map: arrow keys pan, plus and minus keys zoom')
+    container.setAttribute('aria-label', 'Map')
+    container.setAttribute('aria-describedby', describedBy)
     map.getPane('overlayPane')?.querySelector('svg')?.setAttribute('aria-hidden', 'true')
   })
   return null
@@ -299,6 +294,7 @@ export function MapView({
   expanded,
   onToggleExpanded,
 }: MapViewProps) {
+  const helpId = useId()
   return (
     <div className={styles.mapRegion} role="region" aria-label="Map">
       {/* A landmark's aria-label is re-read every time a screen reader user
@@ -307,12 +303,15 @@ export function MapView({
           here instead, visually hidden but still in the accessibility
           tree: read once, in normal order, the first time someone actually
           enters this region (e.g. via the landmarks list), not repeated on
-          every subsequent landmark-list pass the way the label would be. */}
-      <p className={styles.visuallyHidden}>
-        Click to set your start and end points; you can also type addresses in the route controls.
+          every subsequent landmark-list pass the way the label would be.
+          Doubles as the map container's aria-describedby (MapA11y), so
+          keyboard users focusing the map hear the keys once. */}
+      <p id={helpId} className={styles.visuallyHidden}>
+        Click to set your start and end points; arrow keys pan and plus and minus keys zoom. You can also type
+        addresses in the route controls.
       </p>
       {/* zoomAnimation must be OFF under reduced motion, not just quick:
-          index.css's prefers-reduced-motion rule nulls every CSS
+          base.css's prefers-reduced-motion rule nulls every CSS
           transition, and Leaflet's animated zoom waits on a transitionend
           event to leave its "animating" state -- an event a nulled
           transition may never fire. Stuck there, Leaflet silently ignores
@@ -323,12 +322,7 @@ export function MapView({
           asks for. Mount-time read by design: react-leaflet map options
           are immutable, and a mid-session OS toggle is rare enough to
           not chase. */}
-      <MapContainer
-        center={INITIAL_CENTER}
-        zoom={15}
-        zoomAnimation={!reducedMotion()}
-        className={styles.map}
-      >
+      <MapContainer center={INITIAL_CENTER} zoom={15} zoomAnimation={!reducedMotion()} className={styles.map}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url={TILE_URL}
@@ -367,16 +361,18 @@ export function MapView({
             are told apart by pattern (dashed vs solid), not color alone.
             Each route is two Polylines on the same coords: a wide translucent
             "casing" underneath plus the crisp line on top — the cheap way to
-            fake the Greenhouse glow (SVG strokes can't blur). */}
+            fake the Greenhouse glow (SVG strokes can't blur). Colour comes
+            from the className (MapView.module.css, on the theme tokens);
+            pathOptions carries only geometry. */}
         {baseline && (
           <>
             <Polyline
               positions={toLatLngs(baseline)}
-              pathOptions={{ color: '#ff2bd6', weight: 9, opacity: 0.15 }}
+              pathOptions={{ className: styles.routeBaseline, weight: 9, opacity: 0.15 }}
             />
             <Polyline
               positions={toLatLngs(baseline)}
-              pathOptions={{ color: '#ff2bd6', weight: 3, dashArray: '6 8', opacity: 0.85 }}
+              pathOptions={{ className: styles.routeBaseline, weight: 3, dashArray: '6 8', opacity: 0.85 }}
             />
           </>
         )}
@@ -384,11 +380,11 @@ export function MapView({
           <>
             <Polyline
               positions={toLatLngs(selected)}
-              pathOptions={{ color: '#00a86b', weight: 11, opacity: 0.2 }}
+              pathOptions={{ className: styles.routeSelected, weight: 11, opacity: 0.2 }}
             />
             <Polyline
               positions={toLatLngs(selected)}
-              pathOptions={{ color: '#00a86b', weight: 4.5, opacity: 0.95 }}
+              pathOptions={{ className: styles.routeSelected, weight: 4.5, opacity: 0.95 }}
             />
           </>
         )}
@@ -400,9 +396,7 @@ export function MapView({
         {start && (
           <Marker position={[start.lat, start.lon]} icon={startIcon} interactive={false} keyboard={false} />
         )}
-        {end && (
-          <Marker position={[end.lat, end.lon]} icon={endIcon} interactive={false} keyboard={false} />
-        )}
+        {end && <Marker position={[end.lat, end.lon]} icon={endIcon} interactive={false} keyboard={false} />}
 
         {/* The blue dot + its GPS-accuracy halo. */}
         {position && (
@@ -410,18 +404,18 @@ export function MapView({
             <Circle
               center={[position.lat, position.lon]}
               radius={position.accuracy}
-              pathOptions={{ color: '#0077a3', weight: 1, opacity: 0.4, fillOpacity: 0.08 }}
+              pathOptions={{ className: styles.locationHalo, weight: 1, opacity: 0.4, fillOpacity: 0.08 }}
             />
             <CircleMarker
               center={[position.lat, position.lon]}
               radius={7}
-              pathOptions={{ color: '#ffffff', weight: 2, fillColor: '#3388ff', fillOpacity: 1 }}
+              pathOptions={{ className: styles.locationDot, weight: 2, fillOpacity: 1 }}
             />
           </>
         )}
 
         <LocateButton position={position} />
-        <MapA11y />
+        <MapA11y describedBy={helpId} />
       </MapContainer>
       {/* Purely decorative texture; aria-hidden keeps it out of the
           accessibility tree entirely. */}

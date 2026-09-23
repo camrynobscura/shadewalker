@@ -1,6 +1,13 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
-import { geocode, GeocodeUnavailableError, reverseGeocode, type GeocodeResult, type Point, type RouteFeature } from '../api'
+import {
+  geocode,
+  GeocodeUnavailableError,
+  reverseGeocode,
+  type GeocodeResult,
+  type Point,
+  type RouteFeature,
+} from '../api'
 import { formatCoords, formatDistance, spokenDistance } from '../format'
 import type { LocationFillStatus } from '../hooks/useLocationFill'
 import { useGeocodeSuggestions } from '../hooks/useGeocodeSuggestions'
@@ -248,9 +255,10 @@ function useAddressField(
     prevExternalRef.current = externalPoint
 
     if (!externalPoint) {
-      // Point cleared from outside (CLEAR_ROUTE, or this field emptied and
-      // blurred) -- empty the text so field and map never disagree (user
-      // report 2026-08-31: CLEAR_ROUTE left the addresses behind). Guarded
+      // Point cleared from outside (a map tap starting a fresh pair drops
+      // the end point; the ✕; this field emptied and blurred) -- empty the
+      // text so field and map never disagree (the old CLEAR_ROUTE button
+      // once left the addresses behind, user report 2026-08-31). Guarded
       // on `prev` so it fires only on the value->null transition, never on
       // the steady no-point state while a fresh address is being typed.
       // suggestOn is left alone: a blurred field already has it off, and
@@ -342,8 +350,8 @@ function AddressField({
    * labels are dropped (user call 2026-09-03, reclaiming panel height)
    * the chip is the field's identity, echoing the map's A/B markers so
    * field and marker read as the same object. Desktop keeps the labels
-   * and hides the chip. aria-hidden: the input's aria-label speaks the
-   * name at every width. */
+   * and hides the chip. aria-hidden: the <label> names the input at
+   * every width (visually hidden on phones, never display:none). */
   marker: string
   example: string
   field: ReturnType<typeof useAddressField>
@@ -381,6 +389,7 @@ function AddressField({
   const [focused, setFocused] = useState(false)
   const expanded = focused && isMobile
   const inputRef = useRef<HTMLInputElement>(null)
+  const fieldRef = useRef<HTMLDivElement>(null)
 
   /* While the overlay is open the correct window scroll is EXACTLY 0 —
      the input is pinned to the top by design, and nothing at the document
@@ -433,10 +442,20 @@ function AddressField({
 
   /** Collapse the overlay (and the on-screen keyboard with it).
    * `abandon` marks the blur as a walk-away, so half-typed text isn't
-   * geocoded on the way out. */
+   * geocoded on the way out.
+   *
+   * The blur is what closes the keyboard, so focus can't go back to the
+   * input — that would reopen both. It goes to the field's own box
+   * instead (tabIndex -1: script-focusable, never a tab stop): a div
+   * summons no keyboard, so the reading/tab position stays at the field
+   * just edited rather than dropping to <body>, where the next Tab
+   * restarted from the top of the page and VoiceOver lost its place
+   * (craftsmanship review 2026-09-23). preventScroll: the panel must
+   * not jump as the overlay leaves. */
   function collapse(abandon = false) {
     abandonRef.current = abandon
     inputRef.current?.blur()
+    fieldRef.current?.focus({ preventScroll: true })
   }
 
   /* Expand BEFORE focus, not in response to it. On focus, Safari computes
@@ -492,6 +511,8 @@ function AddressField({
 
   return (
     <div
+      ref={fieldRef}
+      tabIndex={-1} /* collapse() parks focus here — see it for why */
       className={expanded ? `${styles.addressField} ${styles.fieldExpanded}` : styles.addressField}
       /* While expanded, a press on the overlay's DEAD SPACE must not
          steal focus and collapse the session — the same preventDefault
@@ -509,7 +530,17 @@ function AddressField({
           it always did as a direct flex child; as a flex row only when
           expanded, to seat CANCEL beside it. */}
       <div className={expanded ? styles.expandedHead : styles.fieldHead}>
-        <label htmlFor={id}>{label}</label>
+        {/* The label IS the input's accessible name (native <label>, no
+            aria-label on the input — craftsmanship review 2026-09-09).
+            Twin spans, the app's one technique for the terminal voice:
+            the screen shows "Start_point", the spoken form drops the
+            underscore ("Start underscore point" otherwise — VoiceOver
+            pass 2026-08-31). Same split as the Shade_walker wordmark and
+            the Shade_priority legend. */}
+        <label htmlFor={id} className={styles.fieldLabel}>
+          <span aria-hidden="true">{label}</span>
+          <span className={styles.visuallyHidden}>{spokenLabel}</span>
+        </label>
         {expanded && (
           /* mousedown preventDefault: same trick as the options below —
              keep the tap from blurring the input first, so this click is
@@ -535,11 +566,6 @@ function AddressField({
           ref={inputRef}
           className={styles.addressInput}
           type="text"
-          /* Spoken name drops the underscore ("Start point", not "Start
-             underscore point") -- the terminal voice is visual chrome,
-             not pronunciation (VoiceOver pass, 2026-08-31). Same split
-             as the Shade_walker wordmark. */
-          aria-label={spokenLabel}
           value={field.query}
           // Off, not "street-address": the browser's own autofill dropdown
           // would paint directly over our listbox, and the ARIA combobox
@@ -623,7 +649,9 @@ function AddressField({
                 id={`${id}-opt-${i}`}
                 role="option"
                 aria-selected={i === activeIndex}
-                className={i === activeIndex ? `${styles.suggestOption} ${styles.suggestActive}` : styles.suggestOption}
+                className={
+                  i === activeIndex ? `${styles.suggestOption} ${styles.suggestActive}` : styles.suggestOption
+                }
                 // mousedown fires before the input's blur — preventing it
                 // keeps focus in the field, so blur can't close the list
                 // out from under the click that's about to land.
@@ -641,9 +669,10 @@ function AddressField({
         )}
       </div>
       {/* role="status" = a polite live region: screen readers announce the
-          result without stealing focus. Nothing shown for 'searching' —
-          the Find_route button's own "FINDING…" label already covers that,
-          and showing it here too just flickered on and off per field. */}
+          result without stealing focus. Nothing shown for 'searching': a
+          lookup is sub-second, and a per-field "searching" line just
+          flickered on and off (it also once duplicated the old FIND_ROUTE
+          button's own pending label). */}
       <p
         className={
           field.status === 'notfound' || field.status === 'unavailable' || notice
@@ -655,14 +684,13 @@ function AddressField({
         {field.status === 'notfound' ? (
           <>
             <span aria-hidden="true">// NOT_FOUND:</span>
-            <span className={styles.visuallyHidden}>NOT FOUND:</span>
-            {' '}try adding a borough
+            <span className={styles.visuallyHidden}>NOT FOUND:</span> try adding a borough
           </>
         ) : field.status === 'unavailable' ? (
           <>
             <span aria-hidden="true">// SEARCH_DOWN:</span>
-            <span className={styles.visuallyHidden}>Search down:</span>
-            {' '}address search is temporarily unavailable — tap the map instead
+            <span className={styles.visuallyHidden}>Search down:</span> address search is temporarily
+            unavailable — tap the map instead
           </>
         ) : (
           notice
@@ -704,8 +732,8 @@ interface ControlsProps {
   /** A rejected route (out of coverage, no path found, server down) --
    * shown right above the address fields since that's what it's actually
    * about, and it's where a user's attention already is right after
-   * submitting Find_route or tapping the map (the map sits directly above
-   * this panel, not down near RouteStats where this used to live). */
+   * pressing Enter on an address or tapping the map (the map sits directly
+   * above this panel, not down near RouteStats where this used to live). */
   error: string | null
 }
 
@@ -804,8 +832,8 @@ export function Controls({
     ) : locationStatus === 'denied' ? (
       <>
         <span aria-hidden="true">{'// LOCATION_OFF:'}</span>
-        <span className={styles.visuallyHidden}>Location off:</span> allow location for this site in
-        your browser settings
+        <span className={styles.visuallyHidden}>Location off:</span> allow location for this site in your
+        browser settings
       </>
     ) : locationStatus === 'unavailable' ? (
       <>
@@ -813,8 +841,8 @@ export function Controls({
         {/* No ⌖ glyph in copy — it's tofu in iOS's mono fallback (the
             whole reason icons.tsx exists). "Location", never "fix" — GPS
             jargon (user call 2026-09-02). */}
-        <span className={styles.visuallyHidden}>No location:</span> couldn&#39;t find your location —
-        tap the location button to retry
+        <span className={styles.visuallyHidden}>No location:</span> couldn&#39;t find your location — tap the
+        location button to retry
       </>
     ) : null
 
@@ -884,7 +912,7 @@ export function Controls({
             a slightly odd screen-reader pronunciation). No ARIA needed — the
             built-in semantics do it. */}
         <fieldset className={styles.presetGroup}>
-          <legend>
+          <legend className={styles.presetLegend}>
             <span aria-hidden="true">Shade_priority</span>
             <span className={styles.visuallyHidden}>Shade priority</span>
           </legend>
@@ -894,16 +922,21 @@ export function Controls({
                 <input
                   type="radio"
                   name={groupName}
-                  aria-label={preset.spoken}
                   value={preset.value}
                   checked={treeWeight === preset.value}
                   onChange={() => onTreeWeightChange(preset.value)}
                   className={styles.segmentInput}
                 />
-                {/* aria-hidden: the radio's aria-label ("Medium") is the one
-                    spoken name -- without this, VoiceOver ALSO read the
-                    visible caps text, spelling L-O-W and doubling MED. */}
-                <span className={styles.segmentText} aria-hidden="true">{preset.label}</span>
+                {/* The wrapping <label> names the radio, twin-span style:
+                    the visible caps text is aria-hidden (VoiceOver spelled
+                    L-O-W and read MED as a word) and the hidden span
+                    speaks `preset.spoken` ("Medium"). One spoken name, from
+                    native labelling — no aria-label on the input
+                    (craftsmanship review 2026-09-09). */}
+                <span className={styles.segmentText} aria-hidden="true">
+                  {preset.label}
+                </span>
+                <span className={styles.visuallyHidden}>{preset.spoken}</span>
               </label>
             ))}
           </div>
@@ -929,18 +962,23 @@ export function Controls({
                 with which section is talking. */}
             <span className={styles.visuallyHidden}>Shade priority: </span>
             <p className={styles.modeLine}>
-              <span className={styles.promptSymbol} aria-hidden="true">&gt;</span>
+              <span className={styles.promptSymbol} aria-hidden="true">
+                &gt;
+              </span>
               <span className={styles.modeVal}>{selectedPreset?.spoken.toLowerCase()}</span>{' '}
               <span aria-hidden="true">//</span> {selectedPreset?.hint}
             </p>
             {comparison && (
               <p className={styles.comparisonLine}>
                 <span aria-hidden="true">
-                  <span className={styles.promptSymbol}>&gt;</span><span className={styles.plusSign}>+</span>
+                  <span className={styles.promptSymbol}>&gt;</span>
+                  <span className={styles.plusSign}>+</span>
                   <span className={styles.numberHighlight}>{comparison.extraShadePct}</span>% shade
-                  <span className={styles.sep}>|</span><span className={styles.plusSign}>+</span>
+                  <span className={styles.sep}>|</span>
+                  <span className={styles.plusSign}>+</span>
                   <span className={styles.numberHighlight}>{comparison.extraMinutes}</span> min
-                  <span className={styles.sep}>|</span><span className={styles.plusSign}>+</span>
+                  <span className={styles.sep}>|</span>
+                  <span className={styles.plusSign}>+</span>
                   {highlightNumber(formatDistance(comparison.extraLengthM))}
                 </span>
                 {/* Spoken twin: full words, no glyph soup (VoiceOver pass). */}
@@ -958,10 +996,7 @@ export function Controls({
           {/* Always mounted so its aria-live can announce the first
               appearance (same reasoning as RouteStats' wrapper); the
               class swap keeps the empty slot at zero height. */}
-          <p
-            className={lowShade ? styles.lowShadeNote : styles.lowShadeEmpty}
-            aria-live="polite"
-          >
+          <p className={lowShade ? styles.lowShadeNote : styles.lowShadeEmpty} aria-live="polite">
             {lowShade && selected && (
               <>
                 <strong>
