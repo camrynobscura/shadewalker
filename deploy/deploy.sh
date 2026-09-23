@@ -32,13 +32,25 @@ if [[ ! -f data/export/citywide.json.gz ]]; then
 fi
 
 # ALLOWLIST, not a denylist: -R (--relative) recreates exactly these paths
-# under $DEST and nothing else. --delete prunes stale files WITHIN each of
-# them (e.g. old hashed /assets from a prior deploy) but never touches
-# paths not listed here — critically, the box's own .venv is safe.
+# under $DEST and nothing else — critically, the box's own .venv is safe.
+SHIPPED_DIRS=(server pipeline web/dist data/export)
 rsync -avzR --delete \
 	--exclude='__pycache__/' --exclude='*.pyc' \
-	server pipeline web/dist data/export pyproject.toml uv.lock \
+	"${SHIPPED_DIRS[@]}" pyproject.toml uv.lock \
 	"$HOST:$DEST/"
+
+# --delete above is a no-op from a Mac: the stock rsync has been Apple's
+# openrsync since macOS 14, and a real run against the box left a stray
+# file in place (2026-09-23; 35 old hashed /assets had piled up since
+# launch). So prune explicitly: inside each shipped DIRECTORY, whatever
+# the box has that this tree doesn't is removed, one line per file. This
+# is what keeps a deleted module out of server/, and a stray *.json.gz
+# out of data/export — the server loads EVERY one it finds there.
+for dir in "${SHIPPED_DIRS[@]}"; do
+	ssh "$HOST" "cd '$DEST' && find '$dir' -type f -not -path '*/__pycache__/*'" |
+		while IFS= read -r f; do [[ -e "$f" ]] || printf '%s\0' "$f"; done |
+		ssh "$HOST" "cd '$DEST' && xargs -0 -r rm -v --"
+done
 
 # On the box: install/refresh the SLIM runtime deps (no-op if unchanged),
 # then restart. --no-default-groups = the 7 server packages only, never
