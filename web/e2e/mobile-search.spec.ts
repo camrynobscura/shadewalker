@@ -61,7 +61,9 @@ test('CANCEL collapses the overlay and keeps the typed text', async ({ page }) =
   await expect(start).not.toBeFocused()
 })
 
-test('Escape collapses the overlay the same way, keeping text and parking focus on the field', async ({ page }) => {
+test('Escape collapses the overlay the same way, keeping text and parking focus on the field', async ({
+  page,
+}) => {
   await mockGeocode(page)
   await page.goto('/')
 

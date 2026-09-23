@@ -239,10 +239,18 @@
 }
 
 /* Scale origin = the bbox corner holding the leaf's anchor on the vine. */
-.oBL { transform-origin: left bottom; }
-.oBR { transform-origin: right bottom; }
-.oTL { transform-origin: left top; }
-.oTR { transform-origin: right top; }
+.oBL {
+  transform-origin: left bottom;
+}
+.oBR {
+  transform-origin: right bottom;
+}
+.oTL {
+  transform-origin: left top;
+}
+.oTR {
+  transform-origin: right top;
+}
 
 .vineLeafDim {
   fill: var(--green-dim);
@@ -250,69 +258,173 @@
 
 /* Dedicated keyframes per leaf: CSS variables can't parameterize
    keyframe selectors. */
-.vl1 { animation: vl1 2.4s ease-out infinite; }
-.vl2 { animation: vl2 2.4s ease-out infinite; }
-.vl3 { animation: vl3 2.4s ease-out infinite; }
-.vl4 { animation: vl4 2.4s ease-out infinite; }
-.vl5 { animation: vl5 2.4s ease-out infinite; }
-.vl6 { animation: vl6 2.4s ease-out infinite; }
-.vl7 { animation: vl7 2.4s ease-out infinite; }
-.vl8 { animation: vl8 2.4s ease-out infinite; }
+.vl1 {
+  animation: vl1 2.4s ease-out infinite;
+}
+.vl2 {
+  animation: vl2 2.4s ease-out infinite;
+}
+.vl3 {
+  animation: vl3 2.4s ease-out infinite;
+}
+.vl4 {
+  animation: vl4 2.4s ease-out infinite;
+}
+.vl5 {
+  animation: vl5 2.4s ease-out infinite;
+}
+.vl6 {
+  animation: vl6 2.4s ease-out infinite;
+}
+.vl7 {
+  animation: vl7 2.4s ease-out infinite;
+}
+.vl8 {
+  animation: vl8 2.4s ease-out infinite;
+}
 
 @keyframes vl6 {
-  0%, 24% { transform: scale(0); }
-  31% { transform: scale(1); }
-  88% { transform: scale(1); opacity: 1; }
-  96%, 100% { opacity: 0; }
+  0%,
+  24% {
+    transform: scale(0);
+  }
+  31% {
+    transform: scale(1);
+  }
+  88% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
 }
 
 @keyframes vl7 {
-  0%, 38% { transform: scale(0); }
-  45% { transform: scale(1); }
-  88% { transform: scale(1); opacity: 1; }
-  96%, 100% { opacity: 0; }
+  0%,
+  38% {
+    transform: scale(0);
+  }
+  45% {
+    transform: scale(1);
+  }
+  88% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
 }
 
 @keyframes vl8 {
-  0%, 48% { transform: scale(0); }
-  55% { transform: scale(1); }
-  88% { transform: scale(1); opacity: 1; }
-  96%, 100% { opacity: 0; }
+  0%,
+  48% {
+    transform: scale(0);
+  }
+  55% {
+    transform: scale(1);
+  }
+  88% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
 }
 
 @keyframes vl1 {
-  0%, 11% { transform: scale(0); }
-  18% { transform: scale(1); }
-  88% { transform: scale(1); opacity: 1; }
-  96%, 100% { opacity: 0; }
+  0%,
+  11% {
+    transform: scale(0);
+  }
+  18% {
+    transform: scale(1);
+  }
+  88% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
 }
 
 @keyframes vl2 {
-  0%, 19% { transform: scale(0); }
-  26% { transform: scale(1); }
-  88% { transform: scale(1); opacity: 1; }
-  96%, 100% { opacity: 0; }
+  0%,
+  19% {
+    transform: scale(0);
+  }
+  26% {
+    transform: scale(1);
+  }
+  88% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
 }
 
 @keyframes vl3 {
-  0%, 27% { transform: scale(0); }
-  34% { transform: scale(1); }
-  88% { transform: scale(1); opacity: 1; }
-  96%, 100% { opacity: 0; }
+  0%,
+  27% {
+    transform: scale(0);
+  }
+  34% {
+    transform: scale(1);
+  }
+  88% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
 }
 
 @keyframes vl4 {
-  0%, 35% { transform: scale(0); }
-  42% { transform: scale(1); }
-  88% { transform: scale(1); opacity: 1; }
-  96%, 100% { opacity: 0; }
+  0%,
+  35% {
+    transform: scale(0);
+  }
+  42% {
+    transform: scale(1);
+  }
+  88% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
 }
 
 @keyframes vl5 {
-  0%, 45% { transform: scale(0); }
-  52% { transform: scale(1); }
-  88% { transform: scale(1); opacity: 1; }
-  96%, 100% { opacity: 0; }
+  0%,
+  45% {
+    transform: scale(0);
+  }
+  52% {
+    transform: scale(1);
+  }
+  88% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
 }
 
 /* No motion means no vine: a still squiggle reads as decoration, not

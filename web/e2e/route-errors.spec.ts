@@ -28,10 +28,16 @@ test('a route request that never answers times out with its own message', async 
   await expect(page.getByText('Finding your route')).toHaveCount(0)
 })
 
-test("a proxy error page (uvicorn down behind Caddy/Vite) reads as 'check your connection', never a status code", async ({ page }) => {
+test("a proxy error page (uvicorn down behind Caddy/Vite) reads as 'check your connection', never a status code", async ({
+  page,
+}) => {
   await mockGeocode(page)
   await page.route('**/route?*', (route) =>
-    route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body>502 Bad Gateway</body></html>' }),
+    route.fulfill({
+      status: 502,
+      contentType: 'text/html',
+      body: '<html><body>502 Bad Gateway</body></html>',
+    }),
   )
   await page.goto(routeUrl(POINT_A, POINT_B))
   await expect(page.getByRole(ERROR())).toContainText("couldn't load the route")
@@ -52,7 +58,9 @@ test('a rate-limited route shows the wait message', async ({ page }) => {
   await expect(page.getByRole(ERROR())).toContainText('wait a moment')
 })
 
-test('a dead geocoder shows SEARCH_DOWN, not NOT_FOUND, and Enter retries the same text', async ({ page }) => {
+test('a dead geocoder shows SEARCH_DOWN, not NOT_FOUND, and Enter retries the same text', async ({
+  page,
+}) => {
   let calls = 0
   await page.route('**/geocode?*', (route) => {
     calls++

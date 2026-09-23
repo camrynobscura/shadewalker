@@ -72,9 +72,7 @@ export default function App() {
   const [startLabel, setStartLabel] = useState<string | null>(() =>
     initialLabel(initialParams, 'fromq', 'from'),
   )
-  const [endLabel, setEndLabel] = useState<string | null>(() =>
-    initialLabel(initialParams, 'toq', 'to'),
-  )
+  const [endLabel, setEndLabel] = useState<string | null>(() => initialLabel(initialParams, 'toq', 'to'))
 
   // The safety net against a stale label outliving its point: every path
   // that moves a point goes through these, and label-reporting (Controls)

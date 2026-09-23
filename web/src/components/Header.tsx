@@ -57,11 +57,7 @@ export function Header({ page }: { page: 'map' | 'about' }) {
           <span className={styles.visuallyHidden}>Shade Walker</span>
           {/* Decorative terminal cursor — never announced. */}
           <span
-            className={
-              cursorShouldBlink(onMap)
-                ? `${styles.cursor} ${styles.cursorBlink}`
-                : styles.cursor
-            }
+            className={cursorShouldBlink(onMap) ? `${styles.cursor} ${styles.cursorBlink}` : styles.cursor}
             aria-hidden="true"
           />
         </a>
@@ -82,7 +78,8 @@ export function Header({ page }: { page: 'map' | 'about' }) {
             <span aria-hidden="true">&#62; </span>find the shadiest walking route in NYC
           </p>
           <p className={styles.instructions}>
-            <span aria-hidden="true">&#62; </span>tap the map to set a start and end point, or search two addresses below
+            <span aria-hidden="true">&#62; </span>tap the map to set a start and end point, or search two
+            addresses below
           </p>
         </div>
       )}

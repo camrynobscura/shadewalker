@@ -82,7 +82,6 @@ test('the shade stat carries real data rather than failing closed', async ({ pag
   await page.goto(routeUrl(POINT_A, POINT_B))
 
   const shade = await readShadePercent(page)
-  expect(shade, 'every preset reading 0% means the shade path is failing closed')
-    .toBeGreaterThan(0)
+  expect(shade, 'every preset reading 0% means the shade path is failing closed').toBeGreaterThan(0)
   expect(shade).toBeLessThanOrEqual(100)
 })

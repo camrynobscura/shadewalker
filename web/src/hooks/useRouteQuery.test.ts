@@ -13,7 +13,12 @@ vi.mock('../api', async (importOriginal) => ({
 const START = { lat: 40.68, lon: -73.99 }
 const END = { lat: 40.686, lon: -73.984 }
 
-function feature(treeWeight: number, lengthM: number, treeCount: number, shadeFraction: number): RouteFeature {
+function feature(
+  treeWeight: number,
+  lengthM: number,
+  treeCount: number,
+  shadeFraction: number,
+): RouteFeature {
   return {
     type: 'Feature',
     geometry: { type: 'LineString', coordinates: [] },
@@ -31,7 +36,12 @@ function feature(treeWeight: number, lengthM: number, treeCount: number, shadeFr
 
 function fakeResponse(): RouteResponse {
   return {
-    routes: [feature(0, 90, 2, 0.2), feature(5, 95, 3, 0.3), feature(15, 100, 5, 0.5), feature(40, 110, 8, 0.7)],
+    routes: [
+      feature(0, 90, 2, 0.2),
+      feature(5, 95, 3, 0.3),
+      feature(15, 100, 5, 0.5),
+      feature(40, 110, 8, 0.7),
+    ],
     snapped: { start: START, end: END },
     month: 7,
     description: 'Head 100 m along Court Street.',

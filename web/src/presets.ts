@@ -81,7 +81,8 @@ export function compareRoutes(selected: RouteFeature, baseline: RouteFeature): R
   return {
     extraMinutes: Math.round(selected.properties.minutes - baseline.properties.minutes),
     extraShadePct: Math.round(
-      (displayShade(selected.properties.shade_fraction) - displayShade(baseline.properties.shade_fraction)) * 100,
+      (displayShade(selected.properties.shade_fraction) - displayShade(baseline.properties.shade_fraction)) *
+        100,
     ),
     extraLengthM: Math.round((selected.properties.length_m - baseline.properties.length_m) * 10) / 10,
   }

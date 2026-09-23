@@ -1,6 +1,13 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
-import { geocode, GeocodeUnavailableError, reverseGeocode, type GeocodeResult, type Point, type RouteFeature } from '../api'
+import {
+  geocode,
+  GeocodeUnavailableError,
+  reverseGeocode,
+  type GeocodeResult,
+  type Point,
+  type RouteFeature,
+} from '../api'
 import { formatCoords, formatDistance, spokenDistance } from '../format'
 import type { LocationFillStatus } from '../hooks/useLocationFill'
 import { useGeocodeSuggestions } from '../hooks/useGeocodeSuggestions'
@@ -642,7 +649,9 @@ function AddressField({
                 id={`${id}-opt-${i}`}
                 role="option"
                 aria-selected={i === activeIndex}
-                className={i === activeIndex ? `${styles.suggestOption} ${styles.suggestActive}` : styles.suggestOption}
+                className={
+                  i === activeIndex ? `${styles.suggestOption} ${styles.suggestActive}` : styles.suggestOption
+                }
                 // mousedown fires before the input's blur — preventing it
                 // keeps focus in the field, so blur can't close the list
                 // out from under the click that's about to land.
@@ -675,14 +684,13 @@ function AddressField({
         {field.status === 'notfound' ? (
           <>
             <span aria-hidden="true">// NOT_FOUND:</span>
-            <span className={styles.visuallyHidden}>NOT FOUND:</span>
-            {' '}try adding a borough
+            <span className={styles.visuallyHidden}>NOT FOUND:</span> try adding a borough
           </>
         ) : field.status === 'unavailable' ? (
           <>
             <span aria-hidden="true">// SEARCH_DOWN:</span>
-            <span className={styles.visuallyHidden}>Search down:</span>
-            {' '}address search is temporarily unavailable — tap the map instead
+            <span className={styles.visuallyHidden}>Search down:</span> address search is temporarily
+            unavailable — tap the map instead
           </>
         ) : (
           notice
@@ -824,8 +832,8 @@ export function Controls({
     ) : locationStatus === 'denied' ? (
       <>
         <span aria-hidden="true">{'// LOCATION_OFF:'}</span>
-        <span className={styles.visuallyHidden}>Location off:</span> allow location for this site in
-        your browser settings
+        <span className={styles.visuallyHidden}>Location off:</span> allow location for this site in your
+        browser settings
       </>
     ) : locationStatus === 'unavailable' ? (
       <>
@@ -833,8 +841,8 @@ export function Controls({
         {/* No ⌖ glyph in copy — it's tofu in iOS's mono fallback (the
             whole reason icons.tsx exists). "Location", never "fix" — GPS
             jargon (user call 2026-09-02). */}
-        <span className={styles.visuallyHidden}>No location:</span> couldn&#39;t find your location —
-        tap the location button to retry
+        <span className={styles.visuallyHidden}>No location:</span> couldn&#39;t find your location — tap the
+        location button to retry
       </>
     ) : null
 
@@ -925,7 +933,9 @@ export function Controls({
                     speaks `preset.spoken` ("Medium"). One spoken name, from
                     native labelling — no aria-label on the input
                     (craftsmanship review 2026-09-09). */}
-                <span className={styles.segmentText} aria-hidden="true">{preset.label}</span>
+                <span className={styles.segmentText} aria-hidden="true">
+                  {preset.label}
+                </span>
                 <span className={styles.visuallyHidden}>{preset.spoken}</span>
               </label>
             ))}
@@ -952,18 +962,23 @@ export function Controls({
                 with which section is talking. */}
             <span className={styles.visuallyHidden}>Shade priority: </span>
             <p className={styles.modeLine}>
-              <span className={styles.promptSymbol} aria-hidden="true">&gt;</span>
+              <span className={styles.promptSymbol} aria-hidden="true">
+                &gt;
+              </span>
               <span className={styles.modeVal}>{selectedPreset?.spoken.toLowerCase()}</span>{' '}
               <span aria-hidden="true">//</span> {selectedPreset?.hint}
             </p>
             {comparison && (
               <p className={styles.comparisonLine}>
                 <span aria-hidden="true">
-                  <span className={styles.promptSymbol}>&gt;</span><span className={styles.plusSign}>+</span>
+                  <span className={styles.promptSymbol}>&gt;</span>
+                  <span className={styles.plusSign}>+</span>
                   <span className={styles.numberHighlight}>{comparison.extraShadePct}</span>% shade
-                  <span className={styles.sep}>|</span><span className={styles.plusSign}>+</span>
+                  <span className={styles.sep}>|</span>
+                  <span className={styles.plusSign}>+</span>
                   <span className={styles.numberHighlight}>{comparison.extraMinutes}</span> min
-                  <span className={styles.sep}>|</span><span className={styles.plusSign}>+</span>
+                  <span className={styles.sep}>|</span>
+                  <span className={styles.plusSign}>+</span>
                   {highlightNumber(formatDistance(comparison.extraLengthM))}
                 </span>
                 {/* Spoken twin: full words, no glyph soup (VoiceOver pass). */}
@@ -981,10 +996,7 @@ export function Controls({
           {/* Always mounted so its aria-live can announce the first
               appearance (same reasoning as RouteStats' wrapper); the
               class swap keeps the empty slot at zero height. */}
-          <p
-            className={lowShade ? styles.lowShadeNote : styles.lowShadeEmpty}
-            aria-live="polite"
-          >
+          <p className={lowShade ? styles.lowShadeNote : styles.lowShadeEmpty} aria-live="polite">
             {lowShade && selected && (
               <>
                 <strong>

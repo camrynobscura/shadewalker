@@ -23,10 +23,7 @@ describe('recordRecent / loadRecents', () => {
     recordRecent(entry('250 Court St', 40.1, -73.1))
     recordRecent(entry('3rd Ave'))
     recordRecent(entry('250 COURT ST', 40.2, -73.2))
-    expect(loadRecents()).toEqual([
-      { label: '250 COURT ST', lat: 40.2, lon: -73.2 },
-      entry('3rd Ave'),
-    ])
+    expect(loadRecents()).toEqual([{ label: '250 COURT ST', lat: 40.2, lon: -73.2 }, entry('3rd Ave')])
   })
 
   it('caps the list, dropping the oldest', () => {

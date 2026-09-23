@@ -102,12 +102,7 @@ const GLYPH_PATHS: Record<Exclude<RouteStep['action'], 'depart'>, string> = {
  * .stepGlyph's CSS color is the single ink knob. */
 function StepGlyph({ action }: { action: RouteStep['action'] }) {
   return (
-    <svg
-      className={styles.stepGlyph}
-      viewBox="0 0 16 16"
-      aria-hidden="true"
-      focusable="false"
-    >
+    <svg className={styles.stepGlyph} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
       {action === 'depart' ? (
         <rect x="5.5" y="5.5" width="5" height="5" fill="currentColor" />
       ) : (
@@ -126,7 +121,6 @@ function StepGlyph({ action }: { action: RouteStep['action'] }) {
     </svg>
   )
 }
-
 
 /** When at least this share of the route's tree score is park-canopy AREA
  * credit (not countable trees), hide the "trees: N" stat -- the count
@@ -236,14 +230,38 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
                   className={styles.vinePath}
                   d="M4 32 C 44 16, 84 48, 124 32 S 204 16, 244 32 S 324 48, 364 32 S 444 16, 484 32 C 494 36, 504 38.5, 518 39"
                 />
-                <path className={`${styles.vineLeaf} ${styles.oBL} ${styles.vl1}`} d="M34 27.5 Q 39 11.5, 54 14.5 Q 48 28.5, 34 27.5 Z" />
-                <path className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oTR} ${styles.vl2}`} d="M94 36.5 Q 89 52.5, 74 49.5 Q 80 35.5, 94 36.5 Z" />
-                <path className={`${styles.vineLeaf} ${styles.oBR} ${styles.vl6}`} d="M154 23 Q 149 7, 134 10 Q 140 24, 154 23 Z" />
-                <path className={`${styles.vineLeaf} ${styles.oBL} ${styles.vl3}`} d="M184 20 Q 189 4, 204 7 Q 198 21, 184 20 Z" />
-                <path className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oTL} ${styles.vl4}`} d="M304 44 Q 309 60, 324 57 Q 318 43, 304 44 Z" />
-                <path className={`${styles.vineLeaf} ${styles.oTL} ${styles.vl7}`} d="M334 41 Q 339 57, 354 54 Q 348 40, 334 41 Z" />
-                <path className={`${styles.vineLeaf} ${styles.oBR} ${styles.vl5}`} d="M424 20 Q 419 4, 404 7 Q 410 21, 424 20 Z" />
-                <path className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oBL} ${styles.vl8}`} d="M454 23 Q 459 7, 474 10 Q 468 24, 454 23 Z" />
+                <path
+                  className={`${styles.vineLeaf} ${styles.oBL} ${styles.vl1}`}
+                  d="M34 27.5 Q 39 11.5, 54 14.5 Q 48 28.5, 34 27.5 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oTR} ${styles.vl2}`}
+                  d="M94 36.5 Q 89 52.5, 74 49.5 Q 80 35.5, 94 36.5 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.oBR} ${styles.vl6}`}
+                  d="M154 23 Q 149 7, 134 10 Q 140 24, 154 23 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.oBL} ${styles.vl3}`}
+                  d="M184 20 Q 189 4, 204 7 Q 198 21, 184 20 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oTL} ${styles.vl4}`}
+                  d="M304 44 Q 309 60, 324 57 Q 318 43, 304 44 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.oTL} ${styles.vl7}`}
+                  d="M334 41 Q 339 57, 354 54 Q 348 40, 334 41 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.oBR} ${styles.vl5}`}
+                  d="M424 20 Q 419 4, 404 7 Q 410 21, 424 20 Z"
+                />
+                <path
+                  className={`${styles.vineLeaf} ${styles.vineLeafDim} ${styles.oBL} ${styles.vl8}`}
+                  d="M454 23 Q 459 7, 474 10 Q 468 24, 454 23 Z"
+                />
               </svg>
             </div>
           </div>
@@ -255,8 +273,8 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
           anyway, so there's nothing route-specific left for it to say. */}
       {route && !loading && !priorityHinted && (
         <p className={styles.visuallyHidden}>
-          Tip: the Shade priority setting above these results chooses how far
-          the route detours for extra shade.
+          Tip: the Shade priority setting above these results chooses how far the route detours for extra
+          shade.
         </p>
       )}
       {route && !loading && <StatsBody route={route} description={description} />}
@@ -295,12 +313,7 @@ function ShareButton() {
 
   return (
     <div className={styles.share}>
-      <button
-        type="button"
-        className={styles.shareButton}
-        onClick={onShare}
-        aria-label="Share route"
-      >
+      <button type="button" className={styles.shareButton} onClick={onShare} aria-label="Share route">
         {/* Icon is decoration (user ask 2026-09-03) — the aria-label
             above stays the whole spoken name. */}
         <ShareIcon />
@@ -361,7 +374,9 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
           <li className={styles.stat}>
             {/* The visible labels are aria-hidden (see above); each value
                 carries its own spoken twin with full words. */}
-            <span className={styles.statLabel} aria-hidden="true">eta</span>
+            <span className={styles.statLabel} aria-hidden="true">
+              eta
+            </span>
             {/* The compact visual ("2 hr 9 min") is aria-hidden; the
                 sr-only twin speaks full words. Same pattern on distance. */}
             <span className={styles.statVal}>
@@ -380,7 +395,9 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
           <li className={styles.stat}>
             {/* Unit in the same lighter <small> the eta box's "min" gets --
                 the value is the datum, the unit is context. */}
-            <span className={styles.statLabel} aria-hidden="true">distance</span>
+            <span className={styles.statLabel} aria-hidden="true">
+              distance
+            </span>
             <span className={styles.statVal}>
               <span aria-hidden="true">
                 {dist.value}
@@ -390,7 +407,9 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
             </span>
           </li>
           <li className={styles.stat}>
-            <span className={styles.statLabel} aria-hidden="true">shaded</span>
+            <span className={styles.statLabel} aria-hidden="true">
+              shaded
+            </span>
             <span className={styles.statVal}>
               {/* Same <small> treatment AND same leading space as eta's
                   "min" and distance's "mi" -- the unit gap matches across
@@ -404,7 +423,9 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
           </li>
           {stats.park_canopy_share < CANOPY_SHARE_HIDES_TREE_COUNT && (
             <li className={styles.stat}>
-              <span className={styles.statLabel} aria-hidden="true">trees</span>
+              <span className={styles.statLabel} aria-hidden="true">
+                trees
+              </span>
               <span className={styles.statVal}>
                 <span aria-hidden="true">{stats.tree_count}</span>
                 <span className={styles.visuallyHidden}>
@@ -415,7 +436,6 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
           )}
         </ul>
 
-
         <div className={styles.directionsGroup}>
           <h3 className={styles.subTitle}>Directions</h3>
 
@@ -425,7 +445,9 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
               uncertainty about street names is disclosed structurally,
               per-step, as "unnamed path", not by a blanket note. */}
           <p className={styles.disclaimer}>
-            <span className={styles.disclaimerMark} aria-hidden="true">&gt;</span>
+            <span className={styles.disclaimerMark} aria-hidden="true">
+              &gt;
+            </span>
             <span>
               {/* sr-only label: the ">" is decorative, so screen readers still
                   get the "caution" framing the visible text no longer states. */}

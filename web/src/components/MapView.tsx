@@ -21,7 +21,7 @@ import styles from './MapView.module.css'
 // there returned near-identical routes across every preset; Village blocks
 // vary enough that the presets visibly diverge, which is the actual demo.
 // (Was Midtown 2026-08-31; Carroll Gardens, the pilot area, before that.)
-const INITIAL_CENTER: [number, number] = [40.7320, -73.9985]
+const INITIAL_CENTER: [number, number] = [40.732, -73.9985]
 
 /* CARTO started watermarking keyless raster tile requests in 2026-08
    ("API KEY REQUIRED" repeated across the map). The key is a build-time
@@ -32,8 +32,7 @@ const INITIAL_CENTER: [number, number] = [40.7320, -73.9985]
    no local setup. Key mechanics: docs.carto.com/faqs/carto-basemaps. */
 const CARTO_KEY = import.meta.env.VITE_CARTO_KEY
 const TILE_URL =
-  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png' +
-  (CARTO_KEY ? `?key=${CARTO_KEY}` : '')
+  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png' + (CARTO_KEY ? `?key=${CARTO_KEY}` : '')
 
 /* Markers as labeled divIcons: start and end are told apart by their letter,
    not color -- both render the same magenta (see MapView.module.css), so
@@ -57,9 +56,7 @@ function toLatLngs(feature: RouteFeature): [number, number][] {
   return feature.geometry.coordinates.map(([lon, lat]) => [lat, lon])
 }
 
-
-const reducedMotion = () =>
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 /** Invisible helper: react-leaflet hooks only work in children of
  * MapContainer, so map-click handling lives in its own tiny component. */
@@ -181,7 +178,6 @@ function RouteFraming({
 
   return null
 }
-
 
 /** Explains the map's line styles. Real text (not just aria-hidden swatches)
  * so the meaning doesn't depend on noticing the color/dash difference —
@@ -311,8 +307,8 @@ export function MapView({
           Doubles as the map container's aria-describedby (MapA11y), so
           keyboard users focusing the map hear the keys once. */}
       <p id={helpId} className={styles.visuallyHidden}>
-        Click to set your start and end points; arrow keys pan and plus and minus keys zoom. You can
-        also type addresses in the route controls.
+        Click to set your start and end points; arrow keys pan and plus and minus keys zoom. You can also type
+        addresses in the route controls.
       </p>
       {/* zoomAnimation must be OFF under reduced motion, not just quick:
           base.css's prefers-reduced-motion rule nulls every CSS
@@ -326,12 +322,7 @@ export function MapView({
           asks for. Mount-time read by design: react-leaflet map options
           are immutable, and a mid-session OS toggle is rare enough to
           not chase. */}
-      <MapContainer
-        center={INITIAL_CENTER}
-        zoom={15}
-        zoomAnimation={!reducedMotion()}
-        className={styles.map}
-      >
+      <MapContainer center={INITIAL_CENTER} zoom={15} zoomAnimation={!reducedMotion()} className={styles.map}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url={TILE_URL}
@@ -405,9 +396,7 @@ export function MapView({
         {start && (
           <Marker position={[start.lat, start.lon]} icon={startIcon} interactive={false} keyboard={false} />
         )}
-        {end && (
-          <Marker position={[end.lat, end.lon]} icon={endIcon} interactive={false} keyboard={false} />
-        )}
+        {end && <Marker position={[end.lat, end.lon]} icon={endIcon} interactive={false} keyboard={false} />}
 
         {/* The blue dot + its GPS-accuracy halo. */}
         {position && (
