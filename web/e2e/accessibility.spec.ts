@@ -185,7 +185,7 @@ test.describe('reduced motion', () => {
     // swapped for text; the spoken sentence is unchanged.
     await expect(page.getByText('> finding your route…')).toBeVisible()
     await expect(page.locator('[class*="vineStage"]')).toBeHidden()
-    await expect(page.getByText('Finding your route…')).toBeAttached()
+    await expect(page.getByText('Finding your route…', { exact: true })).toBeAttached()
   })
 })
 

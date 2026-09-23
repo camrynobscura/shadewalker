@@ -18,14 +18,14 @@ test('a route request that never answers times out with its own message', async 
     /* never fulfilled: a hung worker */
   })
   await page.goto(routeUrl(POINT_A, POINT_B))
-  await expect(page.getByText('Finding your route')).toBeAttached()
+  await expect(page.getByText('Finding your route…', { exact: true })).toBeAttached()
 
   await page.clock.runFor(9_000)
   await expect(page.getByRole(ERROR())).toHaveText('')
 
   await page.clock.runFor(1_500)
   await expect(page.getByRole(ERROR())).toContainText('took too long')
-  await expect(page.getByText('Finding your route')).toHaveCount(0)
+  await expect(page.getByText('Finding your route…', { exact: true })).toHaveCount(0)
 })
 
 test("a proxy error page (uvicorn down behind Caddy/Vite) reads as 'check your connection', never a status code", async ({

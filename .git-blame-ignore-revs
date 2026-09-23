@@ -1,0 +1,3 @@
+# Commits git blame should look through (pure formatting, no semantic change).
+# Enable once per clone: git config blame.ignoreRevsFile .git-blame-ignore-revs
+875fc7aa269cf87a9dc5d95c8b7fd2d71ef76da6
