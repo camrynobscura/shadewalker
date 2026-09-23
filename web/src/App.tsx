@@ -167,8 +167,13 @@ export default function App() {
           so a remount can't re-fire it. */}
       {!mapExpanded && <Header page="map" />}
 
-      <div className={styles.layout}>
-        <main className={styles.mapArea}>
+      {/* <main> wraps BOTH the map and the panel: the panel is the app's
+          primary input, not a sidebar — without it the page is an empty
+          map of New York — so it can't honestly be <aside>/"complementary"
+          (craftsmanship review 2026-09-09). Each half is its own named
+          region inside main: MapView's "Map", and the <section> below. */}
+      <main className={styles.layout}>
+        <div className={styles.mapArea}>
           {/* The wordmark <h1> left with the header, and a page with zero
               headings is a real hole in the a11y tree (axe caught it:
               page-has-heading-one), not a formality — so expanded mode
@@ -190,13 +195,15 @@ export default function App() {
             expanded={mapExpanded}
             onToggleExpanded={isMobile ? () => setWantMapExpanded((v) => !v) : null}
           />
-        </main>
+        </div>
 
-        {/* Stays MOUNTED while the map is expanded, unlike the header:
-            display:none (panelHidden) keeps the address fields' typed-but-
-            unresolved text and the aria-live regions alive, while still
-            removing the panel from the a11y tree and tab order. */}
-        <aside
+        {/* A named <section> = a "region" landmark, so the panel is still
+            one jump away in a landmark list. Stays MOUNTED while the map
+            is expanded, unlike the header: display:none (panelHidden)
+            keeps the address fields' typed-but-unresolved text and the
+            aria-live regions alive, while still removing the panel from
+            the a11y tree and tab order. */}
+        <section
           id="controls"
           tabIndex={-1}
           className={mapExpanded ? `${styles.panel} ${styles.panelHidden}` : styles.panel}
@@ -220,8 +227,8 @@ export default function App() {
             baseline={baseline}
           />
           <RouteStats route={selected} description={route?.description ?? ''} loading={loading} />
-        </aside>
-      </div>
+        </section>
+      </main>
     </div>
   )
 }

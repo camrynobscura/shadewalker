@@ -16,9 +16,9 @@
   margin: 0 0 calc(-1 * var(--space-md));
 }
 
-/* Keep in sync with .lowShadeNote below (only margins differ). */
-.error {
-  margin: 0;
+/* The magenta-edged notice box: the route error and the low-shade note.
+   Composers set only their margins. */
+.notice {
   padding: var(--space-sm) var(--control-pad-x);
   background: var(--panel-raised);
   border: 1px solid var(--line);
@@ -27,16 +27,13 @@
   color: var(--text);
 }
 
+.error {
+  composes: notice;
+  margin: 0;
+}
+
 .visuallyHidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+  composes: visuallyHidden from '../shared.module.css';
 }
 
 .addressField {
@@ -49,29 +46,24 @@
   margin: 0;
 }
 
-.addressField label {
+.fieldLabel {
+  composes: sectionLabel from '../shared.module.css';
   display: block;
-  font-size: var(--section-label-size);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text);
   margin: 0;
 }
 
 .addressInput {
   width: 100%;
-  min-height: 44px;
+  min-height: var(--target-min);
   padding: var(--space-sm) var(--control-pad-x);
   background: var(--panel-raised);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 0;
-  /* 1rem, not the 14px type scale: iOS Safari auto-zooms the page when a
-     focused field is under 16px. .fakePlaceholder must match. */
-  font-size: 1rem;
+  font-size: var(--font-size-input); /* .fakePlaceholder must match */
   /* Reserved unconditionally for the ✕/⌖ accessory, so text never
      reflows when it appears. */
-  padding-right: 44px;
+  padding-right: var(--target-min);
 }
 
 /* ✕/⌖ inside the input's right edge; absolute against .suggestWrap so it
@@ -80,8 +72,8 @@
   position: absolute;
   top: 0;
   right: 0;
-  width: 44px;
-  height: 44px;
+  width: var(--target-min);
+  height: var(--target-min);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -89,7 +81,7 @@
   padding: 0;
   background: none;
   border: none;
-  font-size: 1rem;
+  font-size: var(--font-size-input);
   color: var(--muted);
   cursor: pointer;
 }
@@ -126,7 +118,7 @@
   height: 20px;
   border-radius: 50%;
   background: var(--green-dim);
-  color: #ffffff;
+  color: var(--on-accent);
   font-weight: 700;
   font-size: var(--font-size-sm);
   pointer-events: none;
@@ -136,14 +128,14 @@
 .fakePlaceholder {
   position: absolute;
   left: var(--control-pad-x);
-  right: 44px;
+  right: var(--target-min);
   top: 50%;
   transform: translateY(-50%);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--muted);
-  font-size: 1rem; /* mirrors .addressInput */
+  font-size: var(--font-size-input); /* mirrors .addressInput */
   pointer-events: none;
 }
 
@@ -177,7 +169,7 @@
 .suggestOption {
   display: flex;
   align-items: center;
-  min-height: 44px;
+  min-height: var(--target-min);
   padding: var(--space-sm) var(--control-pad-x);
   font-size: var(--font-size-sm);
   color: var(--text);
@@ -222,7 +214,7 @@
 
 .cancelSearch {
   margin: 0;
-  min-height: 44px;
+  min-height: var(--target-min);
   padding: var(--space-sm);
   background: none;
   border: none;
@@ -243,10 +235,10 @@
   flex: none;
 }
 
-/* .suggestWrap is screen-tall in the overlay — pin to the input's 44px
-   box, not its center. Same for .fieldMarker in the media block. */
+/* .suggestWrap is screen-tall in the overlay — pin to the input's own
+   box, not the wrap's center. Same for .fieldMarker in the media block. */
 .fieldExpanded .fakePlaceholder {
-  top: 22px;
+  top: calc(var(--target-min) / 2);
 }
 
 .fieldExpanded .suggestList {
@@ -277,23 +269,17 @@
   border: none;
 }
 
-/* Divider lives on this wrapper, never the fieldset itself: a fieldset
-   with any border renders its <legend> straddling that border line.
-   Duplicated in RouteStats.module.css (margins differ on purpose). */
+/* Divider on this wrapper, never the fieldset itself (see shared). */
 .sectionDivider {
+  composes: sectionDivider from '../shared.module.css';
   margin-top: var(--space-xl);
   margin-bottom: var(--space-xl);
-  padding-top: var(--space-xl);
-  border-top: 1px solid var(--line);
 }
 
-.presetGroup legend {
+.presetLegend {
+  composes: sectionLabel from '../shared.module.css';
   padding: 0;
   margin-bottom: var(--space-sm);
-  font-size: var(--section-label-size);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text);
 }
 
 .segmented {
@@ -328,7 +314,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 44px;
+  min-height: var(--target-min);
   border-radius: 0;
   font-size: var(--font-size-sm);
   color: var(--muted);
@@ -349,8 +335,10 @@
   }
 }
 
+/* Re-drawn on the label because the real radio is invisible; same values
+   as the global :focus-visible ring in base.css. */
 .segmentInput:focus-visible + .segmentText {
-  outline: 2px solid var(--focus);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -400,19 +388,12 @@
 .numberHighlight {
   color: var(--text);
   font-weight: 600;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
 }
 
-/* Keep in sync with .error above (only margins differ) and RouteStats'
-   .disclaimer. */
 .lowShadeNote {
+  composes: notice;
   margin: var(--space-md) 0 0;
-  padding: var(--space-sm) var(--control-pad-x);
-  background: var(--panel-raised);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--magenta);
-  font-size: var(--font-size-sm);
-  color: var(--text);
 }
 
 .lowShadeEmpty {
@@ -427,7 +408,7 @@
   }
 
   .addressField {
-    --field-gap: 4px;
+    --field-gap: var(--space-xs);
   }
 
   .sectionDivider {
@@ -436,10 +417,21 @@
     padding-top: var(--space-lg);
   }
 
-  /* Collapsed labels hide (the A/B chip is the field's identity; inputs
-     keep their aria-labels). The expanded overlay keeps its label. */
-  .fieldHead label {
-    display: none;
+  /* Collapsed labels go visually hidden, not display:none — the <label>
+     is the input's only accessible name (the A/B chip is the visual
+     identity). The expanded overlay keeps its label on screen. Same
+     declarations as shared.module.css's .visuallyHidden: composes can't
+     target a rule inside a media block, so this is the one hand copy. */
+  .fieldHead .fieldLabel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .fieldMarker {
@@ -456,6 +448,6 @@
   }
 
   .fieldExpanded .fieldMarker {
-    top: 22px;
+    top: calc(var(--target-min) / 2);
   }
 }

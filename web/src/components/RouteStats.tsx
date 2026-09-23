@@ -208,7 +208,16 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
                 label overlaid, above, and colored): the vine alone is the
                 pending state -- motion with a direction reads as work, and
                 the visually-hidden sentence above keeps the spoken
-                announcement intact. */}
+                announcement intact. The ONE exception is reduced motion,
+                where there is no motion to read as work and a still vine
+                is just decoration: CSS swaps the vine for this plain line
+                (user call 2026-09-23; until then the block sat at
+                opacity 0 for the whole wait, a static opacity the
+                cancelled animation never lifted). aria-hidden with the
+                rest of the block — the sentence above is the spoken one. */}
+            <p className={styles.loadingText}>
+              <span>&gt; </span>finding your route…
+            </p>
             <div className={styles.vineStage}>
               <svg viewBox="0 0 520 64" preserveAspectRatio="none" className={styles.vineSvg}>
                 {/* One vine (tried three 2026-09-01, walked back same day —
@@ -340,22 +349,23 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
       </h2>
       <div className={styles.section}>
         {/* Label above value (user call 2026-08-28), eta leading — the
-            question a walker asks first. DOM order matches visual order,
-            so screen readers also announce label-then-value. A real
-            <dl> since 2026-08-30: these are key-value pairs, and dt/dd
-            gives AT the term-to-value association the old spans only
-            implied by proximity (each pair wrapped in a div, which HTML
-            allows inside <dl> exactly for this styling shape). */}
-        <dl className={styles.statRow}>
-          <div className={styles.stat}>
-            {/* All four dt labels are aria-hidden: each dd speaks a
-                self-contained phrase ("74 percent shaded"), so the stats
-                announce as one clean stream instead of label-number
-                fragments (VoiceOver pass, 2026-08-31). */}
-            <dt className={styles.statLabel} aria-hidden="true">eta</dt>
+            question a walker asks first. A plain named list, not a <dl>:
+            it WAS a definition list (2026-08-30 to 2026-09-09), but every
+            <dt> was aria-hidden, so the term-to-value pairing a <dl>
+            promises never reached AT — each value speaks a self-contained
+            phrase ("74 percent shaded") instead, a VoiceOver-pass call
+            (2026-08-31: "eta" read as a word, and the values stand on
+            their own). The markup now claims exactly that: four items.
+            role="list" because .statRow sets list-style: none, which
+            strips the role in Safari (same as the directions list). */}
+        <ul className={styles.statRow} role="list" aria-label="Route stats">
+          <li className={styles.stat}>
+            {/* The visible labels are aria-hidden (see above); each value
+                carries its own spoken twin with full words. */}
+            <span className={styles.statLabel} aria-hidden="true">eta</span>
             {/* The compact visual ("2 hr 9 min") is aria-hidden; the
                 sr-only twin speaks full words. Same pattern on distance. */}
-            <dd className={styles.statVal}>
+            <span className={styles.statVal}>
               <span aria-hidden="true">
                 {formatEtaParts(stats.minutes).map((part, i) => (
                   <Fragment key={part.unit}>
@@ -366,23 +376,23 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
                 ))}
               </span>
               <span className={styles.visuallyHidden}>{spokenEta(stats.minutes)}</span>
-            </dd>
-          </div>
-          <div className={styles.stat}>
+            </span>
+          </li>
+          <li className={styles.stat}>
             {/* Unit in the same lighter <small> the eta box's "min" gets --
                 the value is the datum, the unit is context. */}
-            <dt className={styles.statLabel} aria-hidden="true">distance</dt>
-            <dd className={styles.statVal}>
+            <span className={styles.statLabel} aria-hidden="true">distance</span>
+            <span className={styles.statVal}>
               <span aria-hidden="true">
                 {dist.value}
                 <small> {dist.unit}</small>
               </span>
               <span className={styles.visuallyHidden}>{spokenDistance(stats.length_m)}</span>
-            </dd>
-          </div>
-          <div className={styles.stat}>
-            <dt className={styles.statLabel} aria-hidden="true">shaded</dt>
-            <dd className={styles.statVal}>
+            </span>
+          </li>
+          <li className={styles.stat}>
+            <span className={styles.statLabel} aria-hidden="true">shaded</span>
+            <span className={styles.statVal}>
               {/* Same <small> treatment AND same leading space as eta's
                   "min" and distance's "mi" -- the unit gap matches across
                   all three boxes (user call, 2026-08-31). */}
@@ -391,20 +401,20 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
                 <small> %</small>
               </span>
               <span className={styles.visuallyHidden}>{shownShadePct} percent shaded</span>
-            </dd>
-          </div>
+            </span>
+          </li>
           {stats.park_canopy_share < CANOPY_SHARE_HIDES_TREE_COUNT && (
-            <div className={styles.stat}>
-              <dt className={styles.statLabel} aria-hidden="true">trees</dt>
-              <dd className={styles.statVal}>
+            <li className={styles.stat}>
+              <span className={styles.statLabel} aria-hidden="true">trees</span>
+              <span className={styles.statVal}>
                 <span aria-hidden="true">{stats.tree_count}</span>
                 <span className={styles.visuallyHidden}>
                   {`${stats.tree_count} ${stats.tree_count === 1 ? 'tree' : 'trees'}`}
                 </span>
-              </dd>
-            </div>
+              </span>
+            </li>
           )}
-        </dl>
+        </ul>
 
 
         <div className={styles.directionsGroup}>

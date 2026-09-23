@@ -171,6 +171,24 @@ test.describe('forced colors', () => {
   })
 })
 
+test.describe('reduced motion', () => {
+  test.use({ reducedMotion: 'reduce' })
+  test('the pending state is visible: a plain line stands in for the vine', async ({ page }) => {
+    await mockGeocode(page)
+    // Never fulfilled: the pending state stays up for the whole check.
+    await page.route('**/route?*', () => {})
+    await page.goto(routeUrl(POINT_A, POINT_B))
+    // The regression this pins (2026-09-23): base.css cancels every
+    // animation under reduced motion, and the block used to START at
+    // opacity 0 and rely on one to appear — so these users saw nothing
+    // for the whole wait. The vine (a still squiggle, once frozen) is
+    // swapped for text; the spoken sentence is unchanged.
+    await expect(page.getByText('> finding your route…')).toBeVisible()
+    await expect(page.locator('[class*="vineStage"]')).toBeHidden()
+    await expect(page.getByText('Finding your route…')).toBeAttached()
+  })
+})
+
 test('out-of-coverage rejection has no violations', async ({ page }) => {
   // Same reason as the "a drawn route" test above -- start/end from
   // routeUrl() now reverse-geocodes on load regardless of coverage.

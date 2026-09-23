@@ -21,23 +21,15 @@
 }
 
 .visuallyHidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+  composes: visuallyHidden from '../shared.module.css';
 }
 
 .navLink {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
   padding: var(--space-sm);
   font-size: var(--font-size-sm);
   letter-spacing: 0.1em;
@@ -62,7 +54,7 @@
 
 .title {
   margin: 0;
-  font-size: 1.7rem; /* ~27px */
+  font-size: var(--font-size-display);
   /* Explicit weight: the map page renders this as <h1> (default bold),
      About as <p> (default 400). */
   font-weight: 700;

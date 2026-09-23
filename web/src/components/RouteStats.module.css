@@ -1,13 +1,5 @@
 .visuallyHidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+  composes: visuallyHidden from '../shared.module.css';
 }
 
 .section {
@@ -16,15 +8,12 @@
   gap: var(--space-lg);
 }
 
-/* Explicit font-weight: <h2> carries a bold browser default that the
-   matching label/legend styles in Controls don't. */
+/* Explicit font-weight: <h2>/<h3> carry a bold browser default that the
+   matching label/legend in Controls don't. */
 .sectionTitle {
+  composes: sectionLabel from '../shared.module.css';
   margin: 0 0 var(--space-sm);
-  font-size: var(--section-label-size);
   font-weight: normal;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text);
 }
 
 .directionsGroup {
@@ -34,24 +23,24 @@
 }
 
 .subTitle {
+  composes: sectionLabel from '../shared.module.css';
   margin: 0;
-  font-size: var(--section-label-size);
   font-weight: normal;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text);
 }
 
-/* Padding-only, unlike Controls' margin-carrying twin: this wraps the
-   always-mounted aria-live region, whose spacing when empty must be zero. */
+/* No margins, unlike Controls' twin: this wraps the always-mounted
+   aria-live region, whose spacing when empty must be zero. */
 .sectionDivider {
-  padding-top: var(--space-xl);
-  border-top: 1px solid var(--line);
+  composes: sectionDivider from '../shared.module.css';
 }
 
+/* list-style: none strips list semantics in Safari; the <ul> carries
+   role="list" — don't remove one without the other. */
 .statRow {
   display: flex;
   margin: 0;
+  padding: 0;
+  list-style: none;
   border: 1px solid var(--green-dim);
   background: var(--green-wash);
 }
@@ -71,8 +60,7 @@
 
 .statVal {
   display: block;
-  margin: 0; /* zero the <dd> inline-start indent */
-  font-size: 1.1875rem; /* 19px */
+  font-size: var(--font-size-lg);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--green-dim);
@@ -170,19 +158,32 @@
   text-underline-offset: 2px;
 }
 
-/* The 250ms delay keeps fast responses from flashing the pending state. */
+/* The 250ms delay keeps fast responses from flashing the pending state.
+   No static opacity here: the keyframes own both ends and `both` holds
+   the from-frame through the delay — so when base.css cancels the
+   animation under reduced motion, the block is simply visible (a static
+   opacity: 0 left it invisible for the whole wait). */
 .loadingBlock {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
-  opacity: 0;
-  animation: loading-appear 0.15s ease-out 0.25s forwards;
+  animation: loading-appear 0.15s ease-out 0.25s both;
 }
 
 @keyframes loading-appear {
+  from {
+    opacity: 0;
+  }
+
   to {
     opacity: 1;
   }
+}
+
+/* Reduced-motion stand-in for the vine; see the media block below. */
+.loadingText {
+  composes: description;
+  display: none;
 }
 
 .vineStage {
@@ -313,20 +314,16 @@
   96%, 100% { opacity: 0; }
 }
 
+/* No motion means no vine: a still squiggle reads as decoration, not
+   work. One plain line takes its place. (base.css already cancels every
+   animation, so nothing here needs to.) */
 @media (prefers-reduced-motion: reduce) {
-  /* Target the .vl* classes where the animations live — overriding via a
-     different class on the same element is order-dependent (the prod
-     leaf bug). The fully-grown vine still reads as "busy". */
-  .vinePath,
-  .vl1,
-  .vl2,
-  .vl3,
-  .vl4,
-  .vl5,
-  .vl6,
-  .vl7,
-  .vl8 {
-    animation: none;
+  .vineStage {
+    display: none;
+  }
+
+  .loadingText {
+    display: block;
   }
 }
 
@@ -359,7 +356,7 @@
   justify-content: center;
   gap: var(--space-sm);
   width: 100%;
-  min-height: 44px;
+  min-height: var(--target-min);
   margin: 0;
   padding: var(--space-sm) var(--space-md);
   background: var(--panel-raised);

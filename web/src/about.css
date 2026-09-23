@@ -1,40 +1,25 @@
-/* The About page's own styles, layered on the shared Greenhouse tokens.
-   A second React ENTRY since 2026-09-01 (was plain HTML from 2026-08-30;
-   reversed so the header is the same component the map page renders —
-   see src/about.tsx). Still no router: vite.config.ts builds about.html
-   as its own entry. The header's styles live in Header.module.css; this
-   file covers only the prose + footer. */
-@import './index.css';
-
-/* About is a normal scrolling DOCUMENT. index.css (imported above for the
-   tokens) pins html/body to the viewport with overflow:hidden — right for
-   the app's fixed screen, but it clipped this page's scroll entirely when
-   it landed 2026-08-31 (caught live 2026-09-01, first night on the
-   domain). Restore the browser defaults; about.html has no #root, so the
-   app's layout rules have nothing else to grab here. */
-html,
-body {
-  height: auto;
-  overflow: visible;
-}
+/* The About page's own styles, on the shared tokens + baseline. A second
+   React entry (src/about.tsx) so the header is the same component the
+   map page renders; no router, vite.config.ts builds about.html as its
+   own entry. Header styles live in Header.module.css; this file covers
+   only the prose + footer. About is a normal scrolling document, which
+   is why it imports base.css and NOT index.css (the app shell pins
+   html/body to the viewport). */
+@import './base.css';
 
 .page {
   /* Prose measure: readable line length, not app-panel width. */
   max-width: 640px;
   margin: 0 auto;
-  padding: var(--space-2xl) var(--space-xl); /* bottom matches top (user call) */
-  /* The same proportional face the app's stat readouts use (see
-     web/CLAUDE.md's mono exception: readouts, not terminal voice).
-     Long-form prose is the least terminal-chrome thing in the product,
-     and paragraphs of monospace genuinely read worse (user call
-     2026-08-30). The header and back links above/below stay mono; the
-     reading stays sans. */
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  padding: var(--space-2xl) var(--space-xl); /* bottom matches top */
+  /* Long-form prose is the least terminal-chrome thing in the product;
+     the header and back links above/below stay mono. */
+  font-family: var(--font-sans);
 }
 
 .page h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: var(--font-size-xl);
   font-weight: 650;
 }
 
@@ -42,12 +27,11 @@ body {
   margin-top: var(--space-2xl);
 }
 
-/* Plain-language headings (user call 2026-08-30 -- the terminal
-   //snake_case voice stays in the app chrome; this page speaks like a
-   person). */
+/* Plain-language headings: the terminal //snake_case voice stays in the
+   app chrome; this page speaks like a person. */
 .page h2 {
   margin: 0 0 var(--space-md);
-  font-size: 1.05rem;
+  font-size: 1rem; /* the browser default; was 1.05rem, a 0.8px step nothing could see */
   font-weight: 600;
   color: var(--text);
 }
@@ -101,9 +85,8 @@ body {
 /* Fragment-jump targets (AboutPage focuses location.hash's section after
    render so the reading/tab position moves with the scroll): keep the
    focus, hide the ring — a border around a whole prose section reads as
-   selection, not location (user call 2026-09-02). Only suppresses
-   script-focusable targets; real interactive elements keep index.css's
-   global :focus-visible ring. */
+   selection, not location. Only suppresses script-focusable targets;
+   real interactive elements keep base.css's global :focus-visible ring. */
 [tabindex='-1']:focus-visible {
   outline: none;
 }

@@ -342,8 +342,8 @@ function AddressField({
    * labels are dropped (user call 2026-09-03, reclaiming panel height)
    * the chip is the field's identity, echoing the map's A/B markers so
    * field and marker read as the same object. Desktop keeps the labels
-   * and hides the chip. aria-hidden: the input's aria-label speaks the
-   * name at every width. */
+   * and hides the chip. aria-hidden: the <label> names the input at
+   * every width (visually hidden on phones, never display:none). */
   marker: string
   example: string
   field: ReturnType<typeof useAddressField>
@@ -509,7 +509,17 @@ function AddressField({
           it always did as a direct flex child; as a flex row only when
           expanded, to seat CANCEL beside it. */}
       <div className={expanded ? styles.expandedHead : styles.fieldHead}>
-        <label htmlFor={id}>{label}</label>
+        {/* The label IS the input's accessible name (native <label>, no
+            aria-label on the input — craftsmanship review 2026-09-09).
+            Twin spans, the app's one technique for the terminal voice:
+            the screen shows "Start_point", the spoken form drops the
+            underscore ("Start underscore point" otherwise — VoiceOver
+            pass 2026-08-31). Same split as the Shade_walker wordmark and
+            the Shade_priority legend. */}
+        <label htmlFor={id} className={styles.fieldLabel}>
+          <span aria-hidden="true">{label}</span>
+          <span className={styles.visuallyHidden}>{spokenLabel}</span>
+        </label>
         {expanded && (
           /* mousedown preventDefault: same trick as the options below —
              keep the tap from blurring the input first, so this click is
@@ -535,11 +545,6 @@ function AddressField({
           ref={inputRef}
           className={styles.addressInput}
           type="text"
-          /* Spoken name drops the underscore ("Start point", not "Start
-             underscore point") -- the terminal voice is visual chrome,
-             not pronunciation (VoiceOver pass, 2026-08-31). Same split
-             as the Shade_walker wordmark. */
-          aria-label={spokenLabel}
           value={field.query}
           // Off, not "street-address": the browser's own autofill dropdown
           // would paint directly over our listbox, and the ARIA combobox
@@ -884,7 +889,7 @@ export function Controls({
             a slightly odd screen-reader pronunciation). No ARIA needed — the
             built-in semantics do it. */}
         <fieldset className={styles.presetGroup}>
-          <legend>
+          <legend className={styles.presetLegend}>
             <span aria-hidden="true">Shade_priority</span>
             <span className={styles.visuallyHidden}>Shade priority</span>
           </legend>
@@ -894,16 +899,19 @@ export function Controls({
                 <input
                   type="radio"
                   name={groupName}
-                  aria-label={preset.spoken}
                   value={preset.value}
                   checked={treeWeight === preset.value}
                   onChange={() => onTreeWeightChange(preset.value)}
                   className={styles.segmentInput}
                 />
-                {/* aria-hidden: the radio's aria-label ("Medium") is the one
-                    spoken name -- without this, VoiceOver ALSO read the
-                    visible caps text, spelling L-O-W and doubling MED. */}
+                {/* The wrapping <label> names the radio, twin-span style:
+                    the visible caps text is aria-hidden (VoiceOver spelled
+                    L-O-W and read MED as a word) and the hidden span
+                    speaks `preset.spoken` ("Medium"). One spoken name, from
+                    native labelling — no aria-label on the input
+                    (craftsmanship review 2026-09-09). */}
                 <span className={styles.segmentText} aria-hidden="true">{preset.label}</span>
+                <span className={styles.visuallyHidden}>{preset.spoken}</span>
               </label>
             ))}
           </div>
