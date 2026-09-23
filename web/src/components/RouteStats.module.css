@@ -447,6 +447,7 @@
   grid-template-columns: max-content 1fr;
   column-gap: 6px;
   font-size: var(--font-size-sm);
+  font-style: italic;
   line-height: 1.6;
   color: var(--text);
 }

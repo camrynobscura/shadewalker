@@ -363,16 +363,24 @@ export function MapView({
             "casing" underneath plus the crisp line on top — the cheap way to
             fake the Greenhouse glow (SVG strokes can't blur). Colour comes
             from the className (MapView.module.css, on the theme tokens);
-            pathOptions carries only geometry. */}
+            pathOptions carries only geometry.
+            className MUST be a top-level prop, never inside pathOptions:
+            top-level props reach Leaflet's constructor, so the class is on
+            the SVG element when it's created; pathOptions goes through
+            setStyle() after the layer is added, which never touches the
+            class. StrictMode's double mount hid that in dev — production
+            shipped blue routes (2026-09-23). */}
         {baseline && (
           <>
             <Polyline
               positions={toLatLngs(baseline)}
-              pathOptions={{ className: styles.routeBaseline, weight: 9, opacity: 0.15 }}
+              className={styles.routeBaseline}
+              pathOptions={{ weight: 9, opacity: 0.15 }}
             />
             <Polyline
               positions={toLatLngs(baseline)}
-              pathOptions={{ className: styles.routeBaseline, weight: 3, dashArray: '6 8', opacity: 0.85 }}
+              className={styles.routeBaseline}
+              pathOptions={{ weight: 3, dashArray: '6 8', opacity: 0.85 }}
             />
           </>
         )}
@@ -380,11 +388,13 @@ export function MapView({
           <>
             <Polyline
               positions={toLatLngs(selected)}
-              pathOptions={{ className: styles.routeSelected, weight: 11, opacity: 0.2 }}
+              className={styles.routeSelected}
+              pathOptions={{ weight: 11, opacity: 0.2 }}
             />
             <Polyline
               positions={toLatLngs(selected)}
-              pathOptions={{ className: styles.routeSelected, weight: 4.5, opacity: 0.95 }}
+              className={styles.routeSelected}
+              pathOptions={{ weight: 4.5, opacity: 0.95 }}
             />
           </>
         )}
@@ -404,12 +414,14 @@ export function MapView({
             <Circle
               center={[position.lat, position.lon]}
               radius={position.accuracy}
-              pathOptions={{ className: styles.locationHalo, weight: 1, opacity: 0.4, fillOpacity: 0.08 }}
+              className={styles.locationHalo}
+              pathOptions={{ weight: 1, opacity: 0.4, fillOpacity: 0.08 }}
             />
             <CircleMarker
               center={[position.lat, position.lon]}
               radius={7}
-              pathOptions={{ className: styles.locationDot, weight: 2, fillOpacity: 1 }}
+              className={styles.locationDot}
+              pathOptions={{ weight: 2, fillOpacity: 1 }}
             />
           </>
         )}
