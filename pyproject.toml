@@ -17,6 +17,7 @@ dependencies = [
     "requests>=2.34.2",
     "shapely>=2.1.2",
     "slowapi>=0.1.10",
+    "tzdata>=2026.3",
     "uvicorn>=0.52.4",
 ]
 
@@ -26,6 +27,7 @@ dependencies = [
 # server/ imports any of these -- kept off the production box by
 # `uv sync --no-default-groups`.
 pipeline = [
+    "astral>=3.2",
     "geopandas>=1.1.4",
     # Reads the pinned .pbf in pipeline/graph/pedestrian.py -- a runtime
     # dependency of the pipeline, not just of the tools/audit/ scripts it

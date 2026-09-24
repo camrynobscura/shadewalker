@@ -645,9 +645,71 @@ BOUNDARIES_DATASET_ID = "wh2p-dxnf" # Borough Boundaries (water areas included) 
                                      # that silently severed every inter-borough bridge crossing.
                                      # This version's water jurisdiction still stops at the state
                                      # line (verified: NJ side of the GWB, mid-Hudson excluded).
+BUILDINGS_DATASET_ID = "5zhs-2jue" # Building Footprints (OTI) -- the building-shade layer's
+                                     # heights and outlines; see the "Building footprints" block
 SOCRATA_PAGE_SIZE = 50_000          # rows per request (underscores are just digit separators)
 
 # Optional — unset means anonymous requests (fine at pilot-tile scale, risks
 # throttling at borough+ scale). Set as a real env var, never committed;
 # get one from data.cityofnewyork.us (see README).
 SOCRATA_APP_TOKEN = os.environ.get("SOCRATA_APP_TOKEN")
+
+
+# ── Sun (building shade) ──────────────────────────────────────────────────────
+
+# Where the sun table is computed from. ONE point for the whole city: the
+# centre of CITY_BBOX. Measured 2026-09-24 (pipeline/sun.py's test pins
+# it): across all 146 daylight anchor slots the four bbox corners differ
+# from this point by at most 0.31 deg in elevation and 1.00 deg in
+# azimuth. A 1 deg bearing error moves a shadow sideways by 1.7% of its
+# length -- 6 cm at the pilot's median 3.4 m wall distance, under one 2 m
+# raster cell at a 100 m reach -- so per-borough tables would buy nothing
+# the raster could resolve.
+SUN_OBSERVER_LAT = (CITY_BBOX.lat_min + CITY_BBOX.lat_max) / 2   # 40.696
+SUN_OBSERVER_LON = (CITY_BBOX.lon_min + CITY_BBOX.lon_max) / 2   # -73.970
+
+# A slot is (month, hour): the sun on the 15th of the month, on the hour,
+# New York clock time. The 15th falls after both DST transitions (second
+# Sunday of March, first Sunday of November), so every anchor is a plain
+# clock hour. The year is FIXED so a rebuild reproduces the same table:
+# the same anchor drifts ~0.04 deg/year with the leap cycle (July 15
+# 13:00: 70.706 / 70.744 / 70.782 deg for 2025/26/27), enough to make two
+# builds' shade tables differ for no reason worth chasing.
+SUN_ANCHOR_YEAR = 2026
+SUN_ANCHOR_DAY = 15
+SUN_TIMEZONE = "America/New_York"
+
+
+# ── Building footprints (building shade) ──────────────────────────────────────
+
+# Bumped whenever the fetched columns change; part of the cache file name
+# (the TREE_CACHE_VERSION idiom) so an old download can never be read as
+# the new shape. Deleting the file is the routine cache bust (REFETCH.md);
+# the dataset itself updates daily.
+BUILDINGS_CACHE_VERSION = 1
+
+# `height_roof` is FEET above the building's own ground. Rows above this
+# are DROPPED, not clipped: a value this large is a data error, and a
+# clipped one would still throw a 1,600 ft shadow from what is really a
+# small building. 1,600 ft is above every real roof in the city (Central
+# Park Tower, 1,550 ft, is the tallest; nothing taller is built or
+# approved) so only garbage crosses it. Measured 2026-09-24 on the live
+# dataset (1,083,047 rows): exactly ONE row exceeds it -- BIN 2130353,
+# whose height_roof is 2,130,353, i.e. its own BIN pasted into the height
+# column. The same one-bad-record logic as DBH_CAP_IN for trees.
+BUILDING_HEIGHT_CAP_FT = 1600
+
+# `last_status_type` values whose building is recorded as GONE. Measured
+# 2026-09-24: "Demolition" 13 rows (10-35 ft). The two look-alikes are
+# KEPT because the building still stands when they are set: "Marked for
+# Demolition" 68 rows (0-70 ft) and "Investigate Demolition" 7 rows
+# (0-50 ft). All 88 have geometry. At these heights the choice moves a
+# handful of low-rise shadows either way.
+BUILDING_EXCLUDED_STATUSES = frozenset({"Demolition"})
+
+# `feature_code` 1003 = "Placeholder": a stand-in record, not a surveyed
+# outline. 30 rows measured 2026-09-24: 23 already have a non-positive
+# height, so only the other 7 (12-225 ft) reach this rule.
+# Every other code is kept -- garages (5110), gas-station canopies
+# (1001), skybridges (2110) and cantilevers (1006) all cast shade.
+BUILDING_EXCLUDED_FEATURE_CODES = frozenset({"1003"})
