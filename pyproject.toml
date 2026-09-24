@@ -18,7 +18,7 @@ dependencies = [
     "shapely>=2.1.2",
     "slowapi>=0.1.10",
     "tzdata>=2026.3",
-    "uvicorn>=0.52.4",
+    "uvicorn>=0.53.0",
 ]
 
 [dependency-groups]
