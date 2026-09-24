@@ -645,9 +645,128 @@ BOUNDARIES_DATASET_ID = "wh2p-dxnf" # Borough Boundaries (water areas included) 
                                      # that silently severed every inter-borough bridge crossing.
                                      # This version's water jurisdiction still stops at the state
                                      # line (verified: NJ side of the GWB, mid-Hudson excluded).
+BUILDINGS_DATASET_ID = "5zhs-2jue" # Building Footprints (OTI) -- the building-shade layer's
+                                     # heights and outlines; see the "Building footprints" block
 SOCRATA_PAGE_SIZE = 50_000          # rows per request (underscores are just digit separators)
 
 # Optional — unset means anonymous requests (fine at pilot-tile scale, risks
 # throttling at borough+ scale). Set as a real env var, never committed;
 # get one from data.cityofnewyork.us (see README).
 SOCRATA_APP_TOKEN = os.environ.get("SOCRATA_APP_TOKEN")
+
+
+# ── Sun (building shade) ──────────────────────────────────────────────────────
+
+# Where the sun table is computed from. ONE point for the whole city: the
+# centre of CITY_BBOX. Measured 2026-09-24 (pipeline/sun.py's test pins
+# it): across all 146 daylight anchor slots the four bbox corners differ
+# from this point by at most 0.31 deg in elevation and 1.00 deg in
+# azimuth. A 1 deg bearing error moves a shadow sideways by 1.7% of its
+# length -- 6 cm at the pilot's median 3.4 m wall distance, under one 2 m
+# raster cell at a 100 m reach -- so per-borough tables would buy nothing
+# the raster could resolve.
+SUN_OBSERVER_LAT = (CITY_BBOX.lat_min + CITY_BBOX.lat_max) / 2   # 40.696
+SUN_OBSERVER_LON = (CITY_BBOX.lon_min + CITY_BBOX.lon_max) / 2   # -73.970
+
+# A slot is (month, hour): the sun on the 15th of the month, on the hour,
+# New York clock time. The 15th falls after both DST transitions (second
+# Sunday of March, first Sunday of November), so every anchor is a plain
+# clock hour. The year is FIXED so a rebuild reproduces the same table:
+# the same anchor drifts ~0.04 deg/year with the leap cycle (July 15
+# 13:00: 70.706 / 70.744 / 70.782 deg for 2025/26/27), enough to make two
+# builds' shade tables differ for no reason worth chasing.
+SUN_ANCHOR_YEAR = 2026
+SUN_ANCHOR_DAY = 15
+SUN_TIMEZONE = "America/New_York"
+
+
+# ── Building footprints (building shade) ──────────────────────────────────────
+
+# Bumped whenever the fetched columns change; part of the cache file name
+# (the TREE_CACHE_VERSION idiom) so an old download can never be read as
+# the new shape. Deleting the file is the routine cache bust (REFETCH.md);
+# the dataset itself updates daily.
+BUILDINGS_CACHE_VERSION = 1
+
+# `height_roof` is FEET above the building's own ground. Rows above this
+# are DROPPED, not clipped: a value this large is a data error, and a
+# clipped one would still throw a 1,600 ft shadow from what is really a
+# small building. 1,600 ft is above every real roof in the city (Central
+# Park Tower, 1,550 ft, is the tallest; nothing taller is built or
+# approved) so only garbage crosses it. Measured 2026-09-24 on the live
+# dataset (1,083,047 rows): exactly ONE row exceeds it -- BIN 2130353,
+# whose height_roof is 2,130,353, i.e. its own BIN pasted into the height
+# column. The same one-bad-record logic as DBH_CAP_IN for trees.
+BUILDING_HEIGHT_CAP_FT = 1600
+
+# `last_status_type` values whose building is recorded as GONE. Measured
+# 2026-09-24: "Demolition" 13 rows (10-35 ft). The two look-alikes are
+# KEPT because the building still stands when they are set: "Marked for
+# Demolition" 68 rows (0-70 ft) and "Investigate Demolition" 7 rows
+# (0-50 ft). All 88 have geometry. At these heights the choice moves a
+# handful of low-rise shadows either way.
+BUILDING_EXCLUDED_STATUSES = frozenset({"Demolition"})
+
+# `feature_code` 1003 = "Placeholder": a stand-in record, not a surveyed
+# outline. 30 rows measured 2026-09-24: 23 already have a non-positive
+# height, so only the other 7 (12-225 ft) reach this rule.
+# Every other code is kept -- garages (5110), gas-station canopies
+# (1001), skybridges (2110) and cantilevers (1006) all cast shade.
+BUILDING_EXCLUDED_FEATURE_CODES = frozenset({"1003"})
+
+
+# ── Building shade (engine) ───────────────────────────────────────────────────
+# pipeline/scoring/shadows.py. Values marked GATE 1 are provisional until
+# tools/audit/measure_shadow_feasibility.py has measured them (PLAN
+# `building-shadows`); the design and its measurements: BUILDING-SHADOWS.md.
+
+# Along each edge, one slice per this many metres, sampled at slice centres
+# (the blockface.py rule -- never a midpoint). GATE 1, kept at 5 m
+# (2026-09-24) pending the five-area 2 m vs 5 m comparison in the
+# feasibility report; 2 m costs 2.4x the build time.
+SHADOW_SAMPLE_STEP_M = 5.0
+
+# Across each slice, three points: the line itself and +/- half the tree
+# layer's walker strip, so both layers are measured over the same 2 m band
+# and the display curve's lane-choice credit applies once. A slice reads
+# 0, 1/3, 2/3 or 1.
+SHADOW_STRIP_OFFSETS_M = (-CANOPY_SAMPLE_STRIP_M / 2, 0.0, CANOPY_SAMPLE_STRIP_M / 2)
+
+# The obstacle-height raster the march runs on (named for what it holds,
+# not "building height": tree crowns could join it later). Cell size sets
+# the positional error of a shadow's edge, about one cell plus one march
+# hop -- and noon shadows in low-rise Brooklyn are only ~4 m long, so
+# this is not a detail. GATE 1, decided 2026-09-24 on
+# tools/audit/measure_shadow_feasibility.py (five areas; pilot shown,
+# July 13:00, three-across points, against the exact sweep engine):
+#   cell / hop      points agree   sidewalks (exact 20.0%)   citywide h
+#   2 / 2              95.2%             15.5%                  1.8
+#   1 / 0.5            98.2%             18.8%                  2.8
+#   0.5 / 0.5          98.7%             18.8%                  2.7
+#   0.5 / 0.25         99.0%             19.4%                  3.9   <- chosen
+#   0.25 / 0.25        99.3%             19.4%                  4.3
+# Cost follows the hop, not the cell; past 0.5 / 0.25 the curve is flat.
+# The table is rebuilt monthly with the pipeline, so hours are recurring.
+SHADOW_CELL_M = 0.5
+SHADOW_MARCH_STEP_M = 0.25
+
+# Buildings up to this height are answered by the raster march; taller
+# ones ALSO get the exact swept-polygon path, because their shadows at low
+# sun outrun any sensible march. 300 ft; 1,092 footprints exceed it
+# (measured 2026-09-24).
+SHADOW_RASTER_HEIGHT_CAP_M = 300 * 0.3048
+
+# No shadow is followed further than this from the point, by either path.
+# Beyond it a point reads unshaded even if a distant tower would shade it
+# at very low sun. GATE 1, kept (2026-09-24): the cap only binds with the
+# sun under ~5 deg (13 of 146 slots) and changes points only under 1.5 deg
+# (4 slots, when the city is already ~99% shaded): 0 points in Midtown,
+# <= 0.6% in the pilot at a 5 km reach. Uncapping costs memory, not time
+# -- every tile would load buildings 5 km around it (2-2.6 GB grids).
+SHADOW_MAX_REACH_M = 1000.0
+
+# The engine works one square tile of sample points at a time, rasterizing
+# the buildings within the tile plus a SHADOW_MAX_REACH_M margin, so a
+# shadow crossing a tile edge is still seen. Memory per tile at 0.5 m
+# cells: ((4000 + 2 x 1000) / 0.5)^2 x 4 bytes = 576 MB.
+SHADOW_TILE_M = 4000.0
