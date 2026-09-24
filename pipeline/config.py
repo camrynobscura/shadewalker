@@ -713,3 +713,60 @@ BUILDING_EXCLUDED_STATUSES = frozenset({"Demolition"})
 # Every other code is kept -- garages (5110), gas-station canopies
 # (1001), skybridges (2110) and cantilevers (1006) all cast shade.
 BUILDING_EXCLUDED_FEATURE_CODES = frozenset({"1003"})
+
+
+# ── Building shade (engine) ───────────────────────────────────────────────────
+# pipeline/scoring/shadows.py. Values marked GATE 1 are provisional until
+# tools/audit/measure_shadow_feasibility.py has measured them (PLAN
+# `building-shadows`); the design and its measurements: BUILDING-SHADOWS.md.
+
+# Along each edge, one slice per this many metres, sampled at slice centres
+# (the blockface.py rule -- never a midpoint). GATE 1, kept at 5 m
+# (2026-09-24) pending the five-area 2 m vs 5 m comparison in the
+# feasibility report; 2 m costs 2.4x the build time.
+SHADOW_SAMPLE_STEP_M = 5.0
+
+# Across each slice, three points: the line itself and +/- half the tree
+# layer's walker strip, so both layers are measured over the same 2 m band
+# and the display curve's lane-choice credit applies once. A slice reads
+# 0, 1/3, 2/3 or 1.
+SHADOW_STRIP_OFFSETS_M = (-CANOPY_SAMPLE_STRIP_M / 2, 0.0, CANOPY_SAMPLE_STRIP_M / 2)
+
+# The obstacle-height raster the march runs on (named for what it holds,
+# not "building height": tree crowns could join it later). Cell size sets
+# the positional error of a shadow's edge, about one cell plus one march
+# hop -- and noon shadows in low-rise Brooklyn are only ~4 m long, so
+# this is not a detail. GATE 1, decided 2026-09-24 on
+# tools/audit/measure_shadow_feasibility.py (five areas; pilot shown,
+# July 13:00, three-across points, against the exact sweep engine):
+#   cell / hop      points agree   sidewalks (exact 20.0%)   citywide h
+#   2 / 2              95.2%             15.5%                  1.8
+#   1 / 0.5            98.2%             18.8%                  2.8
+#   0.5 / 0.5          98.7%             18.8%                  2.7
+#   0.5 / 0.25         99.0%             19.4%                  3.9   <- chosen
+#   0.25 / 0.25        99.3%             19.4%                  4.3
+# Cost follows the hop, not the cell; past 0.5 / 0.25 the curve is flat.
+# The table is rebuilt monthly with the pipeline, so hours are recurring.
+SHADOW_CELL_M = 0.5
+SHADOW_MARCH_STEP_M = 0.25
+
+# Buildings up to this height are answered by the raster march; taller
+# ones ALSO get the exact swept-polygon path, because their shadows at low
+# sun outrun any sensible march. 300 ft; 1,092 footprints exceed it
+# (measured 2026-09-24).
+SHADOW_RASTER_HEIGHT_CAP_M = 300 * 0.3048
+
+# No shadow is followed further than this from the point, by either path.
+# Beyond it a point reads unshaded even if a distant tower would shade it
+# at very low sun. GATE 1, kept (2026-09-24): the cap only binds with the
+# sun under ~5 deg (13 of 146 slots) and changes points only under 1.5 deg
+# (4 slots, when the city is already ~99% shaded): 0 points in Midtown,
+# <= 0.6% in the pilot at a 5 km reach. Uncapping costs memory, not time
+# -- every tile would load buildings 5 km around it (2-2.6 GB grids).
+SHADOW_MAX_REACH_M = 1000.0
+
+# The engine works one square tile of sample points at a time, rasterizing
+# the buildings within the tile plus a SHADOW_MAX_REACH_M margin, so a
+# shadow crossing a tile edge is still seen. Memory per tile at 0.5 m
+# cells: ((4000 + 2 x 1000) / 0.5)^2 x 4 bytes = 576 MB.
+SHADOW_TILE_M = 4000.0
