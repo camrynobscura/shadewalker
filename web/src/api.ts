@@ -46,10 +46,10 @@ export interface RouteFeature {
     length_m: number
     minutes: number
     tree_count: number
-    /** Fraction (0-1) of the route classified as shaded -- tree canopy
-     * only today, but a general "shade" field so building-shadow scoring
-     * (an optional future stretch goal) can feed the same one later.
-     * Continuous since 2026-08-17: each block contributes
+    /** Fraction (0-1) of the route that is shaded: tree canopy and, since
+     * the building-shadows work, building shadows for the moment the
+     * server computed it (see `hour`/`minute` on the response), combined
+     * by union. Continuous since 2026-08-17: each block contributes
      * min(density / saturation, 1) of its length, no per-edge cliff. */
     shade_fraction: number
     /** Fraction (0-1) of the route's tree score that is park-canopy AREA
@@ -71,7 +71,18 @@ export interface RouteResponse {
    * may sit mid-block. One shared pair (not per-route): the snap itself
    * doesn't depend on tree_weight. */
   snapped: { start: Point; end: Point }
+  /** The moment the shade was computed for, New York clock. The frontend
+   * sends no time, so this is the server's "now" (or the anchor day, the
+   * 15th, when a request pins only the month); echoed so a client can
+   * show it or, one day, pin it. */
   month: number
+  day: number
+  hour: number
+  minute: number
+  /** Which shade the routing cost saw: "trees" | "buildings" | "both".
+   * Always "both" from this frontend; the switch exists server-side for a
+   * possible layer selector. */
+  layers: 'trees' | 'buildings' | 'both'
   description: string
 }
 
