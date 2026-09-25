@@ -768,5 +768,7 @@ SHADOW_MAX_REACH_M = 1000.0
 # The engine works one square tile of sample points at a time, rasterizing
 # the buildings within the tile plus a SHADOW_MAX_REACH_M margin, so a
 # shadow crossing a tile edge is still seen. Memory per tile at 0.5 m
-# cells: ((4000 + 2 x 1000) / 0.5)^2 x 4 bytes = 576 MB.
-SHADOW_TILE_M = 4000.0
+# cells: ((2000 + 2 x 1000) / 0.5)^2 x 4 bytes = 256 MB (4 km tiles were
+# 576 MB and the practice build swapped; results are identical, the
+# margin makes tiling invisible).
+SHADOW_TILE_M = 2000.0

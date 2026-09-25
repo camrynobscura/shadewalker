@@ -210,7 +210,7 @@ def measure_area(name, bbox, all_edges, usable_rows, table, configs, dump_dir, r
     agreement_rows = []
     for cell, hop in configs:
         t0 = time.perf_counter()
-        tally = shadows.score_building_shade(edges, rows, table, cell_m=cell, march_step_m=hop)
+        tally = shadows.score_building_shade(edges, (geoms, heights), table, cell_m=cell, march_step_m=hop)
         wall = time.perf_counter() - t0
         per_slot[(cell, hop)] = tally["seconds_per_slot"]
         tallies[(cell, hop)] = tally
@@ -286,7 +286,7 @@ def measure_area(name, bbox, all_edges, usable_rows, table, configs, dump_dir, r
     cell, hop = configs[-1]
     fine_edges = [dict(e) for e in edges]
     t0 = time.perf_counter()
-    fine_tally = shadows.score_building_shade(fine_edges, rows, table, step_m=2.0, cell_m=cell, march_step_m=hop)
+    fine_tally = shadows.score_building_shade(fine_edges, (geoms, heights), table, step_m=2.0, cell_m=cell, march_step_m=hop)
     fine_s = time.perf_counter() - t0
     fine = np.frombuffer(b"".join(e["building_shade"] for e in fine_edges), dtype=np.uint8).reshape(len(edges), 288)
     report.append(f"### 5b. Sample step 2 m vs {config.SHADOW_SAMPLE_STEP_M:g} m along the edge "

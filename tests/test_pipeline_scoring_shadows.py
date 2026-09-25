@@ -70,7 +70,7 @@ def _values(edge, month, hour) -> int:
 
 
 def _score(edges, buildings, table, **overrides):
-    return shadows.score_building_shade(edges, buildings, table, **overrides)
+    return shadows.score_building_shade(edges, shadows.prepare_buildings(buildings), table, **overrides)
 
 
 # ── sample points ────────────────────────────────────────────────────────────
@@ -274,3 +274,15 @@ def test_prepare_buildings_converts_feet_and_projects():
     assert heights[0] == pytest.approx(30.0, abs=1e-3)
     minx, miny, maxx, maxy = geoms[0].bounds
     assert (maxx - minx, maxy - miny) == pytest.approx((10.0, 20.0), abs=1e-6)
+
+
+def test_progress_is_logged_per_tile_with_an_estimate(caplog):
+    west, east, building = _street_world()
+    el = math.degrees(math.atan(1.25))
+    with caplog.at_level("INFO", logger="pipeline.scoring.shadows"):
+        _score([west, east], [building], _table(m7h16=(270.0, el)), tile_m=20.0)
+    tile_lines = [m for m in caplog.messages if "[shadows] tile " in m]
+    assert len(tile_lines) >= 2                       # the 16 m wide world spans tiles
+    assert tile_lines[0].startswith("  [shadows] tile 1/")
+    assert "left" in tile_lines[0] and "elapsed" in tile_lines[0]
+    assert any("sample points on 2 edges" in m for m in caplog.messages)
