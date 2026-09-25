@@ -25,14 +25,15 @@ CANDIDATES (each in its own directory under --out-dir)
                GraphStore's *.json.gz glob ignores it today.
 
 Every candidate decodes to the SAME table -- checked here, so the choice
-is about cost only. GraphStore does not read the field yet (PR 2 step 8),
-so "load" below is what today's loader pays for the bigger JSON; the
-decode column is what the field adds once it is read. Mac numbers are
+is about cost only. At Gate 2 GraphStore did not read the field yet
+(PR 2 step 8), so "load" was what that loader paid for the bigger JSON
+and the decode column what the field would add; since PR 2 the loader
+decodes it, so a re-run's "load" includes the decode. Mac numbers are
 relative; the box measurement is deploy day's (CLAUDE.md: a Mac peak is
 not a Linux budget).
 
     uv run python tools/audit/measure_export_candidates.py
-    uv run python tools/audit/measure_export_candidates.py --export data/practice_export/citywide.json.gz
+    uv run python tools/audit/measure_export_candidates.py --export path/to/other/citywide.json.gz
 """
 
 import argparse
@@ -95,7 +96,9 @@ def _load_best(dir_path, runs: int):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--export", default="data/practice_export/citywide.json.gz")
+    # Gate 2 ran on data/practice_export/ (deleted 2026-09-25); the real
+    # export has identical content, so it is the default now.
+    parser.add_argument("--export", default="data/export/citywide.json.gz")
     parser.add_argument("--out-dir", default=f"data/audits/{dt.date.today().isoformat()}/export_candidates")
     parser.add_argument("--runs", type=int, default=2, help="load() runs per candidate; best wall, worst RSS")
     args = parser.parse_args()
