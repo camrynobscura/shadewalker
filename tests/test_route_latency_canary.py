@@ -49,7 +49,7 @@ def test_route_ladder_median_stays_sane(citywide_store):
         pair = citywide_store.snap_pair(frm[0], frm[1], to[0], to[1])
         assert pair is not None, f"canary pair {frm}->{to} no longer snaps"
         for weight in TREE_WEIGHT_LADDER:
-            result = citywide_store.route(pair[0], pair[1], tree_weight=weight, month=7)
+            result = citywide_store.route(pair[0], pair[1], tree_weight=weight, month=7, hour=13)
             assert result is not None, f"canary pair {frm}->{to} no longer routes"
         ladder_times.append(time.perf_counter() - started)
 

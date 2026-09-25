@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import igraph
+import base64
+import calendar
 import ijson
 import numpy as np
 import shapely
@@ -43,6 +45,13 @@ from shapely.strtree import STRtree
 from pipeline import config
 
 logger = logging.getLogger(__name__)
+
+# Building-shade table layout (pipeline/sun.py, meta.shade_slots): 12 months
+# x 24 hours, month-major; rows are the sun on the ANCHOR day of the month.
+SHADE_SLOTS = 288
+SHADE_ANCHOR_DAY = 15
+SHADE_LAYERS = ("trees", "buildings", "both")
+DENSITY_CACHE_SIZE = 8
 
 
 # igraph's C layer emits this RuntimeWarning from get_shortest_paths()
@@ -446,6 +455,19 @@ class GraphStore:
         # than countable trees (FIXES item 4) -- already inside
         # _tree_deciduous, so it's a share of the score, never an addition.
         self._tree_park_canopy = np.empty(0, dtype=np.float32)
+        # Building shade: uint8 (SHADE_SLOTS, n_edges), slot rows contiguous
+        # so one (month, hour) row is a single strided read -- see
+        # _building_fraction. All-zero when the export predates the field
+        # (the committed pilot fixture, tests' synthetic tiles).
+        self._building_shade = np.zeros((SHADE_SLOTS, 0), dtype=np.uint8)
+        self._sun_table = None   # meta.sun_table, for /health and tools; unused by routing
+        # Density arrays per (month, day, hour, minute, layers): route()
+        # calls _edge_density 8x per request (2 per weight x 4), and the
+        # blend reads four rows of the table each time. Tiny and
+        # idempotent, so a thread race just recomputes the same array.
+        # Derived from the arrays above: anything that mutates them in
+        # place (tests do) must clear it.
+        self._density_cache: dict[tuple, np.ndarray] = {}
         self._names: list[str] = []
         # Direction-rendering fields (2026-08-28): OSM's own kind
         # ("footway/crossing"...) so crossings fold into the street run
@@ -513,9 +535,17 @@ class GraphStore:
                     if node_id not in self._id_to_idx:
                         self._id_to_idx[node_id] = len(node_lonlat)
                         node_lonlat.append([lon, lat])
+            # The sun table sits in meta at the top of the file; the
+            # generator is abandoned as soon as it yields, so this costs a
+            # few KB of parsing, not a pass.
+            with gzip.open(path, "rb") as f:
+                table = next(ijson.items(f, "meta.sun_table", use_float=True), None)
+                if table is not None:
+                    self._sun_table = table
+        shade_rows: list[bytes | None] = []
 
         def _emit(u_id, v_id, key, side, seg_length_m, decid, everg,
-                  cnt, canopy, name, kind, folds, coords):
+                  cnt, canopy, name, kind, folds, coords, shade):
             """Add one edge (a whole edge, or one piece of a split one) to
             the graph arrays, through the existing border-dedupe. Splitting
             reduces the severed-overlap class to the already-solved
@@ -548,6 +578,7 @@ class GraphStore:
                     kinds[existing] = kind
                     fold_names[existing] = folds
                     coords_per_edge[existing] = coords
+                    shade_rows[existing] = shade
                 return
 
             # OSM itself sometimes contains the same way twice -- identical
@@ -577,6 +608,7 @@ class GraphStore:
             sides.append(side)
             fold_names.append(folds)
             coords_per_edge.append(coords)
+            shade_rows.append(shade)
 
         # Pass 2: edges, streamed one dict at a time (freed as soon as it's
         # emitted), each through the dedupe above.
@@ -591,7 +623,12 @@ class GraphStore:
                           # values; interning stores each once.
                           sys.intern(edge.get("kind", "")),
                           tuple(edge.get("fold_names", ())),
-                          np.asarray(edge["coords"], dtype=np.float64))
+                          np.asarray(edge["coords"], dtype=np.float64),
+                          # base64 of SHADE_SLOTS uint8 (pipeline/export.py);
+                          # absent = all zero (an all-zero row is omitted at
+                          # export, and older files predate the field).
+                          base64.b64decode(edge["building_shade"])
+                          if edge.get("building_shade") else None)
 
         self._names = names
         self._kinds = kinds
@@ -616,6 +653,22 @@ class GraphStore:
         self._tree_evergreen = np.array(evergreen, dtype=np.float32)
         self._tree_count = np.array(counts, dtype=np.float32)
         self._tree_park_canopy = np.array(canopy_credit, dtype=np.float32)
+
+        # Building shade, slot-major: filled edge-major (one row per edge
+        # as it arrives) then transposed once, so each (month, hour) row
+        # is contiguous for the blend's four strided reads.
+        by_edge = np.zeros((len(shade_rows), SHADE_SLOTS), dtype=np.uint8)
+        with_shade = 0
+        for i, row in enumerate(shade_rows):
+            if row is not None:
+                by_edge[i] = np.frombuffer(row, dtype=np.uint8)
+                with_shade += 1
+        self._building_shade = np.ascontiguousarray(by_edge.T)
+        del by_edge, shade_rows
+        self._density_cache.clear()
+        if with_shade:
+            logger.info(f"[graph_store] building shade on {with_shade:,} edges "
+                        f"({self._building_shade.nbytes / 1e6:.0f} MB)")
 
         # Pack the edge shapes: one flat buffer + an offsets array (see
         # __init__). cumsum turns per-edge point counts into slice
@@ -856,8 +909,65 @@ class GraphStore:
         _, dist_m = self._nearest_edge(lat, lon)
         return dist_m <= config.MAX_SNAP_DISTANCE_M
 
-    def _edge_density(self, month: int) -> np.ndarray:
-        """Month-adjusted CANOPY COVERAGE density (score per meter,
+    def _tree_fraction(self, month: int) -> np.ndarray:
+        """Tree-covered fraction of every edge, 0-1: month-adjusted density
+        over DENSITY_AT_FULL_COVERAGE, capped at 1. The pre-2026-09 shade
+        model, unchanged -- building shade joins it in _edge_density."""
+        canopy = config.CANOPY_BY_MONTH[month - 1]  # month is 1-12; lists index from 0
+        tree_score = self._tree_evergreen + self._tree_deciduous * canopy
+        return np.minimum(tree_score / self._length / config.DENSITY_AT_FULL_COVERAGE, 1.0)
+
+    def _building_fraction(self, month: int, day: int, hour: int, minute: int) -> np.ndarray:
+        """Building-shaded fraction of every edge, 0-1, at a moment.
+
+        The table holds one row per (month, hour): the sun on the 15th of
+        the month, on the hour (pipeline/sun.py; meta.shade_slots). Between
+        rows the value is a weighted average, so nothing jumps at the hour
+        or on the 1st: by the minute between hour h and h+1 (2:45 = 25% of
+        2:00 + 75% of 3:00; 23 wraps to 0, both night), and by the day
+        between the two nearest 15ths (July 25 = 1/3 July + 2/3 August;
+        Dec 16-Jan 14 blend Dec with Jan). Day 15 at minute 0 is exactly
+        the row. Month lengths are the anchor year's (config.SUN_ANCHOR_YEAR)
+        so the weights are the same every year; a Feb 29 request lands
+        half-way to March, which is where it belongs.
+        """
+        rows = self._building_shade
+        f = minute / 60.0
+        h0, h1 = hour, (hour + 1) % 24
+        if day >= SHADE_ANCHOR_DAY:
+            m0, m1 = month, month % 12 + 1
+            g = (day - SHADE_ANCHOR_DAY) / calendar.monthrange(config.SUN_ANCHOR_YEAR, m0)[1]
+        else:
+            m0, m1 = (month - 2) % 12 + 1, month
+            span = calendar.monthrange(config.SUN_ANCHOR_YEAR, m0)[1]
+            g = (span - SHADE_ANCHOR_DAY + day) / span
+
+        def at(m, h):
+            return rows[(m - 1) * 24 + h].astype(np.float32)
+
+        early = (1.0 - f) * at(m0, h0) + f * at(m0, h1)
+        late = (1.0 - f) * at(m1, h0) + f * at(m1, h1)
+        return ((1.0 - g) * early + g * late) / 255.0
+
+    def _edge_density(self, month: int, day: int = SHADE_ANCHOR_DAY,
+                      hour: int | None = None, minute: int = 0,
+                      layers: str = "both") -> np.ndarray:
+        """SHADE density per edge (score per meter, saturating at
+        config.DENSITY_AT_FULL_COVERAGE), vectorized over every edge --
+        trees and building shadows combined by union: covered = 1 - (1 -
+        trees)(1 - buildings), returned as RATE x covered so everything
+        downstream (edge_costs, shade_fraction) keeps its tree-era units.
+        `hour=None` means no time was given and building shade is left
+        out -- exactly the trees-only behaviour every pre-shadow test and
+        harness run pins with `month=7` alone. `layers` is the switch a
+        layer selector would use: "trees", "buildings" or "both" (default);
+        it is validated by /route, not here. Cached per (month, day, hour,
+        minute, layers), a handful of entries.
+
+        The tree half's history, kept in full because the cap decision was
+        measured and the numbers are worth re-reading:
+
+        Month-adjusted CANOPY COVERAGE density (score per meter,
         saturating at config.DENSITY_AT_FULL_COVERAGE), vectorized over
         every edge. Shared by edge_costs() and route()'s shade_fraction,
         so the router optimizes exactly the physical quantity the user
@@ -900,17 +1010,33 @@ class GraphStore:
         The fail-closed guard that lived here (all-zero while the floor was
         None) is gone with it: both constants now have measured, sidewalk-era
         values, which is the condition its own comment set for removal."""
-        canopy = config.CANOPY_BY_MONTH[month - 1]  # month is 1-12; lists index from 0
-        tree_score = self._tree_evergreen + self._tree_deciduous * canopy
-        return np.minimum(tree_score / self._length,
-                          config.DENSITY_AT_FULL_COVERAGE)
+        if layers not in SHADE_LAYERS:
+            raise ValueError(f"layers must be one of {SHADE_LAYERS}, got {layers!r}")
+        cache_key = (month, day, hour, minute, layers)
+        cached = self._density_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        covered = np.zeros(len(self._length), dtype=np.float32)
+        if layers in ("trees", "both"):
+            covered = self._tree_fraction(month)
+        if layers in ("buildings", "both") and hour is not None and self._building_shade.shape[1]:
+            buildings = self._building_fraction(month, day, hour, minute)
+            covered = 1.0 - (1.0 - covered) * (1.0 - buildings)
+        density = (covered * config.DENSITY_AT_FULL_COVERAGE).astype(np.float32)
+        if len(self._density_cache) >= DENSITY_CACHE_SIZE:
+            self._density_cache.pop(next(iter(self._density_cache)))
+        self._density_cache[cache_key] = density
+        return density
 
-    def edge_costs(self, tree_weight: float, month: int) -> np.ndarray:
-        """The plan's trees-only cost formula, vectorized over every edge."""
-        density = self._edge_density(month)
+    def edge_costs(self, tree_weight: float, month: int, day: int = SHADE_ANCHOR_DAY,
+                   hour: int | None = None, minute: int = 0, layers: str = "both") -> np.ndarray:
+        """The plan's cost formula, vectorized over every edge."""
+        density = self._edge_density(month, day, hour, minute, layers)
         return self._length / (1.0 + tree_weight * density)
 
-    def route(self, start: SnapPoint, end: SnapPoint, tree_weight: float, month: int) -> dict | None:
+    def route(self, start: SnapPoint, end: SnapPoint, tree_weight: float, month: int,
+              day: int = SHADE_ANCHOR_DAY, hour: int | None = None, minute: int = 0,
+              layers: str = "both") -> dict | None:
         """Cheapest path between two snapped points. None if unreachable.
 
         A SnapPoint sits partway along an edge, not on a real graph node,
@@ -944,7 +1070,7 @@ class GraphStore:
         to win, since a leafy detour via a real corner can still cost less
         at a high tree_weight.
         """
-        costs = self.edge_costs(tree_weight, month)
+        costs = self.edge_costs(tree_weight, month, day, hour, minute, layers)
         # Continuous per-edge shade credit (FIXES item 2): an edge
         # contributes min(density / DENSITY_AT_FULL_COVERAGE, 1) of its
         # length to shade_fraction, replacing the old shaded-or-not
@@ -960,7 +1086,7 @@ class GraphStore:
         # see _edge_density's docstring for why the earlier split-scale
         # design (unsaturated cost, saturated display) was falsified.
         shade_credit = np.minimum(
-            self._edge_density(month) / config.DENSITY_AT_FULL_COVERAGE, 1.0
+            self._edge_density(month, day, hour, minute, layers) / config.DENSITY_AT_FULL_COVERAGE, 1.0
         )
 
         best_plan = self._best_plan(start, end, costs)

@@ -25,6 +25,7 @@ import math
 import random
 from collections import defaultdict
 
+import numpy as np
 import pytest
 
 from server.graph_store import _local_distance_m, clamp_shade_monotonic
@@ -327,7 +328,7 @@ def test_raising_shade_priority_never_lowers_reported_shade(citywide_store):
         pair = store.snap_pair(lat_a, lon_a, lat_b, lon_b)
         if pair is None:
             continue
-        routes = [store.route(pair[0], pair[1], w, SHADE_MONTH)
+        routes = [store.route(pair[0], pair[1], w, SHADE_MONTH, hour=13)
                   for w in SHADE_WEIGHTS]
         if any(r is None for r in routes):
             continue
@@ -348,3 +349,57 @@ def test_raising_shade_priority_never_lowers_reported_shade(citywide_store):
             for sh, a, b in violations[:5]
         )
     )
+
+
+# ── building shade can only add (PLAN `building-shadows`, PR 2) ─────────────
+#
+# Two forms of the one-way promise, on the REAL export. Per edge: the union
+# rule makes trees + buildings >= trees alone at every moment. Per route at
+# priority NONE: the shortest path never changes, so its reported shade can
+# only rise when buildings join. Both are vacuous on an export whose table
+# is all zero (one built before the shade step), so that case SKIPS and
+# says so rather than passing quietly -- a zero table is a broken
+# instrument, not a clean pass.
+
+@pytest.mark.citywide
+def test_building_shade_never_lowers_any_edge_citywide(citywide_store):
+    store = citywide_store
+    if not store._building_shade.any():
+        pytest.skip("this export carries no building shade -- rebuild with the shade step")
+    for month in (1, 7):
+        trees = store._edge_density(month, layers="trees")
+        for hour in range(6, 21):
+            both = store._edge_density(month, hour=hour)
+            assert np.all(both >= trees - 1e-6), f"month {month} hour {hour}"
+        assert np.any(store._edge_density(month, hour=13) > trees + 1e-6), (
+            f"month {month}: no edge gained any shade at 13:00 -- the table is not reaching _edge_density")
+
+
+@pytest.mark.citywide
+def test_building_shade_never_lowers_a_shortest_route(citywide_store):
+    store = citywide_store
+    if not store._building_shade.any():
+        pytest.skip("this export carries no building shade -- rebuild with the shade step")
+    nodes = list(max(store._graph.connected_components(mode="weak"), key=len))
+    rng = random.Random(SHADE_SEED)
+    checked = attempts = 0
+    while checked < SHADE_PAIRS and attempts < SHADE_PAIRS * 80:
+        attempts += 1
+        a, b = rng.choice(nodes), rng.choice(nodes)
+        if a == b:
+            continue
+        lon_a, lat_a = store._node_lonlat[a]
+        lon_b, lat_b = store._node_lonlat[b]
+        if not (500.0 <= _local_distance_m(lat_a, lon_a, lat_b, lon_b) <= 2500.0):
+            continue
+        pair = store.snap_pair(lat_a, lon_a, lat_b, lon_b)
+        if pair is None:
+            continue
+        trees_only = store.route(pair[0], pair[1], 0.0, SHADE_MONTH)
+        for hour in (9, 13, 17):
+            with_buildings = store.route(pair[0], pair[1], 0.0, SHADE_MONTH, hour=hour)
+            assert with_buildings["coords"] == trees_only["coords"], "priority NONE must not move with the clock"
+            assert with_buildings["shade_fraction"] >= trees_only["shade_fraction"] - 1e-9, (
+                f"pair {checked} at {hour}:00 lost shade when buildings joined")
+        checked += 1
+    assert checked == SHADE_PAIRS, f"only {checked} pairs checked"

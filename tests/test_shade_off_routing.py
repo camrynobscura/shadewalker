@@ -103,6 +103,9 @@ def _strip_trees(store):
     store._tree_deciduous[:] = 0.0
     store._tree_evergreen[:] = 0.0
     store._tree_count[:] = 0.0
+    # Densities are cached per time (graph_store._density_cache); mutating
+    # the arrays underneath it in place must drop what it holds.
+    store._density_cache.clear()
 
 
 # --- the guard against a vacuous test ---------------------------------
