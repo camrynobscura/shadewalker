@@ -50,11 +50,11 @@ export function AboutPage() {
           </p>
           <p>
             So that is where the idea for Shade Walker was born. It gives you directions in NYC that help keep
-            you underneath some trees so you can stay cooler, using the city's own tree data to calculate the
-            shadiness of different routes. You pick your start and end points, and your willingness to go out
-            of your way to get a shadier route, and the app will serve you the best path. I'm planning on
-            adding shade data from the shade cast by buildings onto the sidewalks as the next step of this
-            app, so stay tuned for that.
+            you in the shade so you can stay cooler, using the city's own tree data and building outlines to
+            calculate the shadiness of different routes. You pick your start and end points, and your
+            willingness to go out of your way to get a shadier route, and the app will serve you the best
+            path. The routes now also account for the shadows buildings cast onto the sidewalks, hour by hour,
+            not just the trees.
           </p>
         </section>
 
@@ -86,7 +86,7 @@ export function AboutPage() {
 
         <section>
           <h2>Data</h2>
-          <p>Shade Walker mainly relies on three public datasets:</p>
+          <p>Shade Walker mainly relies on four public datasets:</p>
           <ul>
             <li>
               <strong>The map and the routing</strong> come from{' '}
@@ -105,11 +105,17 @@ export function AboutPage() {
               treetops from above. It fills in some gaps where the tree dataset doesn't cover (like Central
               Park, and a few other areas) so those paths still receive shade credit.
             </li>
+            <li>
+              <strong>The buildings</strong> come from the city's{' '}
+              <a href="https://data.cityofnewyork.us/d/5zhs-2jue">Building Footprints</a> dataset: the outline
+              and roof height of roughly 1.08 million buildings. With the sun's position for a given month and
+              hour, that tells us which stretches of sidewalk sit in a building's shadow at that time.
+            </li>
           </ul>
           <p>
             The background map is drawn by <a href="https://carto.com/attributions">CARTO</a>, and address
             search is answered by <a href="https://photon.komoot.io/">Photon</a>, an open geocoder from
-            komoot. We refresh our copies of the map and the tree dataset once a month.
+            komoot. We refresh our copies of the map, the trees and the buildings once a month.
           </p>
         </section>
 
@@ -117,13 +123,16 @@ export function AboutPage() {
           <h2>Route scoring</h2>
           <p>
             Every block or path in the city gets a shade score derived from how many trees are near it, how
-            big they are, and how much canopy the aerial survey sees overhead (for parks not covered by the
-            original tree dataset). It also takes into account that certain trees lose their leaves in the
-            fall/winter, so the same street scores shadier in July than in April.
+            big they are, how much canopy the aerial survey sees overhead (for parks not covered by the
+            original tree dataset) and, by the hour, the shadows of buildings. For the month and time of day
+            you ask, the app works out where the sun is and which sidewalks the nearby buildings shade at that
+            moment. It also takes into account that certain trees lose their leaves in the fall/winter, so the
+            same street scores shadier in July than in April, and one side of it scores shadier at 9am than at
+            4pm.
           </p>
           <p>
             When you ask for a route, the app weighs your walking time and the shade along your potential
-            routes. The Shade_priority setting is the exchange rate between them. NONE ignores trees entirely
+            routes. The Shade_priority setting is the exchange rate between them. NONE ignores shade entirely
             and gives you the plain fastest walk. LOW takes a shadier street only when it costs nearly
             nothing. MED accepts short detours. MAX will take the longest detour to stay under the trees. The
             panel below the priority switcher shows what the shadier choice costs you in minutes/distance but
@@ -147,6 +156,18 @@ export function AboutPage() {
             <li>
               <strong>The tree count.</strong> It counts only individually mapped trees, not park canopy, so a
               route shaded mostly by canopy won't show one.
+            </li>
+            <li>
+              <strong>Building shadows are for right now.</strong> They're computed for the moment you ask,
+              from the sun's position sampled on the hour once a month and blended in between, so a route you
+              share re-routes at whatever time it's opened. The ground is treated as flat and every building
+              as a plain block of its recorded roof height: elevated tracks, bridges, scaffolding and sidewalk
+              sheds cast no shadow here, and a recorded height can lag a demolition or a new tower by months.
+            </li>
+            <li>
+              <strong>In winter the trees are bare</strong>, so routes follow building shadows instead. On a
+              cold January day the shadiest route really is the cold side of the street. The app is about
+              shade, so it stays honest about that rather than guessing when you'd rather be in the sun.
             </li>
             <li>
               <strong>Some places can't be routed</strong>, and that's due to data limitations from our
@@ -173,7 +194,7 @@ export function AboutPage() {
           <p>
             Treat the routes as suggestions, not instructions: stay aware of your surroundings, cross where
             it's safe rather than exactly where the line crosses, and use your own judgment about where to
-            walk. The app knows where the trees are. You know everything else.
+            walk. The app knows where the trees and the buildings are. You know everything else.
           </p>
         </section>
 
@@ -181,11 +202,12 @@ export function AboutPage() {
           <h2>Credits</h2>
           <p>
             Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>,
-            available under the Open Database License. Tree data from{' '}
-            <a href="https://opendata.cityofnewyork.us/">NYC Open Data</a> and NYC Parks Forestry. Basemap
-            tiles by <a href="https://carto.com/attributions">CARTO</a>. Geocoding by{' '}
-            <a href="https://photon.komoot.io/">Photon</a>, from komoot. Shade Walker is open source, and you
-            can <a href="https://github.com/camrynobscura/shadewalker">read the code on GitHub</a>.
+            available under the Open Database License. Tree data and building footprints from{' '}
+            <a href="https://opendata.cityofnewyork.us/">NYC Open Data</a> (NYC Parks Forestry and the Office
+            of Technology and Innovation). Basemap tiles by <a href="https://carto.com/attributions">CARTO</a>
+            . Geocoding by <a href="https://photon.komoot.io/">Photon</a>, from komoot. Shade Walker is open
+            source, and you can{' '}
+            <a href="https://github.com/camrynobscura/shadewalker">read the code on GitHub</a>.
           </p>
         </section>
       </main>

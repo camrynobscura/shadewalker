@@ -63,6 +63,15 @@ the raster blend the user declined 2026-08-26), and the state/federal
 parks the city list omits (39 km measuring ~10% mean canopy -- near-bare,
 not worth dragging an OSM area pass into the build).
 
+NOT A THIRD INSTRUMENT: BUILDING SHADE
+--------------------------------------
+pipeline/scoring/shadows.py (`building-shadows`, 2026-09) scores the
+shadows buildings cast on every edge, per month and hour. That is a
+second physical LAYER over the same pavement, not another canopy
+instrument: it never enters the hierarchy above, and the server combines
+it with the tree fraction by union at request time
+(server/graph_store.py, _edge_density). Nothing here changes because of it.
+
 THE SCORE
 ---------
     credit = DENSITY_AT_FULL_COVERAGE x covered_fraction x length_m

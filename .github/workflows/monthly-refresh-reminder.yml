@@ -1,7 +1,7 @@
 name: Monthly refresh reminder
 
-# The data refresh is a laptop ritual (trees + OSM re-pin -> build ->
-# deploy) that nothing automates, so nothing would notice it being
+# The data refresh is a laptop ritual (trees + buildings + OSM re-pin ->
+# build -> deploy) that nothing automates, so nothing would notice it being
 # forgotten. This opens one issue on the 1st of each month with the
 # steps; closing it is the record that it happened. It does no work
 # itself and touches nothing but the issue tracker.
@@ -36,18 +36,18 @@ jobs:
           fi
           month=$(date -u +'%B %Y')
           cat > "$RUNNER_TEMP/body.md" <<'EOF'
-          Monthly data refresh for shadewalker.nyc: re-pin OSM, re-fetch the trees, rebuild the export, redeploy. The site keeps working without it; the data just ages (trees update upstream every two weeks, ~1-2% of NYC's pedestrian ways change per month).
+          Monthly data refresh for shadewalker.nyc: re-pin OSM, re-fetch the trees and the building footprints, rebuild the export, redeploy. The site keeps working without it; the data just ages (trees update upstream every two weeks, building footprints daily, ~1-2% of NYC's pedestrian ways change per month).
 
           On the laptop, from the repo root:
 
           1. **Re-pin OSM** (~500 MB):
              `curl -o data/oracle/new-york-latest.osm.pbf https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf`
              then write today's date into `data/oracle/new-york-latest.timestamp.txt`.
-          2. **Bust the tree cache** so the build re-fetches it (~8 min):
-             `rm data/raw/socrata/trees_citywide_v3.json`
-          3. **Build** (~22 min; writes `data/export/` over whatever a local server is serving):
-             `uv run python -m pipeline.build`
-             Watch the edge/naming/canopy tally lines against the previous run's.
+          2. **Bust the tree and building caches** so the build re-fetches them (~8 min + ~7 min):
+             `rm data/raw/socrata/trees_citywide_v3.json data/raw/socrata/buildings_v1.json.gz`
+          3. **Build** (~22 min plus the building-shadow pass, which takes hours — start it with `caffeinate -i` and let it run; writes `data/export/` over whatever a local server is serving):
+             `caffeinate -i uv run python -m pipeline.build`
+             Watch the edge/naming/canopy/buildings/shadows tally lines against the previous run's.
           4. **Ship** (deploy/README.md §5): `(cd web && npm run build)` only if the frontend changed since the last deploy, then `./deploy/smoke_test.sh`, then `HOST=deploy@<droplet-ip> ./deploy/deploy.sh`, then `curl -sS https://shadewalker.nyc/health`.
 
           Close this issue once the live site is serving the new export.
