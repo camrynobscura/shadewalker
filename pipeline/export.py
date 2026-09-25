@@ -20,6 +20,7 @@ the export, or the frontend would try to draw UTM coordinates on a map.
 Coordinate pairs are [lon, lat] to match the GeoJSON convention.
 """
 
+import base64
 import logging
 import gzip
 import json
@@ -81,7 +82,7 @@ def _display_path(path):
         return path
 
 
-def write_citywide(nodes: dict, edges: list[dict]) -> Path:
+def write_citywide(nodes: dict, edges: list[dict], sun_table=None) -> Path:
     """Write the whole city's pedestrian graph as ONE file. Returns its path.
 
     The path is returned rather than left for the caller to reconstruct so
@@ -152,6 +153,19 @@ def write_citywide(nodes: dict, edges: list[dict]) -> Path:
         fold_names = edge.get("fold_names")
         if fold_names:
             record["fold_names"] = fold_names
+        # Building shade: 288 bytes per edge (pipeline/scoring/shadows.py),
+        # month-major, value/255, as base64 -- Gate 2 of PLAN
+        # `building-shadows` (user, 2026-09-25) on the real citywide table
+        # (tools/audit/measure_export_candidates.py): the table is 78%
+        # zeros, so it costs 31 MB gzipped (25.7 -> 57.1 MB) and ~1.4 s of
+        # Mac startup (~8 s on the box); a daylight-only row saved 1.8 MB
+        # and loaded slower; a .npy sidecar loaded 0.8 s faster at 141 MB
+        # more per deploy and a second file to keep in step -- rejected.
+        # Omitted when all-zero, the fold_names rule: 488k edges pay for
+        # every key.
+        shade = edge.get("building_shade")
+        if shade and any(shade):
+            record["building_shade"] = base64.b64encode(shade).decode("ascii")
         edge_records.append(record)
 
     payload = {
@@ -166,6 +180,21 @@ def write_citywide(nodes: dict, edges: list[dict]) -> Path:
         "nodes": node_records,
         "edges": edge_records,
     }
+    if sun_table is not None:
+        # The file describes its own shade table: which sun each slot was
+        # computed for, and how to read a row. The server blends between
+        # slots by the minute and by the day; it never recomputes the sun.
+        payload["meta"]["sun_table"] = sun_table
+        payload["meta"]["shade_slots"] = {
+            "layout": "month-major: index = (month - 1) * 24 + hour",
+            "months": 12,
+            "hours": 24,
+            "anchor": f"the {config.SUN_ANCHOR_DAY}th of the month, on the hour, "
+                      f"{config.SUN_TIMEZONE}, year {config.SUN_ANCHOR_YEAR}",
+            "value": "round(255 * shaded points / sampled points); night 0",
+            "encoding": "building_shade = base64 of 288 uint8; absent = all zero",
+            "sun": "[azimuth deg clockwise from north, elevation deg], null = night",
+        }
 
     out_path = config.EXPORT_DIR / f"{CITYWIDE_NAME}.json.gz"
     size_kb = _write_atomically(out_path, payload)

@@ -105,7 +105,8 @@ def run(args) -> int:
         entry = {"pair": [a_lat, a_lon, b_lat, b_lon], "routes": None}
         if snapped is not None:
             start, end = snapped
-            routes = [store.route(start, end, w, args.month)
+            routes = [store.route(start, end, w, args.month, day=args.day, hour=args.hour,
+                                  minute=args.minute, layers=args.layers)
                       for w in args.weights]
             if all(r is not None for r in routes):
                 before = [r["shade_fraction"] for r in routes]
@@ -125,7 +126,8 @@ def run(args) -> int:
     payload = {
         "meta": {"seed": args.seed, "pairs": len(pairs),
                  "discarded_on_distance": discarded,
-                 "weights": args.weights, "month": args.month,
+                 "weights": args.weights, "month": args.month, "day": args.day,
+                 "hour": args.hour, "minute": args.minute, "layers": args.layers,
                  "routable": routable, "clamp_fired": clamp_fired,
                  "export_dir": str(config.EXPORT_DIR),
                  "measured": time.strftime("%Y-%m-%d %H:%M:%S")},
@@ -184,6 +186,13 @@ def main() -> int:
     p_run.add_argument("--pairs", type=int, default=DEFAULT_PAIRS)
     p_run.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p_run.add_argument("--month", type=int, default=DEFAULT_MONTH)
+    # Building shade is time-of-day dependent: pass the time, or an A/B
+    # between two runs is clock-dependent. No --hour = trees only (the
+    # pre-shadow behaviour), which is what a before/after needs as its before.
+    p_run.add_argument("--day", type=int, default=15)
+    p_run.add_argument("--hour", type=int, default=None)
+    p_run.add_argument("--minute", type=int, default=0)
+    p_run.add_argument("--layers", default="both", choices=["trees", "buildings", "both"])
     p_run.add_argument("--weights", type=lambda s: [float(x) for x in s.split(",")],
                        default=DEFAULT_WEIGHTS)
     p_cmp = sub.add_parser("compare")

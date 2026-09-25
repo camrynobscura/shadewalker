@@ -44,6 +44,10 @@ function fakeResponse(): RouteResponse {
     ],
     snapped: { start: START, end: END },
     month: 7,
+    day: 15,
+    hour: 13,
+    minute: 0,
+    layers: 'both',
     description: 'Head 100 m along Court Street.',
   }
 }

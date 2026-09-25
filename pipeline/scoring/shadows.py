@@ -63,6 +63,11 @@ OUTPUT
 hour), value = round(255 x shaded / sampled); night slots and edges with
 no valid point are 0. Bytes, not a list of ints: 488k lists of 288 would
 be ~1 GB of pointers; the export decides the on-disk packing (Gate 2).
+
+MEASURED (the 2026-09-24 practice build, whole city, 0.5 m / 0.25 m, 5 m
+step): 11,681,343 points, 85 tiles of 4 km, 152 s/slot, 22,479 s -- while
+SWAPPING at 8.6 GB RSS on a 16 GB laptop, hence the per-tile point
+objects, the uint16 tally and the 2 km tiles below.
 """
 
 import logging
@@ -258,14 +263,21 @@ def _tile_keys(points: np.ndarray, tile_m: float) -> np.ndarray:
     return np.floor(points / tile_m).astype(np.int64)
 
 
-def score_building_shade(edges: list[dict], building_rows: list[dict],
-                         sun_table, *, step_m=None, cell_m=None,
-                         march_step_m=None, max_reach_m=None,
+def score_building_shade(edges: list[dict], footprints, sun_table, *, step_m=None,
+                         cell_m=None, march_step_m=None, max_reach_m=None,
                          tile_m=None) -> dict:
     """Set `building_shade` (288 bytes) on every edge. Returns the tally.
 
-    The keyword overrides exist for the feasibility instrument; the
-    pipeline passes none of them.
+    `footprints` is `prepare_buildings()`'s (geometries, heights): the
+    caller converts first and drops the raw rows, so the 1.08M row dicts
+    (~1.5 GB) are not alive during the pass. The keyword overrides exist
+    for the feasibility instrument; the pipeline passes none of them.
+
+    MEMORY (the 2026-09-24 practice build swapped at 8.6 GB): shapely point
+    objects exist for ONE tile at a time, never citywide -- 11.7M of them
+    were the largest single cost; the shaded-count table is uint16; edge
+    owners are int32. Progress is logged per tile with a running estimate,
+    because a whole-city pass is hours and the step is otherwise silent.
     """
     step_m = config.SHADOW_SAMPLE_STEP_M if step_m is None else step_m
     cell_m = config.SHADOW_CELL_M if cell_m is None else cell_m
@@ -273,41 +285,50 @@ def score_building_shade(edges: list[dict], building_rows: list[dict],
     max_reach_m = config.SHADOW_MAX_REACH_M if max_reach_m is None else max_reach_m
     tile_m = config.SHADOW_TILE_M if tile_m is None else tile_m
     cap_m = config.SHADOW_RASTER_HEIGHT_CAP_M
+    geoms, heights = footprints
 
     started = time.perf_counter()
     points, owner = sample_points(edges, step_m)
-    geoms, heights = prepare_buildings(building_rows)
+    owner = owner.astype(np.int32)
+    logger.info(f"  [shadows] {len(points):,} sample points on {len(edges):,} edges "
+                f"({time.perf_counter() - started:.0f}s)")
+    t0 = time.perf_counter()
     building_tree = STRtree(geoms)
+    logger.info(f"  [shadows] index over {len(geoms):,} footprints ({time.perf_counter() - t0:.0f}s)")
     slots = [(m, h, sun_table[m - 1][h]) for m in range(1, 13) for h in range(24)
              if sun_table[m - 1][h] is not None]
 
-    # Points inside a footprint: excluded everywhere, counted once.
-    point_geoms = shapely.points(points)
-    inside_idx = building_tree.query(point_geoms, predicate="within")[0]
-    valid = np.ones(len(points), dtype=bool)
-    valid[inside_idx] = False
-    inside_count = int((~valid).sum())
-
     n_edges = len(edges)
-    shaded_counts = np.zeros((n_edges, SLOT_COUNT), dtype=np.int32)
-    sampled = np.bincount(owner[valid], minlength=n_edges)
-
+    shaded_counts = np.zeros((n_edges, SLOT_COUNT), dtype=np.uint16)
+    sampled = np.zeros(n_edges, dtype=np.int64)
+    inside_count = 0
     keys = _tile_keys(points, tile_m)
     tiles = np.unique(keys, axis=0)
     slot_seconds = 0.0
-    for tx, ty in tiles:
-        in_tile = valid & (keys[:, 0] == tx) & (keys[:, 1] == ty)
-        idx = np.nonzero(in_tile)[0]
+    tiles_started = time.perf_counter()
+    for tile_no, (tx, ty) in enumerate(tiles, 1):
+        t_tile = time.perf_counter()
+        idx = np.nonzero((keys[:, 0] == tx) & (keys[:, 1] == ty))[0]
+        tile_points = points[idx]
+        # Points inside a footprint: excluded everywhere, counted once. The
+        # point objects live only for this tile.
+        tile_geoms = shapely.points(tile_points)
+        inside = np.zeros(len(idx), dtype=bool)
+        inside[building_tree.query(tile_geoms, predicate="within")[0]] = True
+        inside_count += int(inside.sum())
+        idx, tile_points, tile_geoms = idx[~inside], tile_points[~inside], tile_geoms[~inside]
+        sampled += np.bincount(owner[idx], minlength=n_edges)
         if len(idx) == 0:
             continue
-        tile_points = points[idx]
+
         x0, y0 = tx * tile_m - max_reach_m, ty * tile_m - max_reach_m
         x1, y1 = (tx + 1) * tile_m + max_reach_m, (ty + 1) * tile_m + max_reach_m
         near = building_tree.query(shapely.box(x0, y0, x1, y1))
         grid, gx0, gy_top = build_height_grid(geoms[near], heights[near],
                                               (x0, y0, x1, y1), cell_m)
         tall = near[heights[near] > cap_m]
-        point_tree = STRtree(point_geoms[idx]) if len(tall) else None
+        point_tree = STRtree(tile_geoms) if len(tall) else None
+        tile_owner = owner[idx]
 
         for month, hour, (azimuth, elevation) in slots:
             t0 = time.perf_counter()
@@ -317,9 +338,18 @@ def score_building_shade(edges: list[dict], building_rows: list[dict],
                 shaded |= sweep_shaded(point_tree, len(idx), geoms[tall], heights[tall],
                                        azimuth, elevation, max_reach_m)
             slot = (month - 1) * 24 + hour
-            shaded_counts[:, slot] += np.bincount(owner[idx][shaded], minlength=n_edges)
+            shaded_counts[:, slot] += np.bincount(tile_owner[shaded], minlength=n_edges).astype(np.uint16)
             slot_seconds += time.perf_counter() - t0
+        del grid, point_tree, tile_geoms
 
+        elapsed = time.perf_counter() - tiles_started
+        remaining = elapsed / tile_no * (len(tiles) - tile_no)
+        logger.info(f"  [shadows] tile {tile_no}/{len(tiles)}: {len(idx):,} points, "
+                    f"{len(near):,} buildings ({len(tall):,} tall), "
+                    f"{time.perf_counter() - t_tile:.0f}s -- elapsed {elapsed / 60:.0f}m, "
+                    f"~{remaining / 60:.0f}m left")
+
+    assert sampled.max() < 65535, "an edge has more sample points than the uint16 tally holds"
     with np.errstate(divide="ignore", invalid="ignore"):
         fraction = np.where(sampled[:, None] > 0,
                             shaded_counts / np.maximum(sampled, 1)[:, None], 0.0)

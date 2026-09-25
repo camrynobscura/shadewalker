@@ -237,3 +237,43 @@ def test_write_citywide_overwrites_a_previous_export_in_place(citywide_dir):
 
     assert len(list((citywide_dir / "export").glob("*.json.gz"))) == 1
     assert _read_back(citywide_dir)["edges"][0]["name"] == "Union Street"
+
+
+# ── building shade (PLAN `building-shadows`, interim base64 packing) ────
+
+def _shaded_edges():
+    nodes, edges = _minimal_citywide()
+    row = bytes([0] * 12 + [255, 170, 85] + [0] * 273)     # three lit slots
+    edges[0]["building_shade"] = row
+    dark = dict(edges[0], key=1, building_shade=bytes(288))  # all-zero row
+    absent = dict(edges[0], key=2)                          # no row at all
+    del absent["building_shade"]
+    return nodes, [edges[0], dark, absent], row
+
+
+def test_building_shade_is_written_as_base64_only_when_lit(citywide_dir):
+    import base64
+    nodes, edges, row = _shaded_edges()
+    export.write_citywide(nodes, edges)
+    written = _read_back(citywide_dir)["edges"]
+    assert base64.b64decode(written[0]["building_shade"]) == row
+    assert "building_shade" not in written[1]      # all-zero: omitted, 488k edges pay per key
+    assert "building_shade" not in written[2]      # never scored: omitted
+
+
+def test_sun_table_and_slot_layout_land_in_meta_when_given(citywide_dir):
+    nodes, edges, _ = _shaded_edges()
+    table = [[None] * 24 for _ in range(12)]
+    table[6][13] = [178.6, 70.7]
+    export.write_citywide(nodes, edges, sun_table=table)
+    meta = _read_back(citywide_dir)["meta"]
+    assert meta["sun_table"] == table
+    assert meta["shade_slots"]["months"] == 12 and meta["shade_slots"]["hours"] == 24
+    assert "month-major" in meta["shade_slots"]["layout"]
+
+
+def test_meta_has_no_shade_keys_without_a_sun_table(citywide_dir):
+    nodes, edges = _minimal_citywide()
+    export.write_citywide(nodes, edges)
+    meta = _read_back(citywide_dir)["meta"]
+    assert "sun_table" not in meta and "shade_slots" not in meta

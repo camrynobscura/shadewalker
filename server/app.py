@@ -19,7 +19,8 @@ at /docs.
 
 Endpoints:
     GET /health
-    GET /route?from_lat=..&from_lon=..&to_lat=..&to_lon=..[&tree_weights=..&tree_weights=..][&month=..]
+    GET /route?from_lat=..&from_lon=..&to_lat=..&to_lon=..[&tree_weights=..&tree_weights=..]
+              [&month=..&day=..&hour=..&minute=..][&layers=trees|buildings|both]
     GET /geocode?q=..[&limit=..]
     GET /geocode/reverse?lat=..&lon=..
 
@@ -49,7 +50,9 @@ import math
 import os
 import time
 from contextlib import asynccontextmanager
+import calendar
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -61,7 +64,12 @@ from slowapi.util import get_remote_address
 
 from pipeline import config
 from server import geocode as geocoder
-from server.graph_store import GraphStore, clamp_shade_monotonic
+from server.graph_store import GraphStore, SHADE_ANCHOR_DAY, SHADE_LAYERS, clamp_shade_monotonic
+
+# Shade is computed for New York's clock, whatever the box's timezone is
+# (the droplet runs UTC). tzdata is a runtime dep so this never depends on
+# the OS having zone files.
+NYC_TZ = ZoneInfo("America/New_York")
 
 # Route graph_store's loggers somewhere visible under uvicorn, which
 # configures its own loggers but leaves the root logger bare (FIXES item
@@ -222,12 +230,35 @@ def route(
     to_lat: float,
     to_lon: float,
     tree_weights: list[float] = Query(default=[0.0, 5.0, 15.0, 40.0]),  # defaults double as API docs
-    month: int | None = None,                                          # None → current month (server clock)
+    month: int | None = None,      # time of the walk, New York clock; every part defaults to NOW
+    day: int | None = None,        # (month given, day not: the 15th -- the table's anchor)
+    hour: int | None = None,
+    minute: int | None = None,     # (hour given, minute not: 0 -- the anchor)
+    layers: str = "both",          # "trees" | "buildings" | "both": which shade the cost sees
 ) -> dict:
+    # Time is the server's: the frontend sends nothing, so "now" is New
+    # York's now. The parameters exist for tests, tools and curl -- and are
+    # exactly what a time-of-day control would send if one is ever built.
+    # One clock read, so month/day/hour/minute can't straddle a boundary.
+    now = datetime.now(NYC_TZ)
     if month is None:
-        month = datetime.now().month
+        month, day = now.month, now.day if day is None else day
+    elif day is None:
+        day = SHADE_ANCHOR_DAY
+    if hour is None:
+        hour, minute = now.hour, now.minute if minute is None else minute
+    elif minute is None:
+        minute = 0
     if not 1 <= month <= 12:
         raise HTTPException(status_code=400, detail="month must be 1-12")
+    if not 1 <= day <= calendar.monthrange(now.year, month)[1]:
+        raise HTTPException(status_code=400, detail=f"day must be 1-{calendar.monthrange(now.year, month)[1]} for month {month}")
+    if not 0 <= hour <= 23:
+        raise HTTPException(status_code=400, detail="hour must be 0-23")
+    if not 0 <= minute <= 59:
+        raise HTTPException(status_code=400, detail="minute must be 0-59")
+    if layers not in SHADE_LAYERS:
+        raise HTTPException(status_code=400, detail=f"layers must be one of {', '.join(SHADE_LAYERS)}")
     if not tree_weights:
         raise HTTPException(status_code=400, detail="tree_weights must include at least one value")
     # Each weight costs one real Dijkstra run on a worker thread (two
@@ -270,7 +301,8 @@ def route(
 
     results = []
     for tree_weight in tree_weights:
-        result = store.route(start, end, tree_weight=tree_weight, month=month)
+        result = store.route(start, end, tree_weight=tree_weight, month=month,
+                             day=day, hour=hour, minute=minute, layers=layers)
         if result is None:
             raise HTTPException(status_code=422, detail="No path between these points")
         results.append(result)
@@ -296,7 +328,13 @@ def route(
             "start": {"lat": start.point[1], "lon": start.point[0]},
             "end": {"lat": end.point[1], "lon": end.point[0]},
         },
+        # The moment the shade was computed for (New York clock) and which
+        # layers the cost saw -- echoed so a client can show or pin them.
         "month": month,
+        "day": day,
+        "hour": hour,
+        "minute": minute,
+        "layers": layers,
         # All routes share the same street-by-street shape whenever there's
         # no real path to describe (start == end) -- doesn't matter which
         # one this is built from in that case, so the first is as good as

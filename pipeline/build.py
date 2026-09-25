@@ -42,14 +42,14 @@ import logging
 import sys
 import time
 
-from pipeline import config, export
-from pipeline.fetch import planimetrics
+from pipeline import config, export, sun
+from pipeline.fetch import buildings, planimetrics
 from pipeline.fetch.boundaries import fetch_borough_boundaries
 from pipeline.fetch.trees import fetch_trees
 from pipeline.graph import naming, pedestrian
 from pipeline.graph.blockface import BlockFaceIndex
 from pipeline.graph.boundary import nyc_boundary
-from pipeline.scoring import blocks, canopy
+from pipeline.scoring import blocks, canopy, shadows
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +106,12 @@ def main() -> int:
     # and grouping: it adds no way, removes none, and connects nothing.
     _score_shade(edges)
 
+    # The second shade LAYER: building shadows by month and hour, combined
+    # with trees by the server. Labels again -- no way added, none removed.
+    sun_table = _score_building_shade(edges)
+
     logger.info(f"[build] exporting to {config.EXPORT_DIR}")
-    out_path = export.write_citywide(nodes, edges)
+    out_path = export.write_citywide(nodes, edges, sun_table=sun_table)
 
     if not _readback_matches(out_path, len(nodes), len(edges)):
         return 1
@@ -159,6 +163,25 @@ def _score_shade(edges: list[dict]) -> None:
     canopy.score_sidewalk_fallback(edges)
 
 
+def _score_building_shade(edges: list[dict]):
+    """Fill `building_shade` on every edge; returns the sun table it used.
+
+    Every edge kind, crossings included -- buildings shade roadways, which
+    is why this is not gated on the tree hierarchy's kinds. The Building
+    Footprints fetch caches itself (pipeline/fetch/buildings.py); the
+    rules for which rows cast shade are on the config constants. Engine,
+    sample rule and the Gate 1 measurements: pipeline/scoring/shadows.py.
+    """
+    logger.info("[build] building shade")
+    table = sun.sun_table()
+    # Convert first, then score: the raw rows (1.08M dicts, ~1.5 GB) are a
+    # temporary of this one expression and are gone before the pass runs.
+    footprints = shadows.prepare_buildings(buildings.usable(buildings.load()))
+    logger.info(f"  [buildings] {len(footprints[0]):,} footprints prepared")
+    shadows.score_building_shade(edges, footprints, table)
+    return table
+
+
 def _readback_matches(out_path, expected_nodes: int, expected_edges: int) -> bool:
     """Re-open the written file and check it holds what we just built.
 
@@ -185,6 +208,16 @@ def _readback_matches(out_path, expected_nodes: int, expected_edges: int) -> boo
         problems.append("meta.node_count disagrees with the nodes it holds")
     if payload["meta"]["edge_count"] != len(payload["edges"]):
         problems.append("meta.edge_count disagrees with the edges it holds")
+    # Building shade rode along: the table that explains the rows, and the
+    # rows themselves on at least some edges (all-zero rows are omitted, so
+    # "none at all" means the step silently produced nothing).
+    sun_table = payload["meta"].get("sun_table")
+    if not (isinstance(sun_table, list) and len(sun_table) == 12
+            and all(len(row) == 24 for row in sun_table)):
+        problems.append("meta.sun_table is not 12 months x 24 hours")
+    shaded = sum(1 for edge in payload["edges"] if edge.get("building_shade"))
+    if shaded == 0:
+        problems.append("no edge carries building_shade")
 
     if problems:
         for problem in problems:
@@ -192,7 +225,7 @@ def _readback_matches(out_path, expected_nodes: int, expected_edges: int) -> boo
         return False
 
     logger.info(f"[build] readback ok: {len(payload['nodes']):,} nodes, "
-                f"{len(payload['edges']):,} edges")
+                f"{len(payload['edges']):,} edges, {shaded:,} with building shade")
     return True
 
 
