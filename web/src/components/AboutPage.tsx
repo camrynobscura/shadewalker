@@ -205,10 +205,14 @@ export function AboutPage() {
             Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>,
             available under the Open Database License. Tree data and building footprints from{' '}
             <a href="https://opendata.cityofnewyork.us/">NYC Open Data</a> (NYC Parks Forestry and the Office
-            of Technology and Innovation). Basemap tiles by <a href="https://carto.com/attributions">CARTO</a>
-            . Geocoding by <a href="https://photon.komoot.io/">Photon</a>, from komoot. Shade Walker is open
-            source, and you can{' '}
-            <a href="https://github.com/camrynobscura/shadewalker">read the code on GitHub</a>.
+            of Technology and Innovation). Park and path canopy from{' '}
+            <a href="https://doi.org/10.5281/zenodo.14053441">New York City Land Cover (2021)</a> © The Nature
+            Conservancy, developed under contract by the University of Vermont Spatial Analysis Laboratory,
+            used under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a>: we
+            sample it along each path to score its shade, and it is provided as-is, without warranty. Basemap
+            tiles by <a href="https://carto.com/attributions">CARTO</a>. Geocoding by{' '}
+            <a href="https://photon.komoot.io/">Photon</a>, from komoot. Shade Walker is open source, and you
+            can <a href="https://github.com/camrynobscura/shadewalker">read the code on GitHub</a>.
           </p>
         </section>
       </main>

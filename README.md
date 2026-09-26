@@ -8,7 +8,7 @@ of the shade (extra minutes, extra distance) shown.
 ![The Shade Walker app on a Greenwich Village route: the shadiest walk (solid green) splits from the fastest (dashed pink), with the walk's stats beside the map — 19 min, 1.0 mi, 55% shaded, 110 trees.](docs/screenshot.png)
 
 Built on four public datasets: OpenStreetMap's pedestrian network, the
-live NYC Tree Map, the city's 6-inch land-cover raster for park canopy,
+live NYC Tree Map, The Nature Conservancy's 6-inch 2021 land-cover raster for park canopy,
 and the city's Building Footprints with their roof heights.
 
 ## By the numbers
@@ -144,7 +144,14 @@ available through the labeled address fields.
 Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright)
 (ODbL). Tree data: [NYC Open Data](https://opendata.cityofnewyork.us/) /
 NYC Parks Forestry Tree Points. Building footprints: NYC Open Data /
-Office of Technology and Innovation. Basemap tiles by
+Office of Technology and Innovation. Park and path canopy: The Nature
+Conservancy. 2024. [New York City Land Cover (2021), Tree Canopy Change
+(2017-2021), and Estimated Tree Location and Crown Data
+(2021)](https://doi.org/10.5281/zenodo.14053441). Developed under contract
+by the University of Vermont Spatial Analysis Laboratory. Used under
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/),
+as-is and without warranty; we sample it along each path to score its
+shade. Basemap tiles by
 [CARTO](https://carto.com/attributions). Geocoding by
 [Photon](https://photon.komoot.io/) (komoot). The `data/` directory is
 fully regenerable from these sources and never committed.
