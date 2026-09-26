@@ -18,11 +18,15 @@
  *
  * WHY THE FLOOR AND NOT MORE (user decision, 2026-08-27): perceptual
  * calibration pointed at 1.2-1.4, but judgment on real streets is
- * contaminated by BUILDING shade, a mechanism this app does not model
- * -- an exponent tuned to match street-level feel would double-count
- * buildings if building shade ever lands as its own layer. 1.2 is the
- * measured, building-independent part, correct with or without that
- * future. Wide park paths are knowingly under-served (lane choice
+ * contaminated by BUILDING shade, which the app did not model then --
+ * an exponent tuned to match street-level feel would have double-counted
+ * buildings once building shade landed as its own layer. It did (PLAN
+ * `building-shadows`, 2026-09): the same estimator on the three-across
+ * building samples gives k 1.13-1.87 at July noon (hard-edged wall
+ * bands reward lane choice) and 1.04-1.64 at other slots. KEPT at 1.2
+ * (user, 2026-09-25): display-only, and a per-layer exponent would need
+ * per-layer fractions in the response, which the design rejects.
+ * Wide park paths are knowingly under-served (lane choice
  * grows with width: path-kind measures k 1.46-1.72, the Mall ~1.8);
  * inflating the whole city to chase them was declined.
  *

@@ -376,9 +376,11 @@ CONNECTOR_KIND_MARKERS = ("crossing", "traffic_island")
 # min(density / this, 1) of its length, so the stat is a continuous
 # length-weighted average instead of a per-edge yes/no. Distinct from the
 # cost formula's use of density above (which never saturates). Named for
-# *shade* generally, not trees specifically -- Stage 4's building-shadow
-# scoring (optional stretch goal) would feed the same field later without
-# a schema change.
+# *shade* generally, not trees specifically: since `building-shadows`
+# (2026-09) the server folds building shade in BEFORE this saturation
+# (server/graph_store.py `_edge_density`: RATE x (1 - (1 - trees)(1 -
+# buildings))), so the same field carries both layers with no schema
+# change.
 #
 # Replaced SHADE_DENSITY_THRESHOLD (0.025, a binary shaded-or-not bar)
 # on 2026-08-17 (FIXES item 2): the cliff-edge meant near-identical
