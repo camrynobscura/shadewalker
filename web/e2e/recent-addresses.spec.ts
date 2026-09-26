@@ -61,6 +61,46 @@ test('recents survive a reload and are keyboard-pickable', async ({ page }) => {
   await expect(start).toHaveValue('3rd St & 3rd Ave')
 })
 
+test('an arrow pressed the instant the list appears keeps its highlight', async ({ page }) => {
+  // CI's flake on main after #113: the highlight's reset ran as an
+  // effect, a beat AFTER the new list was on screen, so an ArrowDown
+  // landing in that gap was wiped and Enter then resolved the empty text
+  // instead of picking. Machine-speed typing hit the gap only sometimes;
+  // this hits it every time — a MutationObserver fires as the options
+  // are inserted (the same task React commits them in, before any
+  // effect) and sends the key right there. Recents are seeded directly:
+  // how they get recorded is the first test's job.
+  await mockGeocode(page)
+  await page.goto('/')
+  await page.evaluate(() => {
+    const seeded = [
+      { label: '3rd St & 3rd Ave', lat: 40.672, lon: -73.988 },
+      { label: '250 Court St', lat: 40.68, lon: -73.998 },
+    ]
+    localStorage.setItem('sw-recents', JSON.stringify(seeded))
+    const startInput = document.querySelector<HTMLInputElement>('input[role="combobox"]')! // Start is first
+    const observer = new MutationObserver(() => {
+      if (!document.querySelector('[role="listbox"] [role="option"]')) return
+      observer.disconnect()
+      startInput.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
+      )
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
+  })
+
+  const start = page.getByRole('combobox', { name: 'Start point' })
+  await start.click()
+  const recents = page.getByRole('listbox', { name: 'Start point recent addresses' })
+  await expect(recents.getByRole('option')).toHaveText(['3rd St & 3rd Ave', '250 Court St'])
+  // No event marks "every effect has run", so wait out the old reset's
+  // window, then prove the highlight outlived it.
+  await page.waitForTimeout(300)
+  await expect(recents.locator('[aria-selected="true"]')).toHaveText('3rd St & 3rd Ave')
+  await page.keyboard.press('Enter')
+  await expect(start).toHaveValue('3rd St & 3rd Ave')
+})
+
 test('points arriving from outside the field record nothing', async ({ page }) => {
   // A URL-restored point drives the exact externalPoint path a map tap
   // does (see fixtures.ts on why tapping the Leaflet map itself is too
