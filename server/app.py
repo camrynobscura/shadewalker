@@ -54,6 +54,19 @@ import calendar
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+# FIRST, before the heavy imports below: cap glibc's malloc arenas
+# (server/malloc_arenas.py). The cap only limits arenas created after it,
+# and glibc hands a finished thread's arena to later threads even past the
+# cap. Measured 2026-09-26 (Linux container, 4 requests at a time): capping
+# at the start of lifespan left a second arena from a short-lived thread
+# earlier in startup, and one worker filled it to 47 MB (+46 MB over 1,000
+# requests); capping here, under uvicorn's command line as on the box,
+# kept memory flat (607 -> 601 / 612 MB, two runs).
+from pipeline import config  # noqa: E402 -- light (os + pathlib), needed for the value
+from server.malloc_arenas import limit_malloc_arenas  # noqa: E402
+
+MALLOC_ARENAS_CAPPED = limit_malloc_arenas(config.SERVER_MALLOC_ARENAS)
+
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -62,7 +75,6 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from pipeline import config
 from server import geocode as geocoder
 from server.graph_store import GraphStore, SHADE_ANCHOR_DAY, SHADE_LAYERS, clamp_shade_monotonic
 
@@ -90,6 +102,10 @@ store = GraphStore()
 # request — here, the one-time load of all tiles into memory.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # The cap itself ran at import (top of this file); say so once here.
+    if MALLOC_ARENAS_CAPPED:
+        logging.getLogger(__name__).info(
+            f"[app] malloc arenas capped at {config.SERVER_MALLOC_ARENAS}")
     store.load()
     yield
 
