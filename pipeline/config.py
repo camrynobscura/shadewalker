@@ -255,6 +255,9 @@ CONDITION_DEFAULT = 0.5  # missing/blank condition — treat like Unknown
 # Monthly canopy factor for deciduous trees (index 0 = January). Evergreens
 # always count at 1.0. NYC street trees leaf out ~late April and drop
 # ~November; bare branches still cast a little shade, hence the 0.2 floor.
+# Each value is the factor ON THE 15TH; the server blends between 15ths by
+# day (graph_store._month_blend, PLAN `tree-seasonal-blend`), so nothing
+# jumps on the 1st.
 CANOPY_BY_MONTH = [0.2, 0.2, 0.3, 0.6, 0.95, 1.0, 1.0, 1.0, 0.95, 0.8, 0.45, 0.25]
 
 # Genera that keep leaves year-round. Checked against the genus (first word of

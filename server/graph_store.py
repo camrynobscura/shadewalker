@@ -60,14 +60,15 @@ def _slot(month: int, hour: int) -> int:
     return (month - 1) * 24 + hour
 
 
-def _blend_weights(month: int, day: int, hour: int, minute: int) -> list[tuple[int, float]]:
-    """The four (slot, weight) pairs a moment blends -- the two hours
-    around the minute, in the two months around the day. The weights sum
-    to 1; _building_fraction's docstring has the rule and its examples. On
-    an anchor (minute 0, day 15) some weights are 0.0: those slots are not
-    part of the moment, and is_night ignores them."""
-    f = minute / 60.0
-    h0, h1 = hour, (hour + 1) % 24
+def _month_blend(month: int, day: int) -> tuple[int, int, float]:
+    """The two anchor months a day falls between (m0 before, m1 after)
+    and how far along it is, g: 0.0 on m0's 15th, approaching 1.0 at
+    m1's. A monthly value -- a building-shade row, a CANOPY_BY_MONTH
+    entry -- is the value ON the 15th (SHADE_ANCHOR_DAY), and a day in
+    between is (1 - g) * m0's + g * m1's. July 30 = 16/31 July + 15/31
+    August; Dec 16-Jan 14 blend December with January. Month lengths are
+    the anchor year's (config.SUN_ANCHOR_YEAR) so the weights are the
+    same every year; a Feb 29 request lands half-way to March."""
     if day >= SHADE_ANCHOR_DAY:
         m0, m1 = month, month % 12 + 1
         g = (day - SHADE_ANCHOR_DAY) / calendar.monthrange(config.SUN_ANCHOR_YEAR, m0)[1]
@@ -75,6 +76,18 @@ def _blend_weights(month: int, day: int, hour: int, minute: int) -> list[tuple[i
         m0, m1 = (month - 2) % 12 + 1, month
         span = calendar.monthrange(config.SUN_ANCHOR_YEAR, m0)[1]
         g = (span - SHADE_ANCHOR_DAY + day) / span
+    return m0, m1, g
+
+
+def _blend_weights(month: int, day: int, hour: int, minute: int) -> list[tuple[int, float]]:
+    """The four (slot, weight) pairs a moment blends -- the two hours
+    around the minute, in the two months around the day (_month_blend).
+    The weights sum to 1; _building_fraction's docstring has the rule and
+    its examples. On an anchor (minute 0, day 15) some weights are 0.0:
+    those slots are not part of the moment, and is_night ignores them."""
+    f = minute / 60.0
+    h0, h1 = hour, (hour + 1) % 24
+    m0, m1, g = _month_blend(month, day)
     return [
         (_slot(m0, h0), (1.0 - g) * (1.0 - f)),
         (_slot(m0, h1), (1.0 - g) * f),
@@ -1049,11 +1062,21 @@ class GraphStore:
         _, dist_m = self._nearest_edge(lat, lon)
         return dist_m <= config.MAX_SNAP_DISTANCE_M
 
-    def _tree_fraction(self, month: int) -> np.ndarray:
-        """Tree-covered fraction of every edge, 0-1: month-adjusted density
-        over DENSITY_AT_FULL_COVERAGE, capped at 1. The pre-2026-09 shade
-        model, unchanged -- building shade joins it in _edge_density."""
-        canopy = config.CANOPY_BY_MONTH[month - 1]  # month is 1-12; lists index from 0
+    def _tree_fraction(self, month: int, day: int) -> np.ndarray:
+        """Tree-covered fraction of every edge, 0-1: season-adjusted density
+        over DENSITY_AT_FULL_COVERAGE, capped at 1 -- building shade joins
+        it in _edge_density.
+
+        Deciduous credit is scaled by config.CANOPY_BY_MONTH, read as each
+        month's value ON THE 15TH and blended between 15ths by the same
+        day rule as the building-shade rows (_month_blend; PLAN
+        `tree-seasonal-blend`, 2026-09-26). Until then it was one number
+        per month, so a walk's tree shade jumped overnight on the 1st --
+        0.6 -> 0.95 on May 1 and 0.8 -> 0.45 on Nov 1 under the curve of
+        the day. Day 15 is exactly the month's value, which is what every
+        `month=7` test and harness run pins."""
+        m0, m1, g = _month_blend(month, day)
+        canopy = (1.0 - g) * config.CANOPY_BY_MONTH[m0 - 1] + g * config.CANOPY_BY_MONTH[m1 - 1]
         tree_score = self._tree_evergreen + self._tree_deciduous * canopy
         return np.minimum(tree_score / self._length / config.DENSITY_AT_FULL_COVERAGE, 1.0)
 
@@ -1065,11 +1088,10 @@ class GraphStore:
         rows the value is a weighted average, so nothing jumps at the hour
         or on the 1st: by the minute between hour h and h+1 (2:45 = 25% of
         2:00 + 75% of 3:00; 23 wraps to 0, both night), and by the day
-        between the two nearest 15ths (July 25 = 1/3 July + 2/3 August;
-        Dec 16-Jan 14 blend Dec with Jan). Day 15 at minute 0 is exactly
-        the row. Month lengths are the anchor year's (config.SUN_ANCHOR_YEAR)
-        so the weights are the same every year; a Feb 29 request lands
-        half-way to March, which is where it belongs.
+        between the two nearest 15ths (_month_blend: July 25 = 21/31 July
+        + 10/31 August; Dec 16-Jan 14 blend Dec with Jan). Day 15 at
+        minute 0 is exactly the row. Trees blend by the same day rule
+        (_tree_fraction).
 
         A DARK slot counts as full shade (PLAN `night-shade`, 2026-09-26).
         The build computes daylight slots only, so a dark slot's stored
@@ -1121,7 +1143,8 @@ class GraphStore:
         downstream (edge_costs, shade_fraction) keeps its tree-era units.
         `hour=None` means no time was given and building shade is left
         out -- exactly the trees-only behaviour every pre-shadow test and
-        harness run pins with `month=7` alone. `layers` is the switch a
+        harness run pins with `month=7` alone (day defaults to the 15th,
+        where the trees' seasonal blend is exactly the month's value). `layers` is the switch a
         layer selector would use: "trees", "buildings" or "both" (default);
         it is validated by /route, not here. Cached per (month, day, hour,
         minute, layers), a handful of entries.
@@ -1180,7 +1203,7 @@ class GraphStore:
             return cached
         covered = np.zeros(len(self._length), dtype=np.float32)
         if layers in ("trees", "both"):
-            covered = self._tree_fraction(month)
+            covered = self._tree_fraction(month, day)
         if layers in ("buildings", "both") and hour is not None and self._building_shade.shape[1]:
             buildings = self._building_fraction(month, day, hour, minute)
             covered = 1.0 - (1.0 - covered) * (1.0 - buildings)

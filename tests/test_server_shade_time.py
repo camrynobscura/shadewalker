@@ -32,12 +32,18 @@ What is pinned, and why:
     climbs to 1.0 instead of falling to the stored 0; is_night needs
     every blended slot dark; /route at night hands every weight the one
     fastest route; no sun table, no night; the pinned test clock.
+  - trees by the day (PLAN `tree-seasonal-blend`): CANOPY_BY_MONTH is
+    each month's value on the 15th, blended between 15ths by the same
+    day rule as the rows, so tree shade no longer jumps on the 1st;
+    December blends into January; the day reaches route()'s shade. On a
+    synthetic curve, so the real numbers stay a data choice in config.
 
 The synthetic sun table is daylight in EVERY slot unless a test darkens
 some (`dark=`), so the blend tests above read the stored rows untouched.
 """
 
 import base64
+import calendar
 import gzip
 import json
 from datetime import datetime
@@ -238,13 +244,72 @@ def test_adding_building_shade_never_lowers_any_edge(tmp_path, monkeypatch):
     half = 0.5 * RATE * DETOUR_M
     store = _store(tmp_path, monkeypatch, deciduous=half)
     for month, day in ((7, 15), (7, 30), (1, 3), (12, 31)):
-        trees = store._edge_density(month, layers="trees")
+        trees = store._edge_density(month, day, layers="trees")
         for hour in range(24):
             for minute in (0, 30):
                 both = store._edge_density(month, day, hour, minute)
                 only_buildings = store._edge_density(month, day, hour, minute, layers="buildings")
                 assert np.all(both >= trees - 1e-6)
                 assert np.all(both >= only_buildings - 1e-6)
+
+
+# ── trees by the day (PLAN `tree-seasonal-blend`) ────────────────────────────
+
+# A synthetic curve, so these pin the blend, not config's real numbers.
+# April -> May is the big step on purpose.
+CURVE = [0.2, 0.2, 0.2, 0.4, 1.0, 1.0, 1.0, 1.0, 1.0, 0.8, 0.5, 0.3]
+
+
+def _tree_store(tmp_path, monkeypatch) -> GraphStore:
+    """Every edge's deciduous score gives the north way exactly 0.5 x the
+    canopy factor: never capped, so each value below is plain arithmetic."""
+    monkeypatch.setattr(config, "CANOPY_BY_MONTH", CURVE)
+    return _store(tmp_path, monkeypatch, deciduous=0.5 * RATE * DETOUR_M)
+
+
+def test_trees_on_the_15th_are_exactly_the_months_value(tmp_path, monkeypatch):
+    store = _tree_store(tmp_path, monkeypatch)
+    for month in range(1, 13):
+        assert _shade(store, "A", "N", month=month, day=15) == pytest.approx(0.5 * CURVE[month - 1])
+
+
+def test_trees_between_two_15ths_are_a_straight_line_mix(tmp_path, monkeypatch):
+    store = _tree_store(tmp_path, monkeypatch)
+    # April has 30 days: Apr 30 is 15/30 of the way from April 15 to May 15, May 1 is 16/30
+    assert _shade(store, "A", "N", month=4, day=30) == pytest.approx(0.5 * (0.4 + 15 / 30 * (1.0 - 0.4)))
+    assert _shade(store, "A", "N", month=5, day=1) == pytest.approx(0.5 * (0.4 + 16 / 30 * (1.0 - 0.4)))
+
+
+def test_trees_no_longer_jump_on_the_1st(tmp_path, monkeypatch):
+    """The step's point. A per-month lookup moved this edge 0.3 overnight
+    on May 1 (0.5 x (1.0 - 0.4)); blended, no day-to-day change can exceed
+    the biggest month-to-month step spread over the shortest month --
+    including Dec 31 -> Jan 1."""
+    store = _tree_store(tmp_path, monkeypatch)
+    days = [(m, d) for m in range(1, 13) for d in range(1, calendar.monthrange(2026, m)[1] + 1)]
+    shade = [_shade(store, "A", "N", month=m, day=d) for m, d in days]
+    biggest_step = max(abs(b - a) for a, b in zip(CURVE, CURVE[1:] + CURVE[:1]))
+    changes = [abs(b - a) for a, b in zip(shade, shade[1:] + shade[:1])]
+    assert max(changes) <= 0.5 * biggest_step / 28 + 1e-6
+
+
+def test_trees_blend_december_into_january(tmp_path, monkeypatch):
+    store = _tree_store(tmp_path, monkeypatch)
+    # Dec 31 is 16 days past Dec 15; Jan 14 is 30. December has 31 days.
+    assert _shade(store, "A", "N", month=12, day=31) == pytest.approx(0.5 * (0.3 + 16 / 31 * (0.2 - 0.3)))
+    assert _shade(store, "A", "N", month=1, day=14) == pytest.approx(0.5 * (0.3 + 30 / 31 * (0.2 - 0.3)))
+
+
+def test_the_day_reaches_the_routes_shade(tmp_path, monkeypatch):
+    """Through route(), the stat a person sees: the same walk on May 1
+    reads the blended canopy, not May's."""
+    store = _tree_store(tmp_path, monkeypatch)
+    start, end = store.snap_pair(NODES["A"][1], NODES["A"][0], NODES["B"][1], NODES["B"][0])
+    straight = 0.5 * DETOUR_M / 100.0       # the middle way's cover per unit of canopy
+    for day, canopy in ((15, 1.0), (1, 0.4 + 16 / 30 * (1.0 - 0.4))):
+        result = store.route(start, end, tree_weight=0.0, month=5, day=day)
+        assert result["length_m"] == pytest.approx(200.0)
+        assert result["shade_fraction"] == pytest.approx(straight * canopy, abs=1e-3)
 
 
 # ── routing ──────────────────────────────────────────────────────────────────
