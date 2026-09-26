@@ -42,7 +42,8 @@ Restart=always
 RestartSec=3
 
 # Memory guard — the box has 2GB total and no swap. A normal start peaks
-# ~1.1GB (warm coverage cache); a cold-cache start peaks >1.77GB, which on
+# ~1.33GB since building shade (measured 2026-09-25; ~1.1GB before); a
+# cold-cache start peaked >1.77GB, which on
 # 2026-09-01 thrashed the whole droplet unresponsive for 8+ minutes before
 # the kernel OOM killer fired. The cap converts any such runaway into a
 # clean kill of THIS unit the moment it crosses 1.7GB; MemoryHigh starts

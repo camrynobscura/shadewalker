@@ -16,7 +16,8 @@ and the city's Building Footprints with their roof heights.
 - 488,638 routable sidewalk and path edges across all five boroughs
 - ~900,000 city tree records, scored onto the side of the street they
   actually shade
-- One 26 MB export; the whole city routes from ~0.7 GB of RAM
+- One 54 MB export; the whole city routes from ~1.3 GB of RAM (measured
+  on the server, 2026-09-25)
 - Every request computes all four shade presets; typical full response
   ~400 ms
 - 382 backend tests, 83 unit, 45 end-to-end, CI on every PR
@@ -31,7 +32,7 @@ pipeline/   Python · OSM extract + NYC Tree Map + land-cover raster
             → per-sidewalk pedestrian graph, every edge scored for tree
               shade, then shadow-tested against nearby buildings for
               every daylight hour of every month (a 12 × 24 sun table)
-            → one citywide export (~26 MB)
+            → one citywide export (~54 MB)
 server/     FastAPI + igraph · loads the export into memory, serves
             /route (Dijkstra over shade-weighted costs: trees and
             building shadows for the requested time, combined by union),
@@ -70,9 +71,10 @@ The model choices that matter:
 ```bash
 # Python side (needs uv, which installs its own Python)
 uv sync
-uv run python -m pipeline.build          # full pipeline → data/export (~22 min plus the
-                                         # building-shadow pass, which takes hours; fetches
-                                         # OSM extract, trees, raster, buildings on first run)
+uv run python -m pipeline.build          # full pipeline → data/export (~5 h: ~17 min for
+                                         # graph and trees, ~4.5 h for building shadows;
+                                         # fetches OSM extract, trees, raster, buildings on
+                                         # first run)
 uv run uvicorn server.app:app --port 8000
 
 # Frontend

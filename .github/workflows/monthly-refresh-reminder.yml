@@ -45,7 +45,7 @@ jobs:
              then write today's date into `data/oracle/new-york-latest.timestamp.txt`.
           2. **Bust the tree and building caches** so the build re-fetches them (~8 min + ~7 min):
              `rm data/raw/socrata/trees_citywide_v3.json data/raw/socrata/buildings_v1.json.gz`
-          3. **Build** (~22 min plus the building-shadow pass, which takes hours — start it with `caffeinate -i` and let it run; writes `data/export/` over whatever a local server is serving):
+          3. **Build** (~5 h: ~17 min for graph and trees, ~4.5 h for building shadows, measured 2026-09-25 — start it with `caffeinate -i` and let it run; writes `data/export/` over whatever a local server is serving):
              `caffeinate -i uv run python -m pipeline.build`
              Watch the edge/naming/canopy/buildings/shadows tally lines against the previous run's.
           4. **Ship** (deploy/README.md §5): `(cd web && npm run build)` only if the frontend changed since the last deploy, then `./deploy/smoke_test.sh`, then `HOST=deploy@<droplet-ip> ./deploy/deploy.sh`, then `curl -sS https://shadewalker.nyc/health`.
