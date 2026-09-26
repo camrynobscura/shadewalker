@@ -311,6 +311,18 @@ MAX_TREE_WEIGHT = 40.0
 # raise it without re-measuring the tail.
 MAX_TREE_WEIGHTS_PER_REQUEST = 8
 
+# glibc malloc arenas for the server process (server/malloc_arenas.py,
+# `server-memory`, 2026-09-26). By default glibc gives each allocating
+# thread its own arena (up to 8 per core) and an arena keeps freed memory
+# rather than returning it; /route runs on FastAPI's threadpool, so its
+# per-request arrays leave leftovers in several arenas at once. Measured in
+# an Ubuntu 24.04 container calibrated to the box (its load peak within
+# 1-2%), 4 requests at a time: +121 MB over the first requests with the
+# box's default of 8 arenas, then flat through 10,000 requests; +7 MB with
+# ONE arena, same throughput. One is safe here: route work holds the GIL,
+# so threads rarely wait on the allocator, and the box has one core.
+SERVER_MALLOC_ARENAS = 1
+
 # --- Geocoding proxy (server/geocode.py) --------------------------------
 # All geocoding goes through our own server, never straight from the
 # visitor's browser to a third party (decided 2026-08-30,

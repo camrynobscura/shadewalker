@@ -23,6 +23,7 @@ fresh cost array with two vectorized numpy lines — microseconds for the
 whole graph — which keeps every slider value exact rather than quantized.
 """
 
+import array
 import logging
 import gzip
 import json
@@ -52,6 +53,13 @@ SHADE_SLOTS = 288
 SHADE_ANCHOR_DAY = 15
 SHADE_LAYERS = ("trees", "buildings", "both")
 DENSITY_CACHE_SIZE = 8
+
+# load()'s dedupe keys pack (node pair, multigraph key, side) into ONE int
+# per edge (see load()'s MEMORY SHAPE): the key gets 17 bits, the side code
+# 3. load() raises rather than let an export that exceeds them collide.
+_DEDUPE_KEY_BITS = 17
+_DEDUPE_SIDE_BITS = 3
+_HASH_MASK = (1 << 64) - 1
 
 
 # igraph's C layer emits this RuntimeWarning from get_shortest_paths()
@@ -494,7 +502,26 @@ class GraphStore:
 
         Normally that is exactly one file (the citywide export), but the
         glob-and-merge shape is load-bearing: the e2e tier points
-        EXPORT_DIR at a directory holding only the pilot fixture."""
+        EXPORT_DIR at a directory holding only the pilot fixture.
+
+        MEMORY SHAPE (`server-memory`, 2026-09-26): every per-edge
+        temporary lives in a flat buffer (array.array / bytearray), never
+        as one Python object per edge. CPython's small-object allocator
+        returns memory to the OS only in whole 1 MiB arenas, and only once
+        an arena is completely empty. The previous loader built ~520 MB of
+        small temporaries (floats, id strings, dedupe tuples, an ndarray
+        and a bytes row per edge) interleaved with the ~120 MB of objects
+        that stay (node ids, names), so no arena ever emptied and the
+        process kept its load-time peak for life. Measured on Linux (an
+        Ubuntu 24.04 container calibrated to the box within 1-2%): 1,149
+        MB after load then, 574 MB now, output identical attribute for
+        attribute and route for route (HISTORY 2026-09-26). The only
+        per-edge Python objects left are the ones ijson creates for the
+        edge being read -- freed before the next edge, so the next one
+        reuses their memory -- and the permanent ones, which are SHARED:
+        one object per distinct street name, side or fold tuple. Keep it
+        that way: a per-edge list of fresh Python objects brings the
+        retention back."""
         export_paths = sorted(config.EXPORT_DIR.glob("*.json.gz"))
         if not export_paths:
             raise FileNotFoundError(
@@ -503,23 +530,6 @@ class GraphStore:
                 "SHADEWALKER_EXPORT_DIR at a directory holding a built "
                 "export to run against that instead."
             )
-        node_lonlat: list[list[float]] = []
-        edge_pairs: list[tuple[int, int]] = []  # (u_idx, v_idx) for igraph
-        length, deciduous, evergreen, counts = [], [], [], []
-        # .get()-defaulted on read: tiles exported before v19 (the committed
-        # pilot test fixture) predate the field entirely, and 0.0 is exactly
-        # what they mean -- no canopy credit was computed for them.
-        canopy_credit: list[float] = []
-        names: list[str] = []
-        kinds: list[str] = []
-        sides: list[str] = []
-        fold_names: list[tuple] = []
-        # One (n_points, 2) float64 array per edge, converted at ingest so
-        # geometry never sits around as Python lists; packed into _coord_buf
-        # after the loop.
-        coords_per_edge: list[np.ndarray] = []
-        seen_edges: dict[tuple, int] = {}  # (u, v, key, side) -> position in the lists above
-        seen_geometries: set[tuple] = set()  # (u, v, side, geometry hash) -- see below
         # Pass 1: every node from every export file, so the complete node universe
         # is known before any edge is ingested. STREAMED (ijson straight off
         # the gzip stream), never json.loads of the whole file: the parsed
@@ -528,13 +538,16 @@ class GraphStore:
         # Python floats, ~50x the bytes of the same points as arrays), and
         # holding it is what OOM'd the 2GB droplet. Each file is re-streamed
         # in pass 2 rather than held; the second decompress+parse costs
-        # seconds and keeps peak RAM near steady-state.
+        # seconds and keeps peak RAM near steady-state. Coordinates go
+        # straight into one flat double array (lon, lat, lon, lat, ...).
+        node_xy = array.array("d")
         for path in export_paths:
             with gzip.open(path, "rb") as f:
                 for node_id, (lon, lat) in ijson.kvitems(f, "nodes", use_float=True):
                     if node_id not in self._id_to_idx:
-                        self._id_to_idx[node_id] = len(node_lonlat)
-                        node_lonlat.append([lon, lat])
+                        self._id_to_idx[node_id] = len(node_xy) // 2
+                        node_xy.append(lon)
+                        node_xy.append(lat)
             # The sun table sits in meta at the top of the file; the
             # generator is abandoned as soon as it yields, so this costs a
             # few KB of parsing, not a pass.
@@ -542,9 +555,58 @@ class GraphStore:
                 table = next(ijson.items(f, "meta.sun_table", use_float=True), None)
                 if table is not None:
                     self._sun_table = table
-        shade_rows: list[bytes | None] = []
+        n_nodes = len(node_xy) // 2
 
-        def _emit(u_id, v_id, key, side, seg_length_m, decid, everg,
+        # Pass 2 state: flat columns, one entry per KEPT edge, all in step.
+        u_col = array.array("q")   # endpoints as node indices, in the export's own (u, v) order
+        v_col = array.array("q")
+        length = array.array("d")
+        deciduous = array.array("d")
+        evergreen = array.array("d")
+        counts = array.array("d")
+        # .get()-defaulted on read: tiles exported before v19 (the committed
+        # pilot test fixture) predate the field entirely, and 0.0 is exactly
+        # what they mean -- no canopy credit was computed for them.
+        canopy_credit = array.array("d")
+        # Lists of SHARED objects (see the docstring): the list itself is one
+        # buffer; its entries point at one object per distinct value.
+        names: list[str] = []
+        kinds: list[str] = []
+        sides: list[str] = []
+        fold_names: list[tuple] = []
+        # Every edge's points, packed as they arrive; coord_start/coord_count
+        # say where each kept edge's run is (a replaced duplicate's new run
+        # sits at the end, so runs are gathered back into edge order below).
+        coord_flat = array.array("d")
+        coord_start = array.array("q")
+        coord_count = array.array("q")
+        # Building shade rows, SHADE_SLOTS bytes each, packed as they arrive;
+        # shade_at[e] = which row is edge e's, or -1 (all zero / absent).
+        shade_buf = bytearray()
+        shade_at = array.array("q")
+        seen_edges: dict[int, int] = {}   # dedupe key -> position in the columns above
+        seen_geometries: set[int] = set()  # (pair, side, geometry hash) keys -- see below
+        side_codes: dict[str, int] = {}
+        shared_strings: dict = {}
+        shared_folds: dict[tuple, tuple] = {}
+
+        def _shared(value):
+            """The one object stored for this value (first seen wins)."""
+            return shared_strings.setdefault(value, value)
+
+        def _stash_coords(coords: np.ndarray) -> tuple[int, int]:
+            start = len(coord_flat) // 2
+            coord_flat.frombytes(coords.tobytes())
+            return start, len(coords)
+
+        def _stash_shade(shade: bytes | None) -> int:
+            if shade is None:
+                return -1
+            row = len(shade_buf) // SHADE_SLOTS
+            shade_buf.extend(shade)
+            return row
+
+        def _emit(u_idx, v_idx, key, side, seg_length_m, decid, everg,
                   cnt, canopy, name, kind, folds, coords, shade):
             """Add one edge (a whole edge, or one piece of a split one) to
             the graph arrays, through the existing border-dedupe. Splitting
@@ -564,7 +626,16 @@ class GraphStore:
             # the worse copy 3,740 times citywide, including a 1.7km Harlem
             # River Drive Greenway edge held at 0 trees while its other copy
             # had 95.)
-            dedupe_key = (*sorted((u_id, v_id)), key, side)
+            # The key is ONE int over node INDICES -- (sorted pair, key,
+            # side) packed into bits -- not a tuple of two id strings: the
+            # id <-> index map is a bijection, so equality is unchanged, and
+            # it is one small object per edge instead of three.
+            lo, hi = (u_idx, v_idx) if u_idx <= v_idx else (v_idx, u_idx)
+            side_code = side_codes.setdefault(side, len(side_codes))
+            if not (0 <= key < (1 << _DEDUPE_KEY_BITS) and side_code < (1 << _DEDUPE_SIDE_BITS)):
+                raise ValueError(f"edge key {key!r} / side {side!r} outside the dedupe key's bit fields")
+            pair = lo * n_nodes + hi
+            dedupe_key = (((pair << _DEDUPE_KEY_BITS) | key) << _DEDUPE_SIDE_BITS) | side_code
             existing = seen_edges.get(dedupe_key)
             if existing is not None:
                 stored_value = deciduous[existing] + evergreen[existing]
@@ -577,8 +648,8 @@ class GraphStore:
                     names[existing] = name
                     kinds[existing] = kind
                     fold_names[existing] = folds
-                    coords_per_edge[existing] = coords
-                    shade_rows[existing] = shade
+                    coord_start[existing], coord_count[existing] = _stash_coords(coords)
+                    shade_at[existing] = _stash_shade(shade)
                 return
 
             # OSM itself sometimes contains the same way twice -- identical
@@ -590,14 +661,15 @@ class GraphStore:
             # instead of storing them keeps this set small; genuinely
             # different parallel edges between the same nodes (a street and
             # a separate path) hash differently and both survive.
-            geometry_key = (*dedupe_key[:2], side,
-                            min(hash(coords.tobytes()), hash(coords[::-1].tobytes())))
+            geometry_hash = min(hash(coords.tobytes()), hash(coords[::-1].tobytes()))
+            geometry_key = (((pair << _DEDUPE_SIDE_BITS) | side_code) << 64) | (geometry_hash & _HASH_MASK)
             if geometry_key in seen_geometries:
                 return
             seen_geometries.add(geometry_key)
 
-            seen_edges[dedupe_key] = len(edge_pairs)
-            edge_pairs.append((self._id_to_idx[u_id], self._id_to_idx[v_id]))
+            seen_edges[dedupe_key] = len(u_col)
+            u_col.append(u_idx)
+            v_col.append(v_idx)
             length.append(seg_length_m)
             deciduous.append(decid)
             evergreen.append(everg)
@@ -605,36 +677,42 @@ class GraphStore:
             canopy_credit.append(canopy)
             names.append(name)
             kinds.append(kind)
-            sides.append(side)
+            sides.append(_shared(side))
             fold_names.append(folds)
-            coords_per_edge.append(coords)
-            shade_rows.append(shade)
+            start, count = _stash_coords(coords)
+            coord_start.append(start)
+            coord_count.append(count)
+            shade_at.append(_stash_shade(shade))
 
         # Pass 2: edges, streamed one dict at a time (freed as soon as it's
         # emitted), each through the dedupe above.
         for path in export_paths:
             with gzip.open(path, "rb") as f:
                 for edge in ijson.items(f, "edges.item", use_float=True):
-                    _emit(edge["u"], edge["v"], edge["key"], edge["side"],
+                    folds = tuple(_shared(n) for n in edge.get("fold_names", ()))
+                    shade_b64 = edge.get("building_shade")
+                    _emit(self._id_to_idx[edge["u"]], self._id_to_idx[edge["v"]],
+                          int(edge["key"]), edge["side"],
                           edge["length_m"], edge["tree_deciduous"],
                           edge["tree_evergreen"], edge["tree_count"],
-                          edge.get("tree_park_canopy", 0.0), edge["name"],
+                          edge.get("tree_park_canopy", 0.0), _shared(edge["name"]),
                           # sys.intern: 488k kind strings are ~7 distinct
                           # values; interning stores each once.
                           sys.intern(edge.get("kind", "")),
-                          tuple(edge.get("fold_names", ())),
+                          shared_folds.setdefault(folds, folds),
                           np.asarray(edge["coords"], dtype=np.float64),
                           # base64 of SHADE_SLOTS uint8 (pipeline/export.py);
                           # absent = all zero (an all-zero row is omitted at
                           # export, and older files predate the field).
-                          base64.b64decode(edge["building_shade"])
-                          if edge.get("building_shade") else None)
+                          base64.b64decode(shade_b64) if shade_b64 else None)
+        del seen_edges, seen_geometries, shared_strings, shared_folds
 
         self._names = names
         self._kinds = kinds
         self._sides = sides
         self._fold_names = fold_names
-        self._node_lonlat = np.array(node_lonlat)
+        self._node_lonlat = np.frombuffer(node_xy, dtype=np.float64).reshape(-1, 2).copy()
+        del node_xy
         # The data's actual extent — whatever export files are loaded —
         # rather than a hardcoded bbox from pipeline/config.py, so the
         # same server code is correct for the citywide export and the
@@ -648,23 +726,24 @@ class GraphStore:
         # zero-length edge turns route()'s partial-edge division into
         # 0/0 -> NaN -> a crash at int(round(tree_count)). Found live on a
         # Central Park test route. 1cm on a <5cm edge distorts nothing.
-        self._length = np.maximum(np.array(length, dtype=np.float32), 0.01)
-        self._tree_deciduous = np.array(deciduous, dtype=np.float32)
-        self._tree_evergreen = np.array(evergreen, dtype=np.float32)
-        self._tree_count = np.array(counts, dtype=np.float32)
-        self._tree_park_canopy = np.array(canopy_credit, dtype=np.float32)
+        self._length = np.maximum(np.frombuffer(length, dtype=np.float64).astype(np.float32), 0.01)
+        self._tree_deciduous = np.frombuffer(deciduous, dtype=np.float64).astype(np.float32)
+        self._tree_evergreen = np.frombuffer(evergreen, dtype=np.float64).astype(np.float32)
+        self._tree_count = np.frombuffer(counts, dtype=np.float64).astype(np.float32)
+        self._tree_park_canopy = np.frombuffer(canopy_credit, dtype=np.float64).astype(np.float32)
+        del length, deciduous, evergreen, counts, canopy_credit
 
-        # Building shade, slot-major: filled edge-major (one row per edge
-        # as it arrives) then transposed once, so each (month, hour) row
-        # is contiguous for the blend's four strided reads.
-        by_edge = np.zeros((len(shade_rows), SHADE_SLOTS), dtype=np.uint8)
-        with_shade = 0
-        for i, row in enumerate(shade_rows):
-            if row is not None:
-                by_edge[i] = np.frombuffer(row, dtype=np.uint8)
-                with_shade += 1
+        # Building shade, slot-major: gathered edge-major (one row per edge,
+        # by shade_at) then transposed once, so each (month, hour) row is
+        # contiguous for the blend's four strided reads.
+        shade_rows_of = np.frombuffer(shade_at, dtype=np.int64)
+        has_shade = shade_rows_of >= 0
+        rows = np.frombuffer(shade_buf, dtype=np.uint8).reshape(-1, SHADE_SLOTS)
+        by_edge = np.zeros((len(shade_rows_of), SHADE_SLOTS), dtype=np.uint8)
+        by_edge[has_shade] = rows[shade_rows_of[has_shade]]
         self._building_shade = np.ascontiguousarray(by_edge.T)
-        del by_edge, shade_rows
+        with_shade = int(has_shade.sum())
+        del by_edge, rows, shade_rows_of, has_shade, shade_buf, shade_at
         self._density_cache.clear()
         if with_shade:
             logger.info(f"[graph_store] building shade on {with_shade:,} edges "
@@ -672,12 +751,22 @@ class GraphStore:
 
         # Pack the edge shapes: one flat buffer + an offsets array (see
         # __init__). cumsum turns per-edge point counts into slice
-        # boundaries — offsets[e] is where edge e's points start.
-        point_counts = [len(edge_coords) for edge_coords in coords_per_edge]
+        # boundaries — offsets[e] is where edge e's points start. The
+        # gather re-orders coord_flat's runs into edge order (identity
+        # unless a duplicate replaced an earlier copy's geometry).
+        point_counts = np.frombuffer(coord_count, dtype=np.int64)
+        run_starts = np.frombuffer(coord_start, dtype=np.int64)
         self._coord_offsets = np.concatenate(([0], np.cumsum(point_counts))).astype(np.int64)
-        self._coord_buf = np.concatenate(coords_per_edge)
+        points = np.frombuffer(coord_flat, dtype=np.float64).reshape(-1, 2)
+        point_index = (np.repeat(run_starts - self._coord_offsets[:-1], point_counts)
+                       + np.arange(self._coord_offsets[-1]))
+        self._coord_buf = points[point_index]
+        del point_counts, run_starts, points, point_index, coord_flat, coord_start, coord_count
 
-        self._graph = igraph.Graph(n=len(node_lonlat), edges=edge_pairs, directed=False)
+        edge_pairs = np.column_stack((np.frombuffer(u_col, dtype=np.int64),
+                                      np.frombuffer(v_col, dtype=np.int64)))
+        del u_col, v_col
+        self._graph = igraph.Graph(n=n_nodes, edges=edge_pairs, directed=False)
 
         # No filtering here anymore -- every component is kept. This used to
         # drop everything but the largest connected component, because
@@ -700,7 +789,7 @@ class GraphStore:
         # PLAN.md's borough-boundary polygon plan.
         components = self._graph.connected_components(mode="weak")
         membership = np.asarray(components.membership, dtype=np.int32)
-        self._edge_component = membership[[u for u, _ in edge_pairs]]
+        self._edge_component = membership[edge_pairs[:, 0]]
         if len(components) > 1:
             sizes = sorted((len(component) for component in components), reverse=True)
             logger.info(f"[graph_store] {len(components)} disconnected components "
@@ -709,7 +798,7 @@ class GraphStore:
         self._build_edge_index()
 
         logger.info(f"[graph_store] {len(export_paths)} tile(s): "
-              f"{len(node_lonlat)} nodes, {len(edge_pairs)} edges loaded")
+              f"{n_nodes} nodes, {len(edge_pairs)} edges loaded")
 
     def _edge_coords(self, edge: int) -> np.ndarray:
         """Edge `edge`'s [lon, lat] points — a zero-copy view into the
