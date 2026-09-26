@@ -28,6 +28,13 @@ What is pinned, and why:
     all-zero; `layers` selects.
   - /route: NYC-time defaults, "month given -> day 15", validation of day
     against the month, hour, minute and layers, and the echo.
+  - night (PLAN `night-shade`): a dark slot counts as FULL shade, so dusk
+    climbs to 1.0 instead of falling to the stored 0; is_night needs
+    every blended slot dark; /route at night hands every weight the one
+    fastest route; no sun table, no night; the pinned test clock.
+
+The synthetic sun table is daylight in EVERY slot unless a test darkens
+some (`dark=`), so the blend tests above read the stored rows untouched.
 """
 
 import base64
@@ -41,7 +48,7 @@ from fastapi.testclient import TestClient
 
 from pipeline import config
 from server import app as server_app
-from server.graph_store import SHADE_ANCHOR_DAY, GraphStore
+from server.graph_store import SHADE_ANCHOR_DAY, GraphStore, _dark_slots
 
 RATE = config.DENSITY_AT_FULL_COVERAGE
 
@@ -77,7 +84,8 @@ _ROWS = {
                      m7h13=200, m7h14=100,                  # minute blend: 13:30 -> 150
                      m8h13=40,                              # day blend: Jul 30 -> 200 + 15/31*(40-200)
                      m12h11=120, m1h11=60,                  # Dec 31 -> Jan
-                     m7h23=255, m7h0=255),                  # 23:59 -> hour 0 wrap (synthetic)
+                     m7h23=255, m7h0=255,                   # 23:59 -> hour 0 wrap (synthetic)
+                     m7h20=200),                            # dusk: lit, and 21:00 dark in the night tests
     ("N", "B"): _row(m7h9=255, m7h10=255),
     ("A", "S"): _row(m7h16=255, m7h17=255),
     ("S", "B"): _row(m7h16=255, m7h17=255),
@@ -94,17 +102,22 @@ def _edge(u, v, length_m, deciduous=0.0, shade: bytes | None = None) -> dict:
     return record
 
 
-def _payload(with_rows=True, deciduous=0.0):
-    edges = [_edge("A", "N", DETOUR_M, deciduous, _ROWS[("A", "N")] if with_rows else None),
-             _edge("N", "B", DETOUR_M, deciduous, _ROWS[("N", "B")] if with_rows else None),
+def _payload(with_rows=True, deciduous=0.0, north_deciduous=0.0, dark=(), with_sun_table=True):
+    north = deciduous + north_deciduous
+    edges = [_edge("A", "N", DETOUR_M, north, _ROWS[("A", "N")] if with_rows else None),
+             _edge("N", "B", DETOUR_M, north, _ROWS[("N", "B")] if with_rows else None),
              _edge("A", "M", 100.0, deciduous),
              _edge("M", "B", 100.0, deciduous),
              _edge("A", "S", DETOUR_M, deciduous, _ROWS[("A", "S")] if with_rows else None),
              _edge("S", "B", DETOUR_M, deciduous, _ROWS[("S", "B")] if with_rows else None)]
-    table = [[None] * 24 for _ in range(12)]
+    table = [[[180.0, 30.0] for _ in range(24)] for _ in range(12)]    # daylight everywhere
     table[6][9] = [90.0, 40.0]
-    return {"meta": {"node_count": len(NODES), "edge_count": len(edges), "sun_table": table},
-            "nodes": {k: list(v) for k, v in NODES.items()}, "edges": edges}
+    for month, hour in dark:
+        table[month - 1][hour] = None
+    meta = {"node_count": len(NODES), "edge_count": len(edges)}
+    if with_sun_table:
+        meta["sun_table"] = table
+    return {"meta": meta, "nodes": {k: list(v) for k, v in NODES.items()}, "edges": edges}
 
 
 def _store(tmp_path, monkeypatch, **kw) -> GraphStore:
@@ -316,3 +329,111 @@ def test_route_uses_the_hour_it_is_given(client):
     noon = _get(client, month=7, hour=12, tree_weights=[15.0]).json()["routes"][0]["properties"]
     assert morning["shade_fraction"] == 1.0
     assert noon["shade_fraction"] == 0.0
+
+
+# ── night (PLAN `night-shade`) ───────────────────────────────────────────────
+
+# July's real dark slots (pipeline/sun.py, on the 15th: 21:00-05:00), plus
+# August's 20:00-23:00 (synthetic) so a late-July evening blends a lit
+# slot with a dark one across the month line.
+JULY_NIGHT = tuple([(7, h) for h in (21, 22, 23, 0, 1, 2, 3, 4, 5)]
+                   + [(8, h) for h in (20, 21, 22, 23)])
+
+
+def test_a_dark_slot_counts_as_full_shade(tmp_path, monkeypatch):
+    store = _store(tmp_path, monkeypatch, dark=JULY_NIGHT)
+    # the middle way has no row at all, so its shade at 02:00 is the night's
+    assert _shade(store, "A", "M", month=7, hour=2) == 1.0
+    # ...and it is the sun's doing: the trees-alone view has no night
+    assert _shade(store, "A", "M", month=7, hour=2, layers="trees") == 0.0
+
+
+def test_dusk_climbs_toward_full_shade(tmp_path, monkeypatch):
+    """The bug this step found: the stored 0 of a dark slot pulled the
+    last hour before dark toward NO shade (20:30 read 100, not 227.5)."""
+    store = _store(tmp_path, monkeypatch, dark=JULY_NIGHT)
+    assert _shade(store, "A", "N", month=7, hour=20) == pytest.approx(200 / 255)
+    assert _shade(store, "A", "N", month=7, hour=20, minute=30) == pytest.approx((200 + 255) / 2 / 255)
+    by_minute = [_shade(store, "A", "N", month=7, hour=20, minute=m) for m in range(60)]
+    assert by_minute == sorted(by_minute)
+    assert _shade(store, "A", "N", month=7, hour=21) == 1.0
+    # across the month line: July 31 at 20:00 is 16/31 of August's dark 20:00
+    assert _shade(store, "A", "M", month=7, day=31, hour=20) == pytest.approx(16 / 31)
+
+
+def test_dawn_falls_from_full_shade(tmp_path, monkeypatch):
+    store = _store(tmp_path, monkeypatch, dark=JULY_NIGHT)
+    assert _shade(store, "A", "M", month=7, hour=5, minute=15) == pytest.approx(0.75)
+    assert _shade(store, "A", "M", month=7, hour=6) == 0.0
+
+
+@pytest.mark.parametrize("moment, night", [
+    ((7, 15, 20, 59), False),    # 1/60 of lit 20:00 still counts
+    ((7, 15, 21, 0), True),
+    ((7, 15, 2, 30), True),
+    ((7, 15, 5, 0), True),
+    ((7, 15, 5, 1), False),      # 06:00 is lit
+    ((7, 31, 20, 0), False),     # lit July 20:00 blended with dark August 20:00
+    ((8, 15, 20, 0), True),      # August's own 20:00, alone
+    ((7, 15, 12, 0), False),
+])
+def test_is_night_only_when_every_blended_slot_is_dark(tmp_path, monkeypatch, moment, night):
+    store = _store(tmp_path, monkeypatch, dark=JULY_NIGHT)
+    assert store.is_night(*moment) is night
+
+
+def test_an_export_without_a_sun_table_has_no_night(tmp_path, monkeypatch):
+    store = _store(tmp_path, monkeypatch, with_sun_table=False)
+    assert store.is_night(7, 15, 2, 0) is False
+    assert _shade(store, "A", "M", month=7, hour=2) == 0.0
+
+
+def test_a_sun_table_of_the_wrong_shape_is_refused():
+    with pytest.raises(ValueError):
+        _dark_slots([[None] * 24] * 11)
+    with pytest.raises(ValueError):
+        _dark_slots([[None] * 23] * 12)
+
+
+def test_route_at_night_is_the_fastest_route_for_every_weight(tmp_path, monkeypatch):
+    """The live bug (2026-09-25, Fifth Ave at 02:00): MED/MAX still took a
+    canopy detour in the dark. Trees fully shade the north way here, so by
+    day MED and MAX take it; at 02:00 every weight gets the straight way."""
+    store = _store(tmp_path, monkeypatch, dark=JULY_NIGHT, north_deciduous=RATE * DETOUR_M)
+    monkeypatch.setattr(server_app, "store", store)
+    client = TestClient(server_app.app)
+
+    day = _get(client, month=7, hour=12).json()
+    assert day["night"] is False
+    assert day["routes"][3]["properties"]["length_m"] == pytest.approx(2 * DETOUR_M, abs=0.2)
+
+    night = _get(client, month=7, hour=2).json()
+    assert night["night"] is True
+    props = [route["properties"] for route in night["routes"]]
+    assert [p["tree_weight"] for p in props] == [0.0, 5.0, 15.0, 40.0]
+    assert all(route["geometry"] == night["routes"][0]["geometry"] for route in night["routes"])
+    assert props[0]["length_m"] == pytest.approx(200.0, abs=0.2)
+    assert all(p["shade_fraction"] == 1.0 for p in props)
+
+    # the trees-alone view keeps the trees' own night: MAX still detours
+    trees = _get(client, month=7, hour=2, layers="trees").json()
+    assert trees["night"] is False
+    assert trees["routes"][3]["properties"]["length_m"] == pytest.approx(2 * DETOUR_M, abs=0.2)
+
+
+def test_a_pinned_clock_stands_in_for_now(client, monkeypatch):
+    monkeypatch.setattr(server_app, "PINNED_NOW", server_app.parse_pinned_now("2026-07-15T12:00"))
+    body = _get(client).json()
+    assert (body["month"], body["day"], body["hour"], body["minute"]) == (7, 15, 12, 0)
+    assert _get(client, hour=2).json()["hour"] == 2        # a request's own time still wins
+
+
+def test_the_pinned_clock_is_new_york_time():
+    assert server_app.parse_pinned_now(None) is None
+    assert server_app.parse_pinned_now("") is None
+    noon = server_app.parse_pinned_now("2026-07-15T12:00")
+    assert (noon.hour, noon.utcoffset().total_seconds()) == (12, -4 * 3600)
+    # an offset is converted, not dropped: 16:00 UTC is noon in July's New York
+    assert server_app.parse_pinned_now("2026-07-15T16:00+00:00").hour == 12
+    with pytest.raises(ValueError):
+        server_app.parse_pinned_now("noon")

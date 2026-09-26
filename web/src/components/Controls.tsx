@@ -54,6 +54,9 @@ interface ControlsProps {
   /** The NONE (tree_weight=0) route -- the baseline `selected` is compared
    * against in the comparison line below. */
   baseline: RouteFeature | null
+  /** The route's moment is dark (RouteResponse.night): every preset is the
+   * same fastest route, and the box below says so in one line. */
+  night: boolean
   /** A rejected route (out of coverage, no path found, server down) --
    * shown right above the address fields since that's what it's actually
    * about, and it's where a user's attention already is right after
@@ -77,6 +80,7 @@ export function Controls({
   onUseLocation,
   selected,
   baseline,
+  night,
   error,
 }: ControlsProps) {
   // Radios become one group (arrow keys move between them, only one can be
@@ -286,14 +290,31 @@ export function Controls({
                 (VoiceOver pass, 2026-08-31). Every announcement now opens
                 with which section is talking. */}
             <span className={styles.visuallyHidden}>Shade priority: </span>
-            <p className={styles.modeLine}>
-              <span className={styles.promptSymbol} aria-hidden="true">
-                &gt;
-              </span>
-              <span className={styles.modeVal}>{selectedPreset?.spoken.toLowerCase()}</span>{' '}
-              <span aria-hidden="true">//</span> {selectedPreset?.hint}
-            </p>
-            {comparison && (
+            {night ? (
+              /* After dark (PLAN `night-shade`) every preset is the same
+                 fastest route at 100%: the mode hint would promise detours
+                 that don't happen and the comparison would read +0 three
+                 times, so one line replaces both (copy: user, 2026-09-26).
+                 The buttons stay live -- they just agree. */
+              <p className={styles.modeLine}>
+                <span aria-hidden="true">
+                  <span className={styles.promptSymbol}>&gt;</span>
+                  <span className={styles.modeVal}>after dark</span> // the whole city is in shade
+                </span>
+                <span className={styles.visuallyHidden}>
+                  After dark. The whole city is in shade, so every setting gives the fastest route.
+                </span>
+              </p>
+            ) : (
+              <p className={styles.modeLine}>
+                <span className={styles.promptSymbol} aria-hidden="true">
+                  &gt;
+                </span>
+                <span className={styles.modeVal}>{selectedPreset?.spoken.toLowerCase()}</span>{' '}
+                <span aria-hidden="true">//</span> {selectedPreset?.hint}
+              </p>
+            )}
+            {comparison && !night && (
               <p className={styles.comparisonLine}>
                 <span aria-hidden="true">
                   <span className={styles.promptSymbol}>&gt;</span>

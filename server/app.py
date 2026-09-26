@@ -83,6 +83,30 @@ from server.graph_store import GraphStore, SHADE_ANCHOR_DAY, SHADE_LAYERS, clamp
 # the OS having zone files.
 NYC_TZ = ZoneInfo("America/New_York")
 
+
+def parse_pinned_now(raw: str | None) -> datetime | None:
+    """SHADEWALKER_NOW -> the moment /route treats as "now", or None.
+
+    ISO 8601; without an offset it is New York clock time
+    (2026-07-15T12:00), with one it is converted to it. Raises on
+    anything else, so a typo stops the server at startup instead of
+    answering every request with a 500."""
+    if not raw:
+        return None
+    moment = datetime.fromisoformat(raw)
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=NYC_TZ)
+    return moment.astimezone(NYC_TZ)
+
+
+# TEST-ONLY. The Playwright tier (web/playwright.config.ts) pins "now" so
+# the suite checks the same thing whatever the wall clock says: since
+# `night-shade` a run after dark gets four identical routes at 100%
+# shade, and the shade specs would pass there without testing anything.
+# A request's own month/day/hour/minute still win over it. NEVER set in
+# production -- the live site's time is the real one.
+PINNED_NOW = parse_pinned_now(os.environ.get("SHADEWALKER_NOW"))
+
 # Route graph_store's loggers somewhere visible under uvicorn, which
 # configures its own loggers but leaves the root logger bare (FIXES item
 # 9) -- without this, load()'s startup summary and the dead-gap-entry
@@ -106,6 +130,9 @@ async def lifespan(app: FastAPI):
     if MALLOC_ARENAS_CAPPED:
         logging.getLogger(__name__).info(
             f"[app] malloc arenas capped at {config.SERVER_MALLOC_ARENAS}")
+    if PINNED_NOW is not None:
+        logging.getLogger(__name__).warning(
+            f"[app] clock pinned at {PINNED_NOW.isoformat()} (SHADEWALKER_NOW) -- tests only")
     store.load()
     yield
 
@@ -256,7 +283,7 @@ def route(
     # York's now. The parameters exist for tests, tools and curl -- and are
     # exactly what a time-of-day control would send if one is ever built.
     # One clock read, so month/day/hour/minute can't straddle a boundary.
-    now = datetime.now(NYC_TZ)
+    now = PINNED_NOW or datetime.now(NYC_TZ)
     if month is None:
         month, day = now.month, now.day if day is None else day
     elif day is None:
@@ -315,13 +342,27 @@ def route(
         raise HTTPException(status_code=422, detail="No path between these points")
     start, end = pair
 
+    # After dark every edge is fully shaded (graph_store.is_night), so every
+    # tree_weight prices an edge by its length alone and would find the
+    # plain shortest path. Route it ONCE, at weight 0, and hand that route
+    # to every weight: one Dijkstra instead of four, and the presets cannot
+    # split on a floating-point tie (PLAN `night-shade`). layers="trees" is
+    # the trees-alone view, and the dark belongs to the sun: no night there.
+    night = layers != "trees" and store.is_night(month, day, hour, minute)
     results = []
-    for tree_weight in tree_weights:
-        result = store.route(start, end, tree_weight=tree_weight, month=month,
+    if night:
+        result = store.route(start, end, tree_weight=0.0, month=month,
                              day=day, hour=hour, minute=minute, layers=layers)
         if result is None:
             raise HTTPException(status_code=422, detail="No path between these points")
-        results.append(result)
+        results = [result for _ in tree_weights]
+    else:
+        for tree_weight in tree_weights:
+            result = store.route(start, end, tree_weight=tree_weight, month=month,
+                                 day=day, hour=hour, minute=minute, layers=layers)
+            if result is None:
+                raise HTTPException(status_code=422, detail="No path between these points")
+            results.append(result)
 
     # Guarantee the Shade_priority promise: a higher tree_weight must never
     # come back with less shade than a lower one. route() optimizes a smooth
@@ -351,6 +392,10 @@ def route(
         "hour": hour,
         "minute": minute,
         "layers": layers,
+        # True when the whole moment is dark: every route above is the same
+        # fastest route at full shade, and the frontend says so in one line
+        # instead of comparing four identical presets.
+        "night": night,
         # All routes share the same street-by-street shape whenever there's
         # no real path to describe (start == end) -- doesn't matter which
         # one this is built from in that case, so the first is as good as

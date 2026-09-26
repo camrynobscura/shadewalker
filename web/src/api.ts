@@ -83,6 +83,11 @@ export interface RouteResponse {
    * Always "both" from this frontend; the switch exists server-side for a
    * possible layer selector. */
   layers: 'trees' | 'buildings' | 'both'
+  /** True when the whole moment is dark (server/graph_store.py's
+   * is_night): with no sun every street is shade, so every route here is
+   * the same fastest route at 100%. The Shade_priority box says so in one
+   * line instead of comparing four identical presets. */
+  night: boolean
   description: string
 }
 

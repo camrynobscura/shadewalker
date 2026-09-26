@@ -54,6 +54,53 @@ SHADE_ANCHOR_DAY = 15
 SHADE_LAYERS = ("trees", "buildings", "both")
 DENSITY_CACHE_SIZE = 8
 
+
+def _slot(month: int, hour: int) -> int:
+    """Index of (month, hour) in a shade row: month-major, month 1-12."""
+    return (month - 1) * 24 + hour
+
+
+def _blend_weights(month: int, day: int, hour: int, minute: int) -> list[tuple[int, float]]:
+    """The four (slot, weight) pairs a moment blends -- the two hours
+    around the minute, in the two months around the day. The weights sum
+    to 1; _building_fraction's docstring has the rule and its examples. On
+    an anchor (minute 0, day 15) some weights are 0.0: those slots are not
+    part of the moment, and is_night ignores them."""
+    f = minute / 60.0
+    h0, h1 = hour, (hour + 1) % 24
+    if day >= SHADE_ANCHOR_DAY:
+        m0, m1 = month, month % 12 + 1
+        g = (day - SHADE_ANCHOR_DAY) / calendar.monthrange(config.SUN_ANCHOR_YEAR, m0)[1]
+    else:
+        m0, m1 = (month - 2) % 12 + 1, month
+        span = calendar.monthrange(config.SUN_ANCHOR_YEAR, m0)[1]
+        g = (span - SHADE_ANCHOR_DAY + day) / span
+    return [
+        (_slot(m0, h0), (1.0 - g) * (1.0 - f)),
+        (_slot(m0, h1), (1.0 - g) * f),
+        (_slot(m1, h0), g * (1.0 - f)),
+        (_slot(m1, h1), g * f),
+    ]
+
+
+def _dark_slots(sun_table) -> np.ndarray:
+    """(SHADE_SLOTS,) bool, laid out like a shade row: True where the
+    export's sun table holds None -- the sun at or below the horizon at
+    that slot's anchor (pipeline/sun.py). No table (an export from before
+    the shade step; the dedupe tests' tiles) means no known night: all
+    False, so those exports keep their trees-only nights exactly."""
+    dark = np.zeros(SHADE_SLOTS, dtype=bool)
+    if sun_table is None:
+        return dark
+    if len(sun_table) != 12 or any(len(row) != 24 for row in sun_table):
+        raise ValueError("meta.sun_table must be 12 months x 24 hours")
+    for month_index, row in enumerate(sun_table):
+        for hour, sun in enumerate(row):
+            if sun is None:
+                dark[_slot(month_index + 1, hour)] = True
+    return dark
+
+
 # load()'s dedupe keys pack (node pair, multigraph key, side) into ONE int
 # per edge (see load()'s MEMORY SHAPE): the key gets 17 bits, the side code
 # 3. load() raises rather than let an export that exceeds them collide.
@@ -468,7 +515,10 @@ class GraphStore:
         # _building_fraction. All-zero when the export predates the field
         # (the committed pilot fixture, tests' synthetic tiles).
         self._building_shade = np.zeros((SHADE_SLOTS, 0), dtype=np.uint8)
-        self._sun_table = None   # meta.sun_table, for /health and tools; unused by routing
+        self._sun_table = None   # meta.sun_table as loaded; routing reads it only via _dark_slots
+        # Which slots are night in that table -- a dark slot counts as FULL
+        # shade (_building_fraction). All False until a table loads.
+        self._dark_slots = np.zeros(SHADE_SLOTS, dtype=bool)
         # Density arrays per (month, day, hour, minute, layers): route()
         # calls _edge_density 8x per request (2 per weight x 4), and the
         # blend reads four rows of the table each time. Tiny and
@@ -555,6 +605,7 @@ class GraphStore:
                 table = next(ijson.items(f, "meta.sun_table", use_float=True), None)
                 if table is not None:
                     self._sun_table = table
+        self._dark_slots = _dark_slots(self._sun_table)
         n_nodes = len(node_xy) // 2
 
         # Pass 2 state: flat columns, one entry per KEPT edge, all in step.
@@ -1019,24 +1070,46 @@ class GraphStore:
         the row. Month lengths are the anchor year's (config.SUN_ANCHOR_YEAR)
         so the weights are the same every year; a Feb 29 request lands
         half-way to March, which is where it belongs.
+
+        A DARK slot counts as full shade (PLAN `night-shade`, 2026-09-26).
+        The build computes daylight slots only, so a dark slot's stored
+        row is 0 -- "not computed", not "no shade". Read literally, it made
+        the last hour before dark blend TOWARD zero: on the pilot fixture,
+        July 15's length-weighted mean went 0.784 at 20:00 -> 0.523 at
+        20:20 -> 0.013 at 20:59 while the sun set. With no sun there is
+        nothing to stand in, so dusk now climbs to 1.0 and dawn falls from
+        it, and once every slot the moment blends is dark (is_night) every
+        edge is 1.0. The rows stay what the build wrote: they are building
+        shadows, and night is not one.
         """
         rows = self._building_shade
-        f = minute / 60.0
-        h0, h1 = hour, (hour + 1) % 24
-        if day >= SHADE_ANCHOR_DAY:
-            m0, m1 = month, month % 12 + 1
-            g = (day - SHADE_ANCHOR_DAY) / calendar.monthrange(config.SUN_ANCHOR_YEAR, m0)[1]
-        else:
-            m0, m1 = (month - 2) % 12 + 1, month
-            span = calendar.monthrange(config.SUN_ANCHOR_YEAR, m0)[1]
-            g = (span - SHADE_ANCHOR_DAY + day) / span
+        if self.is_night(month, day, hour, minute):
+            # Exactly 1.0: the weighted sum below can land a float's width
+            # short of it, and night's promise is "every edge, fully".
+            return np.ones(rows.shape[1], dtype=np.float32)
+        blended = np.zeros(rows.shape[1], dtype=np.float32)
+        for slot, weight in _blend_weights(month, day, hour, minute):
+            if weight == 0.0:
+                continue
+            if self._dark_slots[slot]:
+                blended += weight * 255.0
+            else:
+                blended += weight * rows[slot].astype(np.float32)
+        return blended / 255.0
 
-        def at(m, h):
-            return rows[(m - 1) * 24 + h].astype(np.float32)
-
-        early = (1.0 - f) * at(m0, h0) + f * at(m0, h1)
-        late = (1.0 - f) * at(m1, h0) + f * at(m1, h1)
-        return ((1.0 - g) * early + g * late) / 255.0
+    def is_night(self, month: int, day: int, hour: int, minute: int = 0) -> bool:
+        """True when every slot this moment blends is dark (zero-weight
+        slots aside). Then _building_fraction is 1.0 on every edge, every
+        edge is fully shaded, and every tree_weight prices an edge by its
+        length alone -- /route's night branch rests on exactly that. In
+        July (dark slots 21-23 and 0-5 in the real table): 20:59 is not
+        night, since 1/60 of 20:00 still counts; 21:00 is, and so is
+        05:00; 05:01 is not. Always False on an export without a sun
+        table."""
+        for slot, weight in _blend_weights(month, day, hour, minute):
+            if weight > 0.0 and not self._dark_slots[slot]:
+                return False
+        return True
 
     def _edge_density(self, month: int, day: int = SHADE_ANCHOR_DAY,
                       hour: int | None = None, minute: int = 0,
