@@ -62,6 +62,9 @@ The model choices that matter:
   month. The server blends the nearest hours and months for the
   requested minute and combines the result with tree shade by union, so
   adding buildings can only ever add shade to an edge, never remove it.
+  Hours when the sun is down count as full shade: the last hour before
+  dark climbs toward 100%, and once it's fully dark `/route` gives every
+  preset the same shortest route and says `night: true`.
 - **One request, four routes.** Every call computes the full
   Shade_priority ladder (weights 0/5/15/40), so switching presets
   client-side is instant.
