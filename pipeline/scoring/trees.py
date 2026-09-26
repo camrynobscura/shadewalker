@@ -25,8 +25,8 @@ The cap is not decoration. The largest `dbh` in the live citywide data is
 would dominate an entire block's score.
 
 Seasonality is applied later, not here: the server multiplies the deciduous
-share by config.CANOPY_BY_MONTH for the month being routed, so one scored
-export serves every month. Evergreens are held out of that multiplication,
+share by config.CANOPY_BY_MONTH, blended by day for the date being routed
+(graph_store._tree_fraction), so one scored export serves every day. Evergreens are held out of that multiplication,
 which is the only reason the split exists.
 """
 

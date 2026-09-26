@@ -253,9 +253,22 @@ CONDITION_SCORES = {
 CONDITION_DEFAULT = 0.5  # missing/blank condition — treat like Unknown
 
 # Monthly canopy factor for deciduous trees (index 0 = January). Evergreens
-# always count at 1.0. NYC street trees leaf out ~late April and drop
-# ~November; bare branches still cast a little shade, hence the 0.2 floor.
-CANOPY_BY_MONTH = [0.2, 0.2, 0.3, 0.6, 0.95, 1.0, 1.0, 1.0, 0.95, 0.8, 0.45, 0.25]
+# always count at 1.0. Each value is the factor ON THE 15TH; the server
+# blends between 15ths by day (graph_store._month_blend, PLAN
+# `tree-seasonal-blend`), so nothing jumps on the 1st. Hand-set, and since
+# 2026-09-26 checked against NYC satellite data (history/leaf-season.md):
+#
+# - SPRING was a month early (Mar/Apr/May were 0.3/0.6/0.95). NASA's MODIS
+#   land-surface phenology (MCD12Q2 v6.1, 500 m, 2015-2024) puts NYC
+#   street-tree neighbourhoods at 15% of their green-up ~Apr 16, 50% ~May 8,
+#   90% ~Jun 5 (parks Apr 3 / May 2 / Jun 3): on April 15 leaves have
+#   barely started, on May 15 they are about half grown.
+# - Summer agrees. Fall can't be checked that way -- turned leaves still
+#   shade but no longer read as green -- and isn't contradicted by it.
+# - The 0.2 bare-branch floor is kept on purpose: a leafless crown does cut
+#   ~25-60% of the sun (Heisler 1986, USDA FS; Youngberg 1983), about half
+#   its summer shade, but as thin branch shadows no walker would call shade.
+CANOPY_BY_MONTH = [0.2, 0.2, 0.2, 0.35, 0.75, 1.0, 1.0, 1.0, 0.95, 0.8, 0.45, 0.25]
 
 # Genera that keep leaves year-round. Checked against the genus (first word of
 # `genusspecies`); everything not listed is treated as deciduous, which is the
