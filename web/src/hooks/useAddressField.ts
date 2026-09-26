@@ -85,10 +85,19 @@ export function useAddressField(
 
   // A fresh option list starts with nothing highlighted -- keeping an
   // old index would silently point Enter at whatever happens to occupy
-  // that position now.
-  useEffect(() => {
+  // that position now. Reset DURING RENDER (React's "adjusting state when
+  // a prop changes" pattern), so the new list and its reset reach the
+  // screen together. It was an effect until 2026-09-26, and an effect
+  // runs a beat after the list is already showing: an ArrowDown landing
+  // in that gap was wiped a moment later, so Enter found nothing
+  // highlighted and resolved the empty text instead (the flaky
+  // recent-addresses e2e on CI; reproduced by pressing ArrowDown the
+  // instant the list rendered).
+  const [highlightedList, setHighlightedList] = useState(options)
+  if (highlightedList !== options) {
+    setHighlightedList(options)
     setActiveIndex(-1)
-  }, [options])
+  }
 
   function onChange(value: string) {
     setQuery(value)
