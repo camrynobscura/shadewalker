@@ -79,3 +79,14 @@ export async function mockGeocode(page: Page): Promise<void> {
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results }) })
   })
 }
+
+/** Asks the REAL test backend for 02:00 on July 15 (PLAN `night-shade`).
+ * The app sends no time and the backend's clock is pinned to noon
+ * (playwright.config.ts), so this appends the time to the app's own /route
+ * request on its way out; a request's own time beats the pinned clock
+ * server-side, so the answer is a genuine night response, nothing staged. */
+export async function atNight(page: Page): Promise<void> {
+  await page.route('**/route?*', (route) =>
+    route.continue({ url: `${route.request().url()}&month=7&hour=2` }),
+  )
+}

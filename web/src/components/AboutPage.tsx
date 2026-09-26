@@ -128,7 +128,8 @@ export function AboutPage() {
             you ask, the app works out where the sun is and which sidewalks the nearby buildings shade at that
             moment. It also takes into account that certain trees lose their leaves in the fall/winter, so the
             same street scores shadier in July than in April, and one side of it scores shadier at 9am than at
-            4pm.
+            4pm. After dark, the whole city is in shade, so every Shade_priority setting gives the fastest
+            route.
           </p>
           <p>
             When you ask for a route, the app weighs your walking time and the shade along your potential

@@ -223,6 +223,7 @@ export default function App() {
             error={error}
             selected={selected}
             baseline={baseline}
+            night={route?.night ?? false}
           />
           <RouteStats route={selected} description={route?.description ?? ''} loading={loading} />
         </section>

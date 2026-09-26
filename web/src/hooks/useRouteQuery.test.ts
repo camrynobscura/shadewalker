@@ -48,6 +48,7 @@ function fakeResponse(): RouteResponse {
     hour: 13,
     minute: 0,
     layers: 'both',
+    night: false,
     description: 'Head 100 m along Court Street.',
   }
 }

@@ -38,7 +38,14 @@ import { defineConfig, devices } from '@playwright/test'
 // tier is hermetic and your dev environment keeps running beside it.
 // SHADEWALKER_API_URL points the built frontend at the test backend;
 // vite.config.ts reads it and falls back to 8000 for ordinary development.
+//
+// SHADEWALKER_NOW pins the backend's "now" to July 15 at noon. The app sends
+// no time, so without it every run tested whatever the wall clock said --
+// and since `night-shade` a run after dark gets four identical routes at
+// 100% shade, where the shade specs pass without testing anything. Night
+// has its own spec, which asks for 02:00 explicitly (night.spec.ts).
 const API_PORT = 8001
+const PINNED_NOW = '2026-07-15T12:00'
 const WEB_PORT = 4173
 
 export default defineConfig({
@@ -49,7 +56,7 @@ export default defineConfig({
     {
       command:
         'mkdir -p data/e2e_export && cp tests/fixtures/pilot.json.gz data/e2e_export/ && ' +
-        `SHADEWALKER_EXPORT_DIR="$(pwd)/data/e2e_export" SHADEWALKER_DISABLE_RATE_LIMIT=1 uv run uvicorn server.app:app --port ${API_PORT}`,
+        `SHADEWALKER_EXPORT_DIR="$(pwd)/data/e2e_export" SHADEWALKER_DISABLE_RATE_LIMIT=1 SHADEWALKER_NOW=${PINNED_NOW} uv run uvicorn server.app:app --port ${API_PORT}`,
       cwd: '..',
       url: `http://localhost:${API_PORT}/health`,
       reuseExistingServer: false,
