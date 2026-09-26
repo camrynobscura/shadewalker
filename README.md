@@ -16,8 +16,8 @@ and the city's Building Footprints with their roof heights.
 - 488,638 routable sidewalk and path edges across all five boroughs
 - ~900,000 city tree records, scored onto the side of the street they
   actually shade
-- One 54 MB export; the whole city routes from ~1.3 GB of RAM (measured
-  on the server, 2026-09-25)
+- One 54 MB export; the whole city routes from ~0.6 GB of RAM (measured
+  on the server, 2026-09-26)
 - Every request computes all four shade presets; typical full response
   ~400 ms
 - 382 backend tests, 83 unit, 45 end-to-end, CI on every PR
