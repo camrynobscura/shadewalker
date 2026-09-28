@@ -75,11 +75,15 @@ export interface RouteResponse {
   snapped: { start: Point; end: Point }
   /** The moment the shade was computed for, New York clock: the set
    * departure time, or the server's "now" when none was (or
-   * the anchor day, the 15th, when a request pins only the month). */
+   * the anchor day, the 15th, when a request pins only the month). For an
+   * arrival, the fastest route's leave time: every route is scored for
+   * that one moment. */
   month: number
   day: number
   hour: number
   minute: number
+  /** True when the time sent was an arrival (arrive by). */
+  arrive: boolean
   /** Which shade the routing cost saw: "trees" | "buildings" | "both".
    * Always "both" from this frontend; the switch exists server-side for a
    * possible layer selector. */
@@ -110,7 +114,8 @@ async function errorDetail(res: Response): Promise<string | null> {
 
 /** `time` null = now: no time goes out, and the server uses New York's
  * clock. A picked time sends all four parts -- never the year, which the
- * server's shade table doesn't have (see WalkTime). */
+ * server's shade table doesn't have (see Moment) -- plus `arrive` when
+ * it's the time the walk has to end by. */
 export async function fetchRoute(
   from: Point,
   to: Point,
@@ -130,6 +135,7 @@ export async function fetchRoute(
     params.set('day', String(time.day))
     params.set('hour', String(time.hour))
     params.set('minute', String(time.minute))
+    if (time.arrive) params.set('arrive', 'true')
   }
   const res = await fetch(`/route?${params}`, { signal })
   if (!res.ok) {

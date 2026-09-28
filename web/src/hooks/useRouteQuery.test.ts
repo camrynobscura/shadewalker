@@ -47,6 +47,7 @@ function fakeResponse(): RouteResponse {
     day: 15,
     hour: 13,
     minute: 0,
+    arrive: false,
     layers: 'both',
     night: false,
     description: 'Head 100 m along Court Street.',
@@ -166,7 +167,7 @@ describe('useRouteQuery', () => {
 
   it('sends the set walk time; a new time waits for FIND_ROUTE', async () => {
     fetchRoute.mockResolvedValue(fakeResponse())
-    const sunday = { year: 2026, month: 9, day: 27, hour: 9, minute: 0 }
+    const sunday = { year: 2026, month: 9, day: 27, hour: 9, minute: 0, arrive: false }
     const { result } = renderHook(() => useRouteQuery(START, END, 15, sunday))
     await waitFor(() => expect(result.current.route).not.toBeNull())
     expect(fetchRoute).toHaveBeenCalledTimes(1)
@@ -225,10 +226,14 @@ describe('useRouteQuery', () => {
     act(() => result.current.setEnd(END))
     await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(1))
 
-    act(() => result.current.setWalkTime({ year: 2026, month: 9, day: 27, hour: 9, minute: 0 }))
+    act(() =>
+      result.current.setWalkTime({ year: 2026, month: 9, day: 27, hour: 9, minute: 0, arrive: false }),
+    )
     await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(2))
     // The same trip again is no change: no third fetch.
-    act(() => result.current.setWalkTime({ year: 2026, month: 9, day: 27, hour: 9, minute: 0 }))
+    act(() =>
+      result.current.setWalkTime({ year: 2026, month: 9, day: 27, hour: 9, minute: 0, arrive: false }),
+    )
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(fetchRoute).toHaveBeenCalledTimes(2)
   })
@@ -244,9 +249,22 @@ describe('useRouteQuery', () => {
     expect(fetchRoute).toHaveBeenCalledTimes(2)
   })
 
+  it("routeWalkTime stays the drawn route's own while the next one loads", async () => {
+    fetchRoute.mockResolvedValue(fakeResponse())
+    const arrival = { year: 2026, month: 9, day: 27, hour: 13, minute: 0, arrive: true }
+    const { result } = renderHook(() => useRouteQuery(START, END, 15, arrival, true))
+    await waitFor(() => expect(result.current.routeWalkTime).toEqual(arrival))
+
+    fetchRoute.mockImplementation(() => new Promise(() => {})) // the next route never lands
+    act(() => result.current.setWalkTime({ ...arrival, hour: 14 }))
+    await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(2))
+    expect(result.current.walkTime?.hour).toBe(14)
+    expect(result.current.routeWalkTime).toEqual(arrival)
+  })
+
   it('setting an equal walk time again does not re-fetch', async () => {
     fetchRoute.mockResolvedValue(fakeResponse())
-    const sunday = { year: 2026, month: 9, day: 27, hour: 9, minute: 0 }
+    const sunday = { year: 2026, month: 9, day: 27, hour: 9, minute: 0, arrive: false }
     const { result } = renderHook(() => useRouteQuery(START, END, 15, sunday))
     await waitFor(() => expect(result.current.route).not.toBeNull())
 

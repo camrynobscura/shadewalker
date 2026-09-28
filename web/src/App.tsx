@@ -8,12 +8,13 @@ import { RouteStats } from './components/RouteStats'
 import { useLocationFill } from './hooks/useLocationFill'
 import { MOBILE_LAYOUT_QUERY, useMediaQuery } from './hooks/useMediaQuery'
 import { useRouteQuery } from './hooks/useRouteQuery'
-import { formatWalkTime, parseWalkTime } from './walkTime'
+import { formatWalkTime, walkTimeFromLink, walkTimeParam } from './walkTime'
 import styles from './App.module.css'
 
 /* ── URL state ────────────────────────────────────────────────────────────
    The whole route request lives in the query string (?from=lat,lon&to=…&w=…,
-   plus &at=2026-09-27T09:00 once a departure time is set) so any
+   plus &at=2026-09-27T09:00 once a departure time is set, or
+   &arrive=… for an arrival) so any
    route is bookmarkable and shareable. Read once at startup, write on
    every change with replaceState (which doesn't pollute Back-button history).
    The one entry the app adds is a phone's route screen, so Back returns to
@@ -57,6 +58,7 @@ export default function App() {
     treeWeight,
     walkTime,
     route,
+    routeWalkTime,
     selected,
     baseline,
     loading,
@@ -72,7 +74,7 @@ export default function App() {
     parsePoint(initialParams.get('from')),
     parsePoint(initialParams.get('to')),
     initialTreeWeight(initialParams),
-    parseWalkTime(initialParams.get('at')),
+    walkTimeFromLink(initialParams),
     !isMobile,
   )
 
@@ -176,7 +178,7 @@ export default function App() {
     if (end) params.set('to', formatPoint(end))
     if (end && endLabel) params.set('toq', endLabel)
     params.set('w', String(treeWeight))
-    if (walkTime) params.set('at', formatWalkTime(walkTime))
+    if (walkTime) params.set(walkTimeParam(walkTime), formatWalkTime(walkTime))
     searchRef.current = `?${params}`
     // Keeps the entry's state: it marks a phone's route screen.
     window.history.replaceState(window.history.state, '', searchRef.current)
@@ -315,6 +317,7 @@ export default function App() {
             walkTime={walkTime}
             onWalkTimeChange={setWalkTime}
             routes={route?.routes ?? null}
+            routeWalkTime={routeWalkTime}
             loading={loading}
             view={showRoute ? 'route' : 'plan'}
             onFindRoute={() => setFindPending(true)}

@@ -5,10 +5,10 @@ import type { LocationFillStatus } from '../hooks/useLocationFill'
 import { useAddressField } from '../hooks/useAddressField'
 import { MOBILE_LAYOUT_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
 import { AddressField } from './AddressField'
-import { BackIcon, ClockIcon, CrosshairIcon } from './icons'
+import { BackIcon, CrosshairIcon } from './icons'
 import { TREE_PRESETS } from '../presets'
 import { CANOPY_SHARE_HIDES_TREE_COUNT, displayShade, LOW_SHADE_FRACTION } from '../shade'
-import { describeWalkTimeShort, type WalkTime } from '../walkTime'
+import { describeClock, leaveTime, type WalkTime } from '../walkTime'
 import { TimeControl } from './TimeControl'
 import styles from './Controls.module.css'
 
@@ -47,11 +47,14 @@ interface ControlsProps {
    * pressing Enter on an address or tapping the map (the map sits directly
    * above this panel, not down near RouteStats where this used to live). */
   error: string | null
-  /** The walk's departure time, or null for "leave now". */
+  /** The walk's departure or arrival time, or null for "leave now". */
   walkTime: WalkTime | null
   onWalkTimeChange: (time: WalkTime | null) => void
   /** Every preset's route from the last FIND_ROUTE, for the rows' numbers. */
   routes: RouteFeature[] | null
+  /** The walk time `routes` were fetched for: for an arrival, each row's
+   * leave time counts back from it. */
+  routeWalkTime: WalkTime | null
   /** A route request is in flight: the rows and lines hold back their
    * numbers rather than show the previous trip's. */
   loading: boolean
@@ -95,6 +98,7 @@ export function Controls({
   walkTime,
   onWalkTimeChange,
   routes,
+  routeWalkTime,
   loading,
   view,
   onFindRoute,
@@ -295,9 +299,14 @@ export function Controls({
             field={end}
             onSubmit={() => void findRoute()}
           />
-          {/* When, right under where (Google Maps' order): leaving now,
-              or a departure the route is scored for. */}
-          <TimeControl walkTime={walkTime} onChange={onWalkTimeChange} />
+          {/* The trip's options, right under where (Google Maps' order),
+              as small pills: most walks are right now, so the time
+              shouldn't weigh what the addresses do (user, 2026-09-28).
+              Here a change waits for FIND_ROUTE, like the addresses; on
+              desktop it routes by itself. */}
+          <div className={styles.tripOptions}>
+            <TimeControl walkTime={walkTime} onChange={onWalkTimeChange} />
+          </div>
         </div>
         <button
           ref={findRef}
@@ -314,10 +323,8 @@ export function Controls({
       {/* The route screen on a phone (hidden until FIND_ROUTE; see App's
           `view`); on desktop simply the panel's second section. */}
       <div className={styles.routeGroup}>
-        {/* Phone only (CSS): the two address boxes and the time boiled
-            down to one line, and the way back to change them. Where and
-            when both show here (user, 2026-09-27), so a route for 9 am
-            can't pass for "now". */}
+        {/* Phone only (CSS): the two address boxes boiled down to one
+            line, and the way back to change them. */}
         <button ref={tripRef} type="button" className={styles.trip} onClick={onBack}>
           <BackIcon />
           <span className={styles.tripWhere}>
@@ -329,11 +336,21 @@ export function Controls({
             <span className={styles.visuallyHidden}> to </span>
             {end.query}
           </span>
-          <span className={styles.tripWhen}>
-            <ClockIcon />
-            {walkTime ? describeWalkTimeShort(walkTime) : 'Leave now'}
-          </span>
         </button>
+        {/* Phone only (CSS): the same pills under the trip line, so the
+            time shows beside the route it's for -- a route for 9 am can't
+            pass for "now" -- and a change here re-routes at once, the way
+            Shade_priority is instant (user, 2026-09-28). Desktop has the
+            one row under the addresses. */}
+        <div className={styles.routeTripOptions}>
+          <TimeControl
+            walkTime={walkTime}
+            onChange={(time) => {
+              onWalkTimeChange(time)
+              onFindRoute()
+            }}
+          />
+        </div>
 
         {/* Divider lives on this wrapper, not the fieldset below -- a
             fieldset with its own border makes browsers render <legend>
@@ -364,6 +381,13 @@ export function Controls({
                   : (routes?.find((r) => r.properties.tree_weight === preset.value) ?? null)
                 const numbers = feature?.properties ?? null
                 const shadePct = numbers ? Math.round(displayShade(numbers.shade_fraction) * 100) : 0
+                // Arrive by: each route's own leave time, first in its row
+                // (user, 2026-09-28 -- bare: the time box and the phone's
+                // trip line already say Arrive).
+                const leave =
+                  numbers && routeWalkTime?.arrive
+                    ? describeClock(leaveTime(routeWalkTime, numbers.minutes))
+                    : null
                 const checked = treeWeight === preset.value
                 return (
                   <label key={preset.value} className={styles.routeRow}>
@@ -383,6 +407,7 @@ export function Controls({
                       {numbers ? (
                         <>
                           <span className={styles.routeMeta}>
+                            {leave && `${leave} · `}
                             {etaText(numbers.minutes)} · {formatDistance(numbers.length_m)}
                           </span>
                           <span className={styles.routeShade}>
@@ -403,7 +428,7 @@ export function Controls({
                     </span>
                     <span className={styles.visuallyHidden}>
                       {numbers
-                        ? `${preset.spoken}: ${spokenEta(numbers.minutes)}, ${spokenDistance(numbers.length_m)}, ${shadePct} percent shaded`
+                        ? `${preset.spoken}: ${leave ? `leave by ${leave}, ` : ''}${spokenEta(numbers.minutes)}, ${spokenDistance(numbers.length_m)}, ${shadePct} percent shaded`
                         : `${preset.spoken}: ${preset.hint}`}
                     </span>
                   </label>

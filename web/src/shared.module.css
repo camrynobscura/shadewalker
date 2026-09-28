@@ -18,7 +18,8 @@
 /* The small-caps "section/field title" look: Start_point, Shade_priority,
    My_route, Directions. */
 .sectionLabel {
-  font-size: var(--section-label-size);
+  font-size: var(--caps-size);
+  font-weight: var(--caps-weight);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--text);
@@ -37,6 +38,8 @@
    caps, tracked, and one run of text so the underline carries through
    the space to the arrow. */
 .pageLink {
+  font-size: var(--caps-size);
+  font-weight: var(--caps-weight);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--green-dim);

@@ -1,8 +1,10 @@
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
   type SyntheticEvent,
@@ -10,100 +12,132 @@ import {
 import { MOBILE_LAYOUT_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
 import {
   dateInputValue,
-  describeWalkTimeShort,
+  describeWalkTime,
   fromInputs,
   nowInNewYork,
   timeInputValue,
+  type Moment,
   type WalkTime,
 } from '../walkTime'
 import { ChevronDownIcon, ClockIcon } from './icons'
 import styles from './TimeControl.module.css'
 
-/** The picker's choices. `arrive` (arrive by) is the next PR's. */
-type Mode = 'now' | 'depart'
+/** The picker's choices. */
+type Mode = 'now' | 'depart' | 'arrive'
 
 const MODES: { value: Mode; label: string; spoken: string }[] = [
   { value: 'now', label: 'LEAVE NOW', spoken: 'Leave now' },
   { value: 'depart', label: 'DEPART AT', spoken: 'Depart at' },
+  { value: 'arrive', label: 'ARRIVE BY', spoken: 'Arrive by' },
 ]
 
+/** How long a desktop date or time field waits after its last change
+ * before it re-routes (user, 2026-09-28): a time input changes value on
+ * every keystroke, so typing 13:00 passes through 01:00 on the way. */
+const TYPING_PAUSE_MS = 500
+
+function modeOf(t: WalkTime | null): Mode {
+  return t ? (t.arrive ? 'arrive' : 'depart') : 'now'
+}
+
+/** The two native inputs' values. */
+interface Fields {
+  date: string
+  time: string
+}
+
+function fieldsOf(t: Moment): Fields {
+  return { date: dateInputValue(t), time: timeInputValue(t) }
+}
+
 interface TimeControlProps {
-  /** The picked departure, or null for "leave now". */
+  /** The picked departure or arrival, or null for "leave now". */
   walkTime: WalkTime | null
   onChange: (time: WalkTime | null) => void
 }
 
-/** The walk's time (PLAN `phone-space`): a third box under the two
- * address boxes, styled like them (user, 2026-09-27 -- after trying it
- * on the map and as a pill: on the phone's plan screen there's room for
- * a real box). It reads
- * "Leave now", or "Depart Sun, Sep 27, 9:05 AM" once a time is set: the
- * box IS the sign a route isn't for right now, which matters most in a
- * shared link. It opens a picker: LEAVE NOW or DEPART AT, and for DEPART
- * AT the device's own date and time inputs. On desktop that's a card in
- * the panel under the line; on a phone it's the whole screen, the way
- * address search takes it (user: a card looked cramped there). DONE
- * applies; CANCEL (phone), Escape or the line again walk away without
- * applying. */
+/** The walk's time as a small pill (PLAN `time-and-layers`, user
+ * 2026-09-28: most walks are right now, so it shouldn't weigh as much as
+ * the addresses). It reads "Leave now", or the set time ("Arrive 1:00
+ * PM") -- the words alone say a shared link isn't for now.
+ * Tapping it opens the picker -- LEAVE NOW, DEPART AT or ARRIVE BY, the
+ * last two with the device's own date and time inputs:
+ *
+ * - Phone: the whole screen, the way address search takes it; DONE
+ *   applies, CANCEL or Escape walk away.
+ * - Desktop: a card under the pill that applies as you go -- a pick at
+ *   once, a typed date or time after a short pause -- since desktop
+ *   routes by itself. The pill again or Escape closes it.
+ *
+ * The caller places it (a pill row) and decides what a change does:
+ * Controls mounts one under the addresses and, on a phone, one on the
+ * route screen that re-routes. */
 export function TimeControl({ walkTime, onChange }: TimeControlProps) {
   const isMobile = useMediaQuery(MOBILE_LAYOUT_QUERY)
   const [open, setOpen] = useState(false)
-  // Drafts: nothing applies until DONE, so flipping modes or half-picked
-  // values never fire a route request.
-  const [mode, setMode] = useState<Mode>('now')
-  const [date, setDate] = useState('')
-  const [time, setTime] = useState('')
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const dialogRef = useRef<HTMLDialogElement>(null)
-  const modeGroupRef = useRef<HTMLFieldSetElement>(null)
-  const dialogId = useId()
-  const labelId = useId()
-  const valueId = useId()
-  const titleId = useId()
-  const modeName = useId()
-  const dateId = useId()
-  const timeId = useId()
-
-  /* A native <dialog>, opened two ways. On a phone, showModal(): the
-     browser puts it above everything and makes the page behind it inert,
-     so Tab can't wander onto controls the full screen hides, and it
-     focuses the first control (CANCEL). On desktop, show(): a plain card
-     in the panel under the line, page still usable, focus sent by hand
-     to the checked mode (arrow keys then move between modes). */
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (!dialog) return
-    if (open && !dialog.open) {
-      if (isMobile) {
-        dialog.showModal()
-      } else {
-        dialog.show()
-        modeGroupRef.current?.querySelector<HTMLInputElement>('input:checked')?.focus()
-      }
-    } else if (!open && dialog.open) {
-      dialog.close()
-    }
-  }, [open, isMobile])
-
-  function toggle() {
-    if (open) {
-      setOpen(false)
-      return
-    }
-    // DEPART AT's fields start on the set time, or on New York's now --
-    // not the device's clock, which for a visitor planning from elsewhere
-    // is the wrong city.
-    const shown = walkTime ?? nowInNewYork()
-    setMode(walkTime ? 'depart' : 'now')
-    setDate(dateInputValue(shown))
-    setTime(timeInputValue(shown))
-    setOpen(true)
-  }
+  const pillRef = useRef<HTMLButtonElement>(null)
+  const pickerId = useId()
 
   function close() {
     setOpen(false)
-    buttonRef.current?.focus()
+    pillRef.current?.focus()
   }
+
+  return (
+    <>
+      <button
+        ref={pillRef}
+        type="button"
+        className={styles.pill}
+        aria-expanded={open}
+        aria-haspopup={isMobile ? 'dialog' : undefined}
+        // Only while open: the picker isn't in the DOM otherwise.
+        aria-controls={open ? pickerId : undefined}
+        onClick={() => setOpen(!open)}
+      >
+        <ClockIcon />
+        <span className={styles.visuallyHidden}>Start time: </span>
+        {walkTime ? describeWalkTime(walkTime) : 'Leave now'}
+        <ChevronDownIcon />
+      </button>
+      {open &&
+        (isMobile ? (
+          <PhonePicker id={pickerId} walkTime={walkTime} onChange={onChange} onClose={close} />
+        ) : (
+          <DesktopCard id={pickerId} walkTime={walkTime} onChange={onChange} onClose={close} />
+        ))}
+    </>
+  )
+}
+
+interface PickerProps extends TimeControlProps {
+  id: string
+  onClose: () => void
+}
+
+/* ── phone: the whole screen ──────────────────────────────────────────── */
+
+function PhonePicker({ id, walkTime, onChange, onClose }: PickerProps) {
+  // Drafts, from the set time or New York's now (not the device's clock,
+  // the wrong city for a visitor planning from elsewhere): nothing
+  // applies until DONE, so flipping modes never fires a route request.
+  const [mode, setMode] = useState<Mode>(() => modeOf(walkTime))
+  const [fields, setFields] = useState(() => fieldsOf(walkTime ?? nowInNewYork()))
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
+
+  /* showModal() puts it above everything and makes the page behind it
+     inert, so Tab can't wander onto controls the full screen hides; it
+     focuses the first control (CANCEL). Mounted only while open. The
+     close() on the way out is what hands focus back to the pill: the
+     browser returns it to whatever opened a modal when it CLOSES, but
+     not when it's just removed. A layout effect, because its cleanup runs
+     while the dialog is still in the document. */
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current
+    dialog?.showModal()
+    return () => dialog?.close()
+  }, [])
 
   function apply(e: FormEvent) {
     e.preventDefault()
@@ -111,142 +145,184 @@ export function TimeControl({ walkTime, onChange }: TimeControlProps) {
       onChange(null)
     } else {
       // `required` inputs mean the form can't submit with an empty field.
-      const picked = fromInputs(date, time)
-      if (picked) onChange(picked)
+      const picked = fromInputs(fields.date, fields.time)
+      if (picked) onChange({ ...picked, arrive: mode === 'arrive' })
     }
-    close()
+    onClose()
   }
 
-  // Escape closes the desktop card too (a modal dialog handles its own,
-  // below; a show()n one doesn't).
-  function onKeyDown(e: KeyboardEvent) {
-    if (open && e.key === 'Escape') close()
-  }
-
-  // A modal dialog also closes ITSELF on Escape (its cancel event); keep
-  // that from happening behind React's back, so `open` stays the truth.
+  // A modal dialog closes ITSELF on Escape (its cancel event); keep that
+  // from happening behind React's back.
   function onCancel(e: SyntheticEvent) {
     e.preventDefault()
-    close()
+    onClose()
   }
 
   return (
-    <div className={styles.whenField} onKeyDown={onKeyDown}>
-      {/* Built from the address field's own parts (Controls.module.css),
-          so the three boxes match: a visible Start_time label on desktop,
-          and on a phone the label hides and a clock chip takes the spot
-          the A and B chips hold. */}
-      <div className={styles.whenHead}>
-        <span id={labelId} className={styles.whenLabel}>
-          <span aria-hidden="true">Start_time</span>
-          <span className={styles.visuallyHidden}>Start time</span>
-        </span>
-      </div>
-      <div className={styles.whenWrap}>
-        <span className={styles.whenMarker} aria-hidden="true">
-          <ClockIcon />
-        </span>
-        {/* Named by the label AND the value ("Start time Leave now"): a
-            <label for> would replace the button's text as its name. */}
-        <button
-          ref={buttonRef}
-          type="button"
-          className={styles.whenBox}
-          aria-labelledby={`${labelId} ${valueId}`}
-          aria-expanded={open}
-          aria-controls={dialogId}
-          onClick={toggle}
-        >
-          <span id={valueId}>{walkTime ? `Depart ${describeWalkTimeShort(walkTime)}` : 'Leave now'}</span>
+    <dialog ref={dialogRef} id={id} className={styles.picker} aria-labelledby={titleId} onCancel={onCancel}>
+      <form className={styles.form} onSubmit={apply}>
+        <div className={styles.head}>
+          {/* Names the dialog; twin spans: Start_time on screen, "Start
+              time" spoken. */}
+          <h2 id={titleId} className={styles.title}>
+            <span aria-hidden="true">Start_time</span>
+            <span className={styles.visuallyHidden}>Start time</span>
+          </h2>
+          {/* The full screen covers the pill that opened it, so it needs
+              its own way out. Same word as address search. */}
+          <button type="button" className={styles.cancel} onClick={onClose}>
+            CANCEL
+          </button>
+        </div>
+        <ModePicker mode={mode} onMode={setMode} />
+        {mode !== 'now' && <WhenFields fields={fields} onFields={setFields} />}
+        <button type="submit" className={styles.done}>
+          DONE
         </button>
-        <span className={styles.whenChevron} aria-hidden="true">
-          <ChevronDownIcon />
-        </span>
+      </form>
+    </dialog>
+  )
+}
+
+/* ── desktop: a card that applies as you go ───────────────────────────── */
+
+function DesktopCard({ id, walkTime, onChange, onClose }: PickerProps) {
+  const mode = modeOf(walkTime)
+  const [fields, setFields] = useState(() => fieldsOf(walkTime ?? nowInNewYork()))
+  const cardRef = useRef<HTMLDivElement>(null)
+  const pending = useRef<number | undefined>(undefined)
+
+  // Focus the checked mode, so arrow keys move between them at once.
+  useEffect(() => {
+    cardRef.current?.querySelector<HTMLInputElement>('input:checked')?.focus()
+  }, [])
+  // A typed change still waiting when the card closes is dropped.
+  useEffect(() => () => window.clearTimeout(pending.current), [])
+
+  function apply(next: Fields, nextMode: Mode) {
+    const picked = fromInputs(next.date, next.time)
+    if (picked) onChange({ ...picked, arrive: nextMode === 'arrive' })
+  }
+
+  // A pick re-routes at once, for the time the fields show (user,
+  // 2026-09-28). Coming from LEAVE NOW -- or from a field left empty --
+  // they start again at New York's now; between DEPART AT and ARRIVE BY
+  // they keep their time.
+  function pickMode(next: Mode) {
+    window.clearTimeout(pending.current)
+    if (next === 'now') {
+      onChange(null)
+      return
+    }
+    const shown = mode === 'now' || !fromInputs(fields.date, fields.time) ? fieldsOf(nowInNewYork()) : fields
+    setFields(shown)
+    apply(shown, next)
+  }
+
+  function editFields(next: Fields) {
+    setFields(next)
+    window.clearTimeout(pending.current)
+    pending.current = window.setTimeout(() => apply(next, mode), TYPING_PAUSE_MS)
+  }
+
+  function onKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Escape') onClose()
+  }
+
+  return (
+    <div ref={cardRef} id={id} className={styles.card} onKeyDown={onKeyDown}>
+      <ModePicker mode={mode} onMode={pickMode} />
+      {mode !== 'now' && <WhenFields fields={fields} onFields={editFields} />}
+    </div>
+  )
+}
+
+/* ── the shared parts ─────────────────────────────────────────────────── */
+
+interface ModePickerProps {
+  mode: Mode
+  onMode: (mode: Mode) => void
+}
+
+/** LEAVE NOW / DEPART AT / ARRIVE BY: one native radio group (arrow keys
+ * move between them), each word over a faint track like the route rows'
+ * meters, with a jade bar that slides to the pick. */
+function ModePicker({ mode, onMode }: ModePickerProps) {
+  const name = useId()
+  const picked = MODES.findIndex((m) => m.value === mode)
+  // The CSS sizes each track, and the bar, from its word's letter count
+  // (the type is monospace), and slides the bar to the picked third.
+  const bar = {
+    '--count': MODES.length,
+    '--pick': picked,
+    '--pick-chars': MODES[picked].label.length,
+  } as CSSProperties
+  return (
+    <fieldset className={styles.modes}>
+      <legend className={styles.visuallyHidden}>Start time</legend>
+      <div className={styles.tabs} style={bar}>
+        {MODES.map((m) => (
+          <label key={m.value} className={styles.tab} style={{ '--chars': m.label.length } as CSSProperties}>
+            <input
+              type="radio"
+              name={name}
+              value={m.value}
+              checked={mode === m.value}
+              onChange={() => onMode(m.value)}
+              className={styles.tabInput}
+            />
+            {/* VoiceOver spells out caps (L-O-W), so the spoken twin. */}
+            <span className={styles.tabText} aria-hidden="true">
+              {m.label}
+            </span>
+            <span className={styles.visuallyHidden}>{m.spoken}</span>
+          </label>
+        ))}
+        <span className={styles.tabBar} aria-hidden="true" />
       </div>
-      <dialog
-        ref={dialogRef}
-        id={dialogId}
-        className={styles.picker}
-        aria-labelledby={titleId}
-        onCancel={onCancel}
-      >
-        <form className={styles.form} onSubmit={apply}>
-          <div className={styles.head}>
-            {/* Twin spans, the app's terminal-voice technique: the screen
-                shows Start_time, a screen reader says "Start time". It
-                names the dialog. */}
-            <h2 id={titleId} className={styles.title}>
-              <span aria-hidden="true">Start_time</span>
-              <span className={styles.visuallyHidden}>Start time</span>
-            </h2>
-            {/* Phone only (CSS): the full screen covers the line that
-                opened it, so it needs its own way out. Same word as
-                address search. */}
-            <button type="button" className={styles.cancel} onClick={close}>
-              CANCEL
-            </button>
-          </div>
-          {/* Segmented radios with twin-span labels (VoiceOver spells out
-              caps: L-O-W). */}
-          <fieldset ref={modeGroupRef} className={styles.modes}>
-            <legend className={styles.visuallyHidden}>When you leave</legend>
-            <div className={styles.segmented}>
-              {MODES.map((m) => (
-                <label key={m.value} className={styles.segment}>
-                  <input
-                    type="radio"
-                    name={modeName}
-                    value={m.value}
-                    checked={mode === m.value}
-                    onChange={() => setMode(m.value)}
-                    className={styles.segmentInput}
-                  />
-                  <span className={styles.segmentText} aria-hidden="true">
-                    {m.label}
-                  </span>
-                  <span className={styles.visuallyHidden}>{m.spoken}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          {mode === 'depart' && (
-            <>
-              <div className={styles.field}>
-                <label htmlFor={dateId} className={styles.fieldLabel}>
-                  date
-                </label>
-                <input
-                  id={dateId}
-                  type="date"
-                  required
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className={styles.input}
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor={timeId} className={styles.fieldLabel}>
-                  time
-                </label>
-                <input
-                  id={timeId}
-                  type="time"
-                  required
-                  value={time}
-                  onChange={(e) => setTime(e.target.value)}
-                  className={styles.input}
-                />
-              </div>
-              <p className={styles.caption}>New York time</p>
-            </>
-          )}
-          <div className={styles.actions}>
-            <button type="submit" className={styles.done}>
-              DONE
-            </button>
-          </div>
-        </form>
-      </dialog>
+    </fieldset>
+  )
+}
+
+interface WhenFieldsProps {
+  fields: Fields
+  onFields: (fields: Fields) => void
+}
+
+/** Date and time side by side (user, 2026-09-28). The time's label says
+ * whose clock: the shade is New York's, whatever zone the device is in
+ * ("NYC", not "EST", which is wrong from March to November). */
+function WhenFields({ fields, onFields }: WhenFieldsProps) {
+  const dateId = useId()
+  const timeId = useId()
+  return (
+    <div className={styles.fields}>
+      <div className={styles.field}>
+        <label htmlFor={dateId} className={styles.fieldLabel}>
+          date
+        </label>
+        <input
+          id={dateId}
+          type="date"
+          required
+          value={fields.date}
+          onChange={(e) => onFields({ ...fields, date: e.target.value })}
+          className={styles.input}
+        />
+      </div>
+      <div className={styles.field}>
+        <label htmlFor={timeId} className={styles.fieldLabel}>
+          time (NYC)
+        </label>
+        <input
+          id={timeId}
+          type="time"
+          required
+          value={fields.time}
+          onChange={(e) => onFields({ ...fields, time: e.target.value })}
+          className={styles.input}
+        />
+      </div>
     </div>
   )
 }

@@ -31,7 +31,8 @@
   min-width: var(--target-min);
   min-height: var(--target-min);
   padding: var(--space-sm);
-  font-size: var(--font-size-sm);
+  font-size: var(--caps-size);
+  font-weight: var(--caps-weight);
   letter-spacing: 0.1em;
   color: var(--text);
   text-underline-offset: 3px;

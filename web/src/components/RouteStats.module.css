@@ -9,12 +9,9 @@
   gap: var(--space-lg);
 }
 
-/* Explicit font-weight: <h2>/<h3> carry a bold browser default that the
-   matching label/legend in Controls don't. */
 .sectionTitle {
   composes: sectionLabel from '../shared.module.css';
   margin: 0 0 var(--space-sm);
-  font-weight: normal;
 }
 
 .directionsGroup {
@@ -400,7 +397,8 @@
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 0;
-  font-size: var(--font-size-md);
+  font-size: var(--caps-size);
+  font-weight: var(--caps-weight);
   cursor: pointer;
 }
 

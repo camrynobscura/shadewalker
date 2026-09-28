@@ -35,9 +35,13 @@ export interface UseRouteQueryResult {
   start: Point | null
   end: Point | null
   treeWeight: number
-  /** The set departure time, or null for "leave now". */
+  /** The set departure or arrival time, or null for "leave now". */
   walkTime: WalkTime | null
   route: RouteResponse | null
+  /** The walk time `route` was fetched for. Not always `walkTime`: that
+   * is already the next request's while it loads, and an arrival's route
+   * rows count their leave times back from the one their numbers are for. */
+  routeWalkTime: WalkTime | null
   /** The Feature matching the currently selected treeWeight -- what
    * RouteStats displays, and one of the two lines MapView draws. */
   selected: RouteFeature | null
@@ -106,6 +110,7 @@ export function useRouteQuery(
   )
 
   const [route, setRoute] = useState<RouteResponse | null>(null)
+  const [routeWalkTime, setRouteWalkTime] = useState<WalkTime | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -175,6 +180,7 @@ export function useRouteQuery(
     fetchRoute(request.start, request.end, TREE_WEIGHTS, controller.signal, request.walkTime)
       .then((data) => {
         setRoute(data)
+        setRouteWalkTime(request.walkTime)
         setSnappedStart(data.snapped.start)
         setSnappedEnd(data.snapped.end)
         setLoading(false)
@@ -218,6 +224,7 @@ export function useRouteQuery(
     treeWeight,
     walkTime,
     route,
+    routeWalkTime,
     selected,
     baseline,
     loading,
