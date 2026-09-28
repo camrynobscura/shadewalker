@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { mockGeocode, POINT_A, POINT_B, routeUrl } from './fixtures'
+import { mockGeocode, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
 
 /** The steady-preset-camera guarantee (MapView's RouteFraming guard):
  * flipping Shade_priority holds the camera still while the newly
@@ -43,7 +43,7 @@ async function drawRoute(page: Page) {
   // Start at NONE so the switch to MAX below crosses the widest gap the
   // presets offer -- the pair most likely to have different bounds.
   await page.goto(routeUrl(POINT_A, POINT_B, 0))
-  await expect(page.getByText('shaded', { exact: true })).toBeVisible()
+  await expect(routeDrawn(page)).toBeVisible()
 }
 
 test('switching presets holds the camera while the route stays in view', async ({ page }) => {

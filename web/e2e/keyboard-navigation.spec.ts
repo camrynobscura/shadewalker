@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { mockGeocode, POINT_A, POINT_B, routeUrl } from './fixtures'
+import { mockGeocode, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
 
 // axe-core inspects markup, not actual tab behavior — this checks the part
 // it can't: that CLAUDE.md's accessibility promises (skip link, logical
@@ -13,7 +13,7 @@ test('reaches and operates every control in order via keyboard alone', async ({ 
   await page.goto(routeUrl(POINT_A, POINT_B))
   // Wait for the route so both fields hold text and their ✕ accessories
   // (which replaced CLEAR_ROUTE, 2026-09-02) are part of the tab order.
-  await expect(page.getByText('distance', { exact: true })).toBeVisible()
+  await expect(routeDrawn(page)).toBeVisible()
 
   await page.keyboard.press('Tab')
   await expect(page.getByRole('link', { name: 'Skip to route controls' })).toBeFocused()
@@ -39,18 +39,24 @@ test('reaches and operates every control in order via keyboard alone', async ({ 
   await page.keyboard.press('Tab')
   await expect(page.getByRole('button', { name: 'Clear end point' })).toBeFocused()
 
+  // Then the time box under the addresses: when, right after where.
+  // (No FIND_ROUTE on desktop: it routes by itself.)
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('button', { name: 'Leave now' })).toBeFocused()
+
   // Shade_priority is one native radiogroup tab stop: focus lands on
-  // whichever preset is already checked (MED, from routeUrl's default
-  // w=15), and arrow keys move both focus and the checked value together.
+  // whichever row is already checked (MED, from routeUrl's default w=15),
+  // and arrow keys move both focus and the checked value together. The
+  // rows run shadiest first (MAX, MED, LOW, NONE), so down from MED is LOW.
   await page.keyboard.press('Tab')
   const medRadio = page.getByRole('radio', { name: 'MEDIUM' })
   await expect(medRadio).toBeFocused()
   await expect(medRadio).toBeChecked()
 
-  await page.keyboard.press('ArrowRight')
-  const maxRadio = page.getByRole('radio', { name: 'MAX' })
-  await expect(maxRadio).toBeFocused()
-  await expect(maxRadio).toBeChecked()
+  await page.keyboard.press('ArrowDown')
+  const lowRadio = page.getByRole('radio', { name: 'LOW' })
+  await expect(lowRadio).toBeFocused()
+  await expect(lowRadio).toBeChecked()
 
   // Enter/Space activate buttons reached this way, same as a pointer
   // click: clearing the start field drops its text, point, and the route
@@ -61,7 +67,7 @@ test('reaches and operates every control in order via keyboard alone', async ({ 
   // The ✕ unmounts as it clears; a keyboard activation must land focus on
   // the emptied input, not on <body> (audit 2026-09-09).
   await expect(page.getByRole('combobox', { name: 'Start point' })).toBeFocused()
-  await expect(page.getByText('distance', { exact: true })).toBeHidden()
+  await expect(routeDrawn(page)).toBeHidden()
   await expect(page.getByRole('button', { name: 'Use location' })).toBeVisible()
 })
 

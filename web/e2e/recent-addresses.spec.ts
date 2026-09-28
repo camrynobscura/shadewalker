@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { mockGeocode, POINT_A, POINT_B, routeUrl } from './fixtures'
+import { mockGeocode, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
 
 test('deliberate entries become recents once a route draws', async ({ page }) => {
   await mockGeocode(page)
@@ -21,7 +21,7 @@ test('deliberate entries become recents once a route draws', async ({ page }) =>
   // the suggestion's full label.
   await end.fill('court')
   await page.getByRole('option', { name: 'Court St & Baltic St, Brooklyn' }).click()
-  await expect(page.getByText('distance', { exact: true })).toBeVisible()
+  await expect(routeDrawn(page)).toBeVisible()
 
   await page.getByRole('button', { name: 'Clear start point' }).click()
   await start.click()
@@ -35,7 +35,7 @@ test('deliberate entries become recents once a route draws', async ({ page }) =>
   // carries its stored point, so the route redraws with no new geocode.
   await recents.getByRole('option', { name: '250 Court St' }).click()
   await expect(start).toHaveValue('250 Court St')
-  await expect(page.getByText('distance', { exact: true })).toBeVisible()
+  await expect(routeDrawn(page)).toBeVisible()
 })
 
 test('recents survive a reload and are keyboard-pickable', async ({ page }) => {
@@ -46,9 +46,9 @@ test('recents survive a reload and are keyboard-pickable', async ({ page }) => {
   await page.keyboard.press('Enter')
   await page.getByRole('combobox', { name: 'End point' }).fill('3rd St & 3rd Ave')
   await page.keyboard.press('Enter')
-  // The route drawing means both resolves finished — both recents are
-  // recorded before the reload below wipes the page (not the storage).
-  await expect(page.getByText('distance', { exact: true })).toBeVisible()
+  // The route drawing means both resolves finished — both recents are recorded before the reload
+  // below wipes the page (not the storage).
+  await expect(routeDrawn(page)).toBeVisible()
 
   await page.goto('/')
   await start.click()

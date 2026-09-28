@@ -97,3 +97,29 @@ export function displayShade(fraction: number): number {
  * itself at ~18% displayed rather than 15% measured, and its words stay
  * true either way. */
 export const LOW_SHADE_FRACTION = 0.15
+
+/** When at least this share of the route's tree score is park-canopy AREA
+ * credit (not countable trees), hide the tree count -- the "> N trees
+ * along the way" line under the route rows (the "trees: N" stat before
+ * 2026-09-27) -- the count
+ * can't see area credit, so it undersells exactly the routes with the
+ * most real cover ("83% shaded, 3 trees").
+ *
+ * 0.25, user decision 2026-08-28: the count is flavor, so it should be
+ * accurate or absent. Because canopy credit shares units with per-tree
+ * credit, the share IS the fraction of shade the count can't see -- so
+ * a shown count always covers at least 75% of the route's shade story.
+ * Calibrated against 250 seeded citywide routes at the default preset
+ * (seed 20260829, weight 15, July; method in history/quick-fixes.md):
+ *   - hides the stat on 20.0% of sampled routes (the 2026-08-17 guess
+ *     of 1/3 hid 13.2%);
+ *   - a 60/40 street/park route (share ~0.4) HIDES: the walker can SEE
+ *     the park trees the number ignores, and that visible contradiction
+ *     -- not any internal score ratio -- is the harm model here;
+ *   - 0.5 ("hide only when the count stops being the majority of the
+ *     score") was derived first and REJECTED: score-majority is
+ *     invisible to a walker, uncounted trees in plain view are not.
+ *     Don't re-raise it without evidence about perception, not scores;
+ *   - share 0.75+ is the absurd case either way (count 3 vs ~117
+ *     unseen tree-equivalents; pure-canopy routes counting 0). */
+export const CANOPY_SHARE_HIDES_TREE_COUNT = 0.25

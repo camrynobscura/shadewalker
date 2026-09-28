@@ -47,7 +47,7 @@
   border-radius: 50%;
   font-weight: 700;
   font-size: 0.9375rem; /* 15px */
-  color: var(--text); /* ink on neon magenta: 5.6:1 */
+  color: var(--text); /* ink on neon magenta: 5.1:1 */
   box-shadow: 0 1px 3px rgba(11, 36, 24, 0.3);
 }
 
@@ -67,7 +67,7 @@
   position: absolute;
   left: 10px;
   bottom: 10px;
-  z-index: 1000; /* above Leaflet's map panes, same tier as .locateButton */
+  z-index: 1000; /* above Leaflet's map panes, same tier as its controls */
   margin: 0;
   padding: var(--space-sm) var(--control-pad-x);
   list-style: none;
@@ -97,11 +97,8 @@
   border-top: 3px dashed var(--magenta);
 }
 
+/* Positioned by Leaflet: it's a control in the bottom-right corner. */
 .locateButton {
-  position: absolute;
-  right: 10px;
-  bottom: 24px;
-  z-index: 1000; /* above Leaflet's map panes */
   /* inline-flex seats the SVG on the text's centerline, not the baseline. */
   display: inline-flex;
   align-items: center;
@@ -124,7 +121,7 @@
   position: absolute;
   top: 10px;
   right: 10px;
-  z-index: 1000; /* above Leaflet's map panes, same tier as .locateButton */
+  z-index: 1000; /* above Leaflet's map panes, same tier as its controls */
   display: inline-flex;
   align-items: center;
   justify-content: center;

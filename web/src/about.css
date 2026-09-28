@@ -27,6 +27,11 @@
   margin-top: var(--space-2xl);
 }
 
+/* The title's gap matches a heading's gap to its paragraph. */
+.page h1 + section {
+  margin-top: var(--space-md);
+}
+
 /* Plain-language headings: the terminal //snake_case voice stays in the
    app chrome; this page speaks like a person. */
 .page h2 {
@@ -76,10 +81,6 @@
    gap -- matching the header-to-title gap above exactly. */
 .page section:last-child p:last-child {
   margin-bottom: 0;
-}
-
-.footer a {
-  color: var(--green-dim);
 }
 
 /* Fragment-jump targets (AboutPage focuses location.hash's section after

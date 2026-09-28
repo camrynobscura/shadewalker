@@ -32,3 +32,13 @@
   padding-top: var(--space-xl);
   border-top: 1px solid var(--line);
 }
+
+/* A link to the other page (the ⓘ pop-up's ABOUT, About's way back):
+   caps, tracked, and one run of text so the underline carries through
+   the space to the arrow. */
+.pageLink {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--green-dim);
+  text-underline-offset: 3px;
+}
