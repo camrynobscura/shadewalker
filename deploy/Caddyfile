@@ -76,8 +76,9 @@ shadewalker.nyc {
 
 	# Access log with the sensitive query params stripped: /route carries
 	# coordinates and /geocode carries searched text, neither of which may
-	# ever land in a log file. These keys ARE the Query() params in
-	# server/app.py — keep this list in sync if an endpoint gains one.
+	# ever land in a log file, nor the time a walk is planned for. These
+	# keys ARE the Query() params in server/app.py — keep this list in sync
+	# if an endpoint gains one.
 	# (uvicorn's own access log is already off via --no-access-log; this is
 	# the edge log, kept for ops with the location data scrubbed out.)
 	log {
@@ -94,6 +95,11 @@ shadewalker.nyc {
 					delete to_lon
 					delete tree_weights
 					delete month
+					delete day
+					delete hour
+					delete minute
+					delete arrive
+					delete layers
 					delete q
 					delete lat
 					delete lon

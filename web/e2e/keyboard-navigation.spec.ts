@@ -39,10 +39,10 @@ test('reaches and operates every control in order via keyboard alone', async ({ 
   await page.keyboard.press('Tab')
   await expect(page.getByRole('button', { name: 'Clear end point' })).toBeFocused()
 
-  // Then the time box under the addresses: when, right after where.
+  // Then the time pill under the addresses: when, right after where.
   // (No FIND_ROUTE on desktop: it routes by itself.)
   await page.keyboard.press('Tab')
-  await expect(page.getByRole('button', { name: 'Leave now' })).toBeFocused()
+  await expect(page.getByRole('button', { name: 'Start time: Leave now' })).toBeFocused()
 
   // Shade_priority is one native radiogroup tab stop: focus lands on
   // whichever row is already checked (MED, from routeUrl's default w=15),

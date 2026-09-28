@@ -36,16 +36,27 @@ describe('fetchRoute time', () => {
   it('sends no time for "now", so the server uses its own clock', async () => {
     mockFetchOnce({})
     await fetchRoute(A, B, [0], new AbortController().signal, null)
-    for (const key of ['month', 'day', 'hour', 'minute']) expect(requestedParams().has(key)).toBe(false)
+    for (const key of ['month', 'day', 'hour', 'minute', 'arrive'])
+      expect(requestedParams().has(key)).toBe(false)
   })
 
   it('sends all four parts of a picked time, and no year', async () => {
     mockFetchOnce({})
-    const time = { year: 2028, month: 2, day: 29, hour: 9, minute: 5 }
+    const time = { year: 2028, month: 2, day: 29, hour: 9, minute: 5, arrive: false }
     await fetchRoute(A, B, [0], new AbortController().signal, time)
     const params = requestedParams()
     expect(['month', 'day', 'hour', 'minute'].map((key) => params.get(key))).toEqual(['2', '29', '9', '5'])
     expect(params.has('year')).toBe(false)
+    expect(params.has('arrive')).toBe(false)
+  })
+
+  it('marks an arrival, so the server scores the walk for when it leaves', async () => {
+    mockFetchOnce({})
+    const time = { year: 2026, month: 9, day: 28, hour: 13, minute: 0, arrive: true }
+    await fetchRoute(A, B, [0], new AbortController().signal, time)
+    const params = requestedParams()
+    expect(params.get('arrive')).toBe('true')
+    expect(['month', 'day', 'hour', 'minute'].map((key) => params.get(key))).toEqual(['9', '28', '13', '0'])
   })
 })
 

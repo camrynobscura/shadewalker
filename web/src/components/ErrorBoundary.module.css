@@ -32,7 +32,8 @@
   color: var(--on-accent);
   border: none;
   font: inherit;
-  font-size: var(--font-size-md);
+  font-size: var(--caps-size);
+  font-weight: var(--caps-weight);
   cursor: pointer;
 }
 

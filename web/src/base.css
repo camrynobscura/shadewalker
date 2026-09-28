@@ -60,6 +60,8 @@
      and 38% (the other rows' bars). */
   --meter-track: rgba(0, 122, 77, 0.1);
   --meter-fill: rgba(0, 122, 77, 0.38);
+  /* The trip-option pills: jade at 14%. */
+  --pill-fill: rgba(0, 168, 107, 0.14);
 
   /* Mono everywhere is the theme's voice (ui-monospace resolves to SF
      Mono on macOS; the rest is the fallback chain). The sans stack is
@@ -69,13 +71,14 @@
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
-  /* Type scale, small to large. The caption tier (10/12/14) is what the
+  /* Type scale, small to large. The caption tier (12/13/14) is what the
      panel is mostly set in; the display tier (19/24/27) is one size
      each for the stat numbers, About's title and the wordmark. Pick
      from here rather than inventing a new rem. */
-  --label-font-size: 0.625rem; /* 10px: the small-caps sublabel look (eta / distance / shaded) */
-  --section-label-size: 0.75rem; /* 12px: section/field TITLES, one step up from the sublabels */
-  --font-size-sm: 0.75rem; /* 12px: captions, status lines, buttons' small text */
+  --caps-size: 0.875rem; /* 14px: every small-caps button and label, one family */
+  --caps-weight: 600;
+  --font-size-sm: 0.75rem; /* 12px: captions, status lines */
+  --font-size-pill: 0.8125rem; /* 13px: the trip-option pills */
   --font-size-md: 0.875rem; /* 14px: directions, the share/reload buttons */
   --font-size-input: 1rem; /* 16px: the address inputs and everything drawn
                               inside them. NOT a scale step — iOS Safari

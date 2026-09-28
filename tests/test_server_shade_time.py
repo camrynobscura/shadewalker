@@ -37,6 +37,10 @@ What is pinned, and why:
     day rule as the rows, so tree shade no longer jumps on the 1st;
     December blends into January; the day reaches route()'s shade. On a
     synthetic curve, so the real numbers stay a data choice in config.
+  - arrive by (PLAN `time-and-layers`): the time given is the arrival;
+    the whole batch is scored for the fastest route's leave time, its
+    minutes rounded the way the frontend rounds them, back across
+    midnight, a month's end and New Year's; an arrival needs its time.
 
 The synthetic sun table is daylight in EVERY slot unless a test darkens
 some (`dark=`), so the blend tests above read the stored rows untouched.
@@ -364,6 +368,7 @@ def _get(client, **params):
 def test_route_echoes_the_time_and_layers(client):
     body = _get(client, month=7, day=20, hour=9, minute=15, layers="buildings").json()
     assert (body["month"], body["day"], body["hour"], body["minute"], body["layers"]) == (7, 20, 9, 15, "buildings")
+    assert body["arrive"] is False
 
 
 def test_route_defaults_to_new_york_now(client):
@@ -494,6 +499,58 @@ def test_route_at_night_is_the_fastest_route_for_every_weight(tmp_path, monkeypa
     trees = _get(client, month=7, hour=2, layers="trees").json()
     assert trees["night"] is False
     assert trees["routes"][3]["properties"]["length_m"] == pytest.approx(2 * DETOUR_M, abs=0.2)
+
+
+# ── arrive by (PLAN `time-and-layers`) ───────────────────────────────────────
+
+# The fastest way here is the straight 200 m: 200 / 1.4 / 60 = 2.38, the
+# route's 2.4 minutes, so every arrival below leaves 2 minutes earlier.
+
+def test_arrive_by_scores_the_walk_for_when_it_leaves(tmp_path, monkeypatch):
+    """21:01 in July is dark and 20:59 is not (1/60 of lit 20:00 still
+    counts). Arriving at 21:01 means leaving at 20:59: the batch is exactly
+    a walk that LEAVES at 20:59, not the night's one that leaves at 21:01."""
+    store = _store(tmp_path, monkeypatch, dark=JULY_NIGHT)
+    monkeypatch.setattr(server_app, "store", store)
+    client = TestClient(server_app.app)
+
+    arriving = _get(client, month=7, day=15, hour=21, minute=1, arrive="true").json()
+    assert arriving["arrive"] is True
+    assert (arriving["month"], arriving["day"], arriving["hour"], arriving["minute"]) == (7, 15, 20, 59)
+    assert arriving["night"] is False
+    assert arriving["routes"] == _get(client, month=7, day=15, hour=20, minute=59).json()["routes"]
+    # ...and that is a different answer from the arrival's own moment
+    leaving = _get(client, month=7, day=15, hour=21, minute=1).json()
+    assert leaving["night"] is True
+    assert arriving["routes"] != leaving["routes"]
+
+
+@pytest.mark.parametrize("arrival, leave", [
+    ((7, 15, 13, 0), (7, 15, 12, 58)),
+    ((8, 1, 0, 1), (7, 31, 23, 59)),     # back over a month's end
+    ((1, 1, 0, 1), (12, 31, 23, 59)),    # and New Year's
+    ((3, 1, 0, 1), (2, 29, 23, 59)),     # in LEAP_YEAR: the table has no year (_leave_time)
+])
+def test_arrive_by_leaves_the_fastest_walks_minutes_earlier(client, arrival, leave):
+    month, day, hour, minute = arrival
+    body = _get(client, month=month, day=day, hour=hour, minute=minute, arrive="true").json()
+    assert (body["month"], body["day"], body["hour"], body["minute"]) == leave
+
+
+def test_arrive_by_finds_the_fastest_walk_even_when_none_isnt_asked_for(client):
+    body = _get(client, month=7, hour=13, arrive="true", tree_weights=[15.0]).json()
+    assert (body["hour"], body["minute"]) == (12, 58)
+
+
+def test_leave_time_rounds_half_a_minute_up_like_the_frontend():
+    """The route row shows Math.round(minutes); Python's round(2.5) is 2."""
+    assert server_app._leave_time(7, 15, 13, 0, 2.5) == (7, 15, 12, 57)
+    assert server_app._leave_time(7, 15, 13, 0, 2.4) == (7, 15, 12, 58)
+
+
+@pytest.mark.parametrize("params", [{"arrive": "true"}, {"arrive": "true", "month": 7}])
+def test_arrive_by_needs_the_arrival_time(client, params):
+    assert _get(client, **params).status_code == 400
 
 
 def test_a_pinned_clock_stands_in_for_now(client, monkeypatch):

@@ -46,22 +46,21 @@ test('a route after dark has no violations', async ({ page }) => {
   expect(results.violations).toEqual([])
 })
 
-test('the open time picker, and a set departure on the time button, have no violations', async ({ page }) => {
-  // Both only exist after a tap: the picker (a dialog, segmented radios,
-  // native date/time inputs, the button's aria-expanded/-controls) and
-  // the button's "Depart ..." text once a time is applied.
+test('the open time card, and a set departure on the time pill, have no violations', async ({ page }) => {
+  // Both only exist after a click: the card (the radios, native
+  // date/time inputs, the pill's aria-expanded/-controls) and the pill's
+  // "Depart ..." text once a time is set. (The phone's full-screen picker
+  // has its own scan in time-picker.spec.)
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
   await expect(routeDrawn(page)).toBeVisible()
-  await page.getByRole('button', { name: 'Leave now' }).click()
-  const picker = page.getByRole('dialog', { name: 'Start time' })
-  await picker.getByRole('radio', { name: 'Depart at' }).check()
-  await expect(picker.getByLabel('date', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Start time: Leave now' }).click()
+  await page.getByRole('radio', { name: 'Depart at' }).check()
+  await expect(page.getByLabel('date', { exact: true })).toBeVisible()
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
 
-  await picker.getByLabel('time', { exact: true }).fill('09:05')
-  await page.getByRole('button', { name: 'DONE' }).click()
-  await expect(page.getByRole('button', { name: /Depart .*9:05/ })).toBeVisible()
+  await page.getByLabel('time (NYC)').fill('09:05')
+  await expect(page.getByRole('button', { name: /^Start time: Depart .*9:05/ })).toBeVisible()
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
 })
 

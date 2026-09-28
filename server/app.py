@@ -20,7 +20,7 @@ at /docs.
 Endpoints:
     GET /health
     GET /route?from_lat=..&from_lon=..&to_lat=..&to_lon=..[&tree_weights=..&tree_weights=..]
-              [&month=..&day=..&hour=..&minute=..][&layers=trees|buildings|both]
+              [&month=..&day=..&hour=..&minute=..][&arrive=true][&layers=trees|buildings|both]
     GET /geocode?q=..[&limit=..]
     GET /geocode/reverse?lat=..&lon=..
 
@@ -51,7 +51,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 import calendar
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # FIRST, before the heavy imports below: cap glibc's malloc arenas
@@ -282,10 +282,14 @@ def route(
     hour: int | None = None,
     minute: int | None = None,     # (hour given, minute not: 0 -- the anchor)
     layers: str = "both",          # "trees" | "buildings" | "both": which shade the cost sees
+    arrive: bool = False,          # the time given is when the walk ENDS (arrive by), not when it starts
 ) -> dict:
+    # Arriving "now" means nothing: an arrival needs its time.
+    if arrive and hour is None:
+        raise HTTPException(status_code=400, detail="arrive needs the arrival time (at least hour)")
     # No time given means New York's now -- what the frontend sends until
-    # someone sets a departure time, which then sends all four parts. One clock read, so month/day/hour/minute can't straddle a
-    # boundary.
+    # someone sets a time, which then sends all four parts. One clock
+    # read, so month/day/hour/minute can't straddle a boundary.
     now = PINNED_NOW or datetime.now(NYC_TZ)
     if month is None:
         month, day = now.month, now.day if day is None else day
@@ -350,6 +354,21 @@ def route(
         raise HTTPException(status_code=422, detail="No path between these points")
     start, end = pair
 
+    # Arrive by (PLAN `time-and-layers`): the fastest route prices an edge
+    # by its length alone (weight 0 in graph_store.edge_costs), so its
+    # minutes are the same at any hour. Leave that many minutes before the
+    # arrival, and score EVERY weight for that one moment: a shadier route
+    # really leaves a minute or two earlier still, but one moment keeps the
+    # batch comparable -- clamp_shade_monotonic compares the weights'
+    # shade against each other. The frontend shows each route's own leave
+    # time (the arrival minus that route's minutes).
+    if arrive:
+        fastest = store.route(start, end, tree_weight=0.0, month=month,
+                              day=day, hour=hour, minute=minute, layers=layers)
+        if fastest is None:
+            raise HTTPException(status_code=422, detail="No path between these points")
+        month, day, hour, minute = _leave_time(month, day, hour, minute, fastest["minutes"])
+
     # After dark every edge is fully shaded (graph_store.is_night), so every
     # tree_weight prices an edge by its length alone and would find the
     # plain shortest path. Route it ONCE, at weight 0, and hand that route
@@ -395,10 +414,12 @@ def route(
         },
         # The moment the shade was computed for (New York clock) and which
         # layers the cost saw -- echoed so a client can show or pin them.
+        # With arrive, that moment is the fastest route's leave time.
         "month": month,
         "day": day,
         "hour": hour,
         "minute": minute,
+        "arrive": arrive,
         "layers": layers,
         # True when the whole moment is dark: every route above is the same
         # fastest route at full shade, and the frontend says so in one line
@@ -412,6 +433,21 @@ def route(
         # not from this string -- see RouteStats.tsx.
         "description": _describe(routes[0]["properties"]["segments"]),
     }
+
+
+def _leave_time(month: int, day: int, hour: int, minute: int,
+                walk_minutes: float) -> tuple[int, int, int, int]:
+    """When to leave to arrive at month/day/hour/minute after a walk of
+    walk_minutes. Rounded to the minute the way the frontend rounds a
+    route row's minutes (Math.round: .5 goes up, where Python's round()
+    goes to even), so the NONE row's leave time is this exact moment.
+    Midnight, a month's end and New Year's Eve are crossed as the calendar
+    crosses them, in LEAP_YEAR -- the table has no year, and the one day
+    that changes is a walk leaving before midnight on Mar 1, which reads
+    Feb 29 for Feb 28: a day apart, in a table blended by the day."""
+    arrival = datetime(LEAP_YEAR, month, day, hour, minute)
+    leave = arrival - timedelta(minutes=math.floor(walk_minutes + 0.5))
+    return leave.month, leave.day, leave.hour, leave.minute
 
 
 def _to_feature(route: dict, tree_weight: float) -> dict:

@@ -131,7 +131,8 @@ test.describe('on a phone', () => {
     // A shared link: the trip is chosen, so it opens on the route screen.
     await page.goto(routeUrl(POINT_A, POINT_B))
     await expect(routeDrawn(page)).toBeVisible()
-    await expect(tripBox(page)).toHaveAccessibleName(/250 Court St to 3rd Ave Leave now/)
+    // Where only: the time pill under it says when.
+    await expect(tripBox(page)).toHaveAccessibleName(/250 Court St to 3rd Ave$/)
     await expect(page.getByRole('radio', { name: /^Medium:/ })).toBeVisible()
     await expect(page.getByRole('combobox', { name: 'Start point' })).toBeHidden()
 
