@@ -22,6 +22,7 @@ export function AddressField({
   field,
   emptyAccessory,
   notice,
+  onSubmit,
 }: {
   label: string
   /** The field's map-marker letter ("A" start, "B" end). Rendered as a
@@ -44,6 +45,10 @@ export function AddressField({
    * Controls. The field's own NOT_FOUND wins when both apply: it's the
    * answer to the more recent action (typing beats a parked error). */
   notice?: ReactNode
+  /** Enter with nothing highlighted, AFTER the typed text starts
+   * resolving: the End field's FIND_ROUTE (Controls waits for the
+   * lookup before routing). */
+  onSubmit?: () => void
 }) {
   // useId generates a unique, SSR-safe id so <label htmlFor> can point at
   // the input even when the component appears twice on the page.
@@ -156,16 +161,16 @@ export function AddressField({
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     // Enter with no highlighted option resolves the typed text. Handled
-    // here, not via form submission: with FIND_ROUTE gone the form has no
-    // submit button, and a form with two text inputs and no submit button
-    // suppresses implicit submission entirely — Enter (and iOS's Go key,
-    // which arrives as Enter) would silently do nothing. In full-screen
+    // here, not via form submission: the fields sit in no <form> (see
+    // Controls), so Enter (and iOS's Go key, which arrives as Enter)
+    // would otherwise silently do nothing. In full-screen
     // mode also close the keyboard, so the route appears on a fully
     // visible map instead of behind the overlay.
     if (e.key === 'Enter' && activeIndex < 0) {
       e.preventDefault()
       void field.resolve()
       if (expanded) collapse()
+      onSubmit?.()
       return
     }
     if (!open) {

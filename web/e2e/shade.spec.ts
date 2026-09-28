@@ -7,17 +7,15 @@ import { mockGeocode, POINT_A, POINT_B, routeUrl } from './fixtures'
  * guarantee testable from the UI at all. */
 const PRESETS = [0, 5, 15, 40]
 
-/** Reads the "shaded" stat as a whole number, anchored on its LABEL rather
- * than on a class or DOM position — RouteStats renders the label
- * followed by the value as siblings inside one list item (label ABOVE
- * value since the 2026-08-28 panel redesign; a <dl> from 2026-08-30 until
- * 2026-09-09, a plain <ul> since), and the label is the part that
- * carries meaning if the markup is refactored again. */
+/** Reads the checked route row's shade as a whole number, from its
+ * spoken name ("Medium: 12 minutes, 0.4 miles, 44 percent shaded") -- the
+ * rows replaced the stats box and its "shaded" label (2026-09-27), and
+ * the words are what carry meaning if the markup changes again. */
 async function readShadePercent(page: Page): Promise<number> {
-  const label = page.getByText('shaded', { exact: true })
-  await expect(label).toBeVisible()
-  const text = await label.locator('xpath=following-sibling::*[1]/span[@aria-hidden="true"]').innerText()
-  const value = Number(text.replace('%', '').trim())
+  const checked = page.getByRole('radio', { checked: true })
+  await expect(checked).toHaveAccessibleName(/percent shaded$/)
+  const spoken = (await checked.locator('xpath=following-sibling::span[2]').textContent()) ?? ''
+  const value = Number(/(\d+) percent shaded$/.exec(spoken)?.[1])
   expect(Number.isFinite(value)).toBe(true)
   return value
 }

@@ -132,3 +132,57 @@ export function ClearIcon() {
     </svg>
   )
 }
+
+/** The map's time control: a clock face, the universal "when" mark. */
+export function ClockIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <circle cx="9" cy="9" r="7.5" />
+      <polyline points="9,4.5 9,9 12,10.5" />
+    </svg>
+  )
+}
+
+/** A small down chevron: "this opens a choice", after the time line's
+ * text. SVG for the same reason as the rest -- ▾ isn't safe in iOS's
+ * monospace fallback. */
+export function ChevronDownIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <polyline points="2.5,4.5 6,8 9.5,4.5" />
+    </svg>
+  )
+}
+
+/** The trip summary's way back: a left chevron. */
+export function BackIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <polyline points="11.5,3 5.5,9 11.5,15" />
+    </svg>
+  )
+}

@@ -50,6 +50,11 @@
 
 /* Mobile / narrow (and 200%-zoom reflow): stack map above panel. */
 @media (max-width: 720px) {
+  /* The phone's plan screen shows no route output (see App's `view`). */
+  .panel[data-view='plan'] .routeOnly {
+    display: none;
+  }
+
   .layout {
     flex-direction: column;
   }

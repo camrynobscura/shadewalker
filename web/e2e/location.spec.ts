@@ -30,6 +30,20 @@ test.describe('one-tap location fill', () => {
     await expect(start).toHaveValue('250 Court St')
     await expect(page.getByRole('button', { name: 'Clear start point' })).toBeVisible()
   })
+
+  test('a tap on Locate me never drops a route point', async ({ page }) => {
+    // It sits inside the map, so without Leaflet's click guard (it's a
+    // Leaflet control since 2026-09-27) the tap also reached the map.
+    await mockGeocode(page)
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Use location' }).click()
+    await expect(page.getByRole('combobox', { name: 'Start point' })).toHaveValue('250 Court St')
+
+    // Start is set and end isn't, so a click reaching the map would make
+    // the button's spot the end point.
+    await page.getByRole('button', { name: 'Locate me' }).click()
+    await expect(page.getByRole('combobox', { name: 'End point' })).toHaveValue('')
+  })
 })
 
 test.describe('location denied', () => {

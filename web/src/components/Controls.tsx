@@ -1,29 +1,16 @@
-import { useEffect, useId } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import type { Point, RouteFeature } from '../api'
-import { formatDistance, spokenDistance } from '../format'
+import { formatDistance, formatEtaParts, spokenDistance, spokenEta } from '../format'
 import type { LocationFillStatus } from '../hooks/useLocationFill'
 import { useAddressField } from '../hooks/useAddressField'
+import { MOBILE_LAYOUT_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
 import { AddressField } from './AddressField'
-import { CrosshairIcon } from './icons'
-import { compareRoutes, TREE_PRESETS } from '../presets'
-import { displayShade, LOW_SHADE_FRACTION } from '../shade'
+import { BackIcon, ClockIcon, CrosshairIcon } from './icons'
+import { TREE_PRESETS } from '../presets'
+import { CANOPY_SHARE_HIDES_TREE_COUNT, displayShade, LOW_SHADE_FRACTION } from '../shade'
+import { describeWalkTimeShort, type WalkTime } from '../walkTime'
+import { TimeControl } from './TimeControl'
 import styles from './Controls.module.css'
-
-/** Splits a formatted distance ("0.2 mi", "524 ft") into its leading
- * number, highlighted, and its trailing unit, left plain — only the
- * comparison line's actual values get the bold/green treatment, not
- * their units. formatDistance() itself stays a single string everywhere
- * else it's used; this split is local to that one line. */
-function highlightNumber(text: string) {
-  const match = text.match(/^(-?[\d.]+)(.*)$/)
-  if (!match) return text
-  return (
-    <>
-      <span className={styles.numberHighlight}>{match[1]}</span>
-      {match[2]}
-    </>
-  )
-}
 
 interface ControlsProps {
   treeWeight: number
@@ -51,9 +38,6 @@ interface ControlsProps {
   onUseLocation: () => void
   /** The currently selected Shade_priority preset's route. */
   selected: RouteFeature | null
-  /** The NONE (tree_weight=0) route -- the baseline `selected` is compared
-   * against in the comparison line below. */
-  baseline: RouteFeature | null
   /** The route's moment is dark (RouteResponse.night): every preset is the
    * same fastest route, and the box below says so in one line. */
   night: boolean
@@ -63,6 +47,33 @@ interface ControlsProps {
    * pressing Enter on an address or tapping the map (the map sits directly
    * above this panel, not down near RouteStats where this used to live). */
   error: string | null
+  /** The walk's departure time, or null for "leave now". */
+  walkTime: WalkTime | null
+  onWalkTimeChange: (time: WalkTime | null) => void
+  /** Every preset's route from the last FIND_ROUTE, for the rows' numbers. */
+  routes: RouteFeature[] | null
+  /** A route request is in flight: the rows and lines hold back their
+   * numbers rather than show the previous trip's. */
+  loading: boolean
+  /** Which phone screen shows (App's `view`): the plan (fields, time,
+   * FIND_ROUTE) or the route (trip summary, rows). CSS hides the other
+   * one on phones; desktop shows both. */
+  view: 'plan' | 'route'
+  /** FIND_ROUTE, once the fields have finished resolving typed text. */
+  onFindRoute: () => void
+  /** The trip summary: back to the plan screen to change anything. */
+  onBack: () => void
+}
+
+/* The rows run shadiest first (MAX on top, user default 2026-09-27):
+   shade is the point of the app. */
+const PRESETS_SHADIEST_FIRST = [...TREE_PRESETS].reverse()
+
+/** "15 min" / "1 hr 5 min", flat -- the row's compact eta. */
+function etaText(minutes: number): string {
+  return formatEtaParts(minutes)
+    .map((part) => `${part.value} ${part.unit}`)
+    .join(' ')
 }
 
 export function Controls({
@@ -79,23 +90,70 @@ export function Controls({
   locationStatus,
   onUseLocation,
   selected,
-  baseline,
   night,
   error,
+  walkTime,
+  onWalkTimeChange,
+  routes,
+  loading,
+  view,
+  onFindRoute,
+  onBack,
 }: ControlsProps) {
   // Radios become one group (arrow keys move between them, only one can be
   // checked) by sharing a `name` — useId gives us one that's unique even if
   // this component ever renders twice.
   const groupName = useId()
   const selectedPreset = TREE_PRESETS.find((preset) => preset.value === treeWeight)
-  const comparison = selected && baseline ? compareRoutes(selected, baseline) : null
+  // Nothing about the chosen route while a new one is on its way: the
+  // numbers would be the previous trip's.
+  const shown = loading ? null : selected
   // The low-shade warning lives HERE, not with the route stats, since
   // 2026-08-31 (user call): Shade_priority is where the remedy is -- turn
   // the dial up and watch whether the warning goes away.
-  const lowShade = selected !== null && selected.properties.shade_fraction < LOW_SHADE_FRACTION
+  const lowShade = shown !== null && shown.properties.shade_fraction < LOW_SHADE_FRACTION
+  // The tree count, flavour the user wanted kept (2026-09-27): a line
+  // under the rows (it didn't fit IN them on a phone), hidden by the same
+  // park-canopy rule the old stat had.
+  const treeCount =
+    shown && shown.properties.park_canopy_share < CANOPY_SHARE_HIDES_TREE_COUNT
+      ? shown.properties.tree_count
+      : null
 
   const start = useAddressField(onSetStart, startPoint, onStartLabel, initialStartLabel)
   const end = useAddressField(onSetEnd, endPoint, onEndLabel, initialEndLabel)
+
+  /* FIND_ROUTE is live once each field has a point OR typed text to look
+     up. A tap first lets both fields finish resolving -- including the
+     lookup the tap's own blur just started -- and only then asks App to
+     route, so a typed-but-unconfirmed address counts. */
+  const canFind = Boolean((startPoint || start.query.trim()) && (endPoint || end.query.trim()))
+  async function findRoute() {
+    try {
+      await Promise.all([start.resolve(), end.resolve()])
+    } catch {
+      return // the lookup itself broke; the field's status line says so
+    }
+    onFindRoute()
+  }
+
+  /* Where focus goes when the phone swaps screens: onto the trip summary
+     going forward (the top of what just appeared), onto FIND_ROUTE coming
+     back, so a keyboard or screen-reader user lands where the change is
+     instead of on <body> (the control they used just vanished). Only on
+     a CHANGE of screen, never on mount: a shared link opening on the
+     route screen shouldn't grab focus. */
+  const isMobile = useMediaQuery(MOBILE_LAYOUT_QUERY)
+  const tripRef = useRef<HTMLButtonElement>(null)
+  const findRef = useRef<HTMLButtonElement>(null)
+  const shownViewRef = useRef(view)
+  useEffect(() => {
+    const previous = shownViewRef.current
+    shownViewRef.current = view
+    if (!isMobile || previous === view) return
+    if (view === 'route') tripRef.current?.focus()
+    else findRef.current?.focus()
+  }, [view, isMobile])
 
   /* Recents are recorded HERE, on route arrival — not at resolve time.
      Only the endpoints of a route that actually drew count as recent
@@ -205,13 +263,16 @@ export function Controls({
             </>
           )}
         </p>
-        {/* No FIND_ROUTE button and no form since 2026-09-02: routes
-            auto-compute the moment both points exist (suggestion picks,
-            map taps), typed text resolves on Enter (handled in
-            AddressField's keydown — a two-input form with no submit
-            button gets no implicit submission) and on blur. A plain div:
-            keeping a <form> that can never submit would be lying to
-            assistive tech. */}
+        {/* Typed text resolves on Enter (handled in AddressField's
+            keydown) and on blur. On a phone the route then waits for
+            FIND_ROUTE below (back since 2026-09-27 -- it went in the
+            2026-09-02 mobile pass to save room, and the phone's two
+            screens gave the room back; it's the checkpoint where a wrong
+            address gets caught, and the step to the route screen). Desktop
+            has no second screen, so no button (CSS): it routes the moment
+            both points exist, as before. A plain div, not a <form>:
+            FIND_ROUTE has to wait for the fields' lookups, which a submit
+            event can't. */}
         <div className={styles.addressFields}>
           {/* Both examples verified against /geocode (2026-09-01): each
               resolves to the right spot in the Village, inside the landing
@@ -225,136 +286,200 @@ export function Controls({
             emptyAccessory={locationAccessory}
             notice={locationNotice}
           />
-          <AddressField label="End_point" marker="B" example="24 East 7th St" field={end} />
+          {/* Enter here is FIND_ROUTE too: the last field, the natural
+              "done" (iOS's Go key arrives as Enter). */}
+          <AddressField
+            label="End_point"
+            marker="B"
+            example="24 East 7th St"
+            field={end}
+            onSubmit={() => void findRoute()}
+          />
+          {/* When, right under where (Google Maps' order): leaving now,
+              or a departure the route is scored for. */}
+          <TimeControl walkTime={walkTime} onChange={onWalkTimeChange} />
         </div>
+        <button
+          ref={findRef}
+          type="button"
+          className={styles.findRoute}
+          disabled={!canFind}
+          onClick={() => void findRoute()}
+        >
+          <span aria-hidden="true">FIND_ROUTE</span>
+          <span className={styles.visuallyHidden}>Find route</span>
+        </button>
       </div>
 
-      {/* Second of the panel's three sections. Divider lives on this
-          wrapper, not the fieldset below -- a fieldset with its own border
-          makes browsers render <legend> straddling that border instead of
-          sitting below it. */}
-      <div className={styles.sectionDivider}>
-        {/* <fieldset> + <legend> is the native way to give a radio group its
+      {/* The route screen on a phone (hidden until FIND_ROUTE; see App's
+          `view`); on desktop simply the panel's second section. */}
+      <div className={styles.routeGroup}>
+        {/* Phone only (CSS): the two address boxes and the time boiled
+            down to one line, and the way back to change them. Where and
+            when both show here (user, 2026-09-27), so a route for 9 am
+            can't pass for "now". */}
+        <button ref={tripRef} type="button" className={styles.trip} onClick={onBack}>
+          <BackIcon />
+          <span className={styles.tripWhere}>
+            <span className={styles.visuallyHidden}>Change trip: </span>
+            {start.query}
+            <span className={styles.tripArrow} aria-hidden="true">
+              →
+            </span>
+            <span className={styles.visuallyHidden}> to </span>
+            {end.query}
+          </span>
+          <span className={styles.tripWhen}>
+            <ClockIcon />
+            {walkTime ? describeWalkTimeShort(walkTime) : 'Leave now'}
+          </span>
+        </button>
+
+        {/* Divider lives on this wrapper, not the fieldset below -- a
+            fieldset with its own border makes browsers render <legend>
+            straddling that border instead of sitting below it. */}
+        <div className={styles.sectionDivider}>
+          {/* <fieldset> + <legend> is the native way to give a radio group its
             label: screen readers announce "Shade priority" alongside whichever
             option is focused (the underscore in the visible text is read
             aloud too — a deliberate terminal-copy choice, traded off against
             a slightly odd screen-reader pronunciation). No ARIA needed — the
             built-in semantics do it. */}
-        <fieldset className={styles.presetGroup}>
-          <legend className={styles.presetLegend}>
-            <span aria-hidden="true">Shade_priority</span>
-            <span className={styles.visuallyHidden}>Shade priority</span>
-          </legend>
-          <div className={styles.segmented}>
-            {TREE_PRESETS.map((preset) => (
-              <label key={preset.value} className={styles.segment}>
-                <input
-                  type="radio"
-                  name={groupName}
-                  value={preset.value}
-                  checked={treeWeight === preset.value}
-                  onChange={() => onTreeWeightChange(preset.value)}
-                  className={styles.segmentInput}
-                />
-                {/* The wrapping <label> names the radio, twin-span style:
-                    the visible caps text is aria-hidden (VoiceOver spelled
-                    L-O-W and read MED as a word) and the hidden span
-                    speaks `preset.spoken` ("Medium"). One spoken name, from
-                    native labelling — no aria-label on the input
-                    (craftsmanship review 2026-09-09). */}
-                <span className={styles.segmentText} aria-hidden="true">
-                  {preset.label}
-                </span>
-                <span className={styles.visuallyHidden}>{preset.spoken}</span>
-              </label>
-            ))}
-          </div>
-          {/* One box for both the mode description and (once a route exists)
-              its actual cost — a walker weighs them together when deciding
-              whether a shadier route is worth taking, so they read as one
-              unit instead of a plain label above a separately-boxed number
-              line. Visible from first load (mode line alone) so the box
-              doesn't only appear once results are in. aria-live: this
-              text changes every time Shade_priority changes (mode line) or
-              a new route resolves (comparison line), and unlike RouteStats'
-              stats it's the only place the *delta* numbers appear, so it
-              needs its own live region rather than piggybacking on that
-              one. aria-atomic re-reads the whole box on any change instead
-              of just the changed line, since the two lines are meant to be
-              read together as one unit, same as they're meant to be read
-              together visually. */}
-          <div className={styles.comparisonHint} aria-live="polite" aria-atomic="true">
-            {/* Spoken-only prefix: aria-atomic re-reads this whole box on
+          <fieldset className={styles.presetGroup}>
+            <legend className={styles.presetLegend}>
+              <span aria-hidden="true">Shade_priority</span>
+              <span className={styles.visuallyHidden}>Shade priority</span>
+            </legend>
+            {/* The four routes as rows (PLAN `phone-space`, user
+              2026-09-27): each row IS its route's numbers -- minutes,
+              distance, shade -- so every option's cost shows at once
+              instead of one comparison at a time. (The tree count was
+              tried in the rows too and wrapped them to two lines on a
+              phone; it's a line under them instead.) Still one native radio group -- a tap or arrow key
+              picks a row and the map shows it, as the old bar did. */}
+            <div className={styles.routeRows}>
+              {PRESETS_SHADIEST_FIRST.map((preset) => {
+                const feature = loading
+                  ? null
+                  : (routes?.find((r) => r.properties.tree_weight === preset.value) ?? null)
+                const numbers = feature?.properties ?? null
+                const shadePct = numbers ? Math.round(displayShade(numbers.shade_fraction) * 100) : 0
+                const checked = treeWeight === preset.value
+                return (
+                  <label key={preset.value} className={styles.routeRow}>
+                    <input
+                      type="radio"
+                      name={groupName}
+                      value={preset.value}
+                      checked={checked}
+                      onChange={() => onTreeWeightChange(preset.value)}
+                      className={styles.routeInput}
+                    />
+                    {/* Visible row aria-hidden, one spoken sentence as the
+                      name (twin spans, as before): VoiceOver spelled L-O-W
+                      and would read "min" and "mi" as words. */}
+                    <span className={styles.routeFace} aria-hidden="true">
+                      <span className={styles.routeName}>{preset.label}</span>
+                      {numbers ? (
+                        <>
+                          <span className={styles.routeMeta}>
+                            {etaText(numbers.minutes)} · {formatDistance(numbers.length_m)}
+                          </span>
+                          <span className={styles.routeShade}>
+                            <strong>{shadePct}%</strong> shaded
+                          </span>
+                        </>
+                      ) : (
+                        <span className={styles.routeMeta}>{preset.hint}</span>
+                      )}
+                      {/* The empty track shows before there are numbers too.
+                        Out of 100, not scaled to the shadiest route: a
+                        low-shade trip honestly shows short bars. */}
+                      <span className={styles.routeMeter}>
+                        {numbers && (
+                          <span className={styles.routeMeterFill} style={{ width: `${shadePct}%` }} />
+                        )}
+                      </span>
+                    </span>
+                    <span className={styles.visuallyHidden}>
+                      {numbers
+                        ? `${preset.spoken}: ${spokenEta(numbers.minutes)}, ${spokenDistance(numbers.length_m)}, ${shadePct} percent shaded`
+                        : `${preset.spoken}: ${preset.hint}`}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+            {/* The lines under the rows, once a route exists: what the chosen
+              preset does, and the tree count. (A "+31% shade | +3 min" line
+              compared it with NONE until the rows showed every route's
+              numbers side by side -- user, 2026-09-28.) aria-live: they
+              change with Shade_priority and when a route arrives;
+              aria-atomic re-reads the box as one unit. */}
+            <div className={styles.routeHint} aria-live="polite" aria-atomic="true">
+              {/* Spoken-only prefix: aria-atomic re-reads this whole box on
                 every route arrival and preset change, and without a name
                 the stream arrived as context-free "mode medium..."
                 (VoiceOver pass, 2026-08-31). Every announcement now opens
                 with which section is talking. */}
-            <span className={styles.visuallyHidden}>Shade priority: </span>
-            {night ? (
-              /* After dark (PLAN `night-shade`) every preset is the same
+              <span className={styles.visuallyHidden}>Shade priority: </span>
+              {night ? (
+                /* After dark (PLAN `night-shade`) every preset is the same
                  fastest route at 100%: the mode hint would promise detours
-                 that don't happen and the comparison would read +0 three
-                 times, so one line replaces both (copy: user, 2026-09-26).
-                 The buttons stay live -- they just agree. */
-              <p className={styles.modeLine}>
-                <span aria-hidden="true">
-                  <span className={styles.promptSymbol}>&gt;</span>
-                  <span className={styles.modeVal}>after dark</span> // the whole city is in shade
-                </span>
-                <span className={styles.visuallyHidden}>
-                  After dark. The whole city is in shade, so every setting gives the fastest route.
-                </span>
-              </p>
-            ) : (
-              <p className={styles.modeLine}>
-                <span className={styles.promptSymbol} aria-hidden="true">
-                  &gt;
-                </span>
-                <span className={styles.modeVal}>{selectedPreset?.spoken.toLowerCase()}</span>{' '}
-                <span aria-hidden="true">//</span> {selectedPreset?.hint}
-              </p>
-            )}
-            {comparison && !night && (
-              <p className={styles.comparisonLine}>
-                <span aria-hidden="true">
-                  <span className={styles.promptSymbol}>&gt;</span>
-                  <span className={styles.plusSign}>+</span>
-                  <span className={styles.numberHighlight}>{comparison.extraShadePct}</span>% shade
-                  <span className={styles.sep}>|</span>
-                  <span className={styles.plusSign}>+</span>
-                  <span className={styles.numberHighlight}>{comparison.extraMinutes}</span> min
-                  <span className={styles.sep}>|</span>
-                  <span className={styles.plusSign}>+</span>
-                  {highlightNumber(formatDistance(comparison.extraLengthM))}
-                </span>
-                {/* Spoken twin: full words, no glyph soup (VoiceOver pass). */}
-                {/* One string, not adjacent nodes: a pluralizing "s" as its
-                    own text node gets read as the letter S ("minute, S") --
-                    user report 2026-08-31. */}
-                <span className={styles.visuallyHidden}>
-                  {`plus ${comparison.extraShadePct} percent shade, plus ` +
-                    `${comparison.extraMinutes} ${comparison.extraMinutes === 1 ? 'minute' : 'minutes'}, plus ` +
-                    spokenDistance(comparison.extraLengthM)}
-                </span>
-              </p>
-            )}
-          </div>
-          {/* Always mounted so its aria-live can announce the first
+                 that don't happen, so one line replaces it (copy: user,
+                 2026-09-26). The buttons stay live -- they just agree. */
+                <p className={styles.modeLine}>
+                  <span aria-hidden="true">
+                    <span className={styles.promptSymbol}>&gt;</span>
+                    <span className={styles.modeVal}>after dark</span> // the whole city is in shade
+                  </span>
+                  <span className={styles.visuallyHidden}>
+                    After dark. The whole city is in shade, so every setting gives the fastest route.
+                  </span>
+                </p>
+              ) : (
+                /* Waits for a route: until one arrives (and while the next
+                 loads) the rows show these same descriptions themselves. */
+                shown && (
+                  <p className={styles.modeLine}>
+                    <span className={styles.promptSymbol} aria-hidden="true">
+                      &gt;
+                    </span>
+                    <span className={styles.modeVal}>{selectedPreset?.spoken.toLowerCase()}</span>{' '}
+                    <span aria-hidden="true">//</span> {selectedPreset?.hint}
+                  </p>
+                )
+              )}
+              {treeCount !== null && (
+                <p className={styles.treeLine}>
+                  <span aria-hidden="true">
+                    <span className={styles.promptSymbol}>&gt;</span>
+                    <span className={styles.numberHighlight}>{treeCount}</span>{' '}
+                    {treeCount === 1 ? 'tree' : 'trees'} along the way
+                  </span>
+                  <span className={styles.visuallyHidden}>
+                    {`${treeCount} ${treeCount === 1 ? 'tree' : 'trees'} along the way`}
+                  </span>
+                </p>
+              )}
+            </div>
+            {/* Always mounted so its aria-live can announce the first
               appearance (same reasoning as RouteStats' wrapper); the
               class swap keeps the empty slot at zero height. */}
-          <p className={lowShade ? styles.lowShadeNote : styles.lowShadeEmpty} aria-live="polite">
-            {lowShade && selected && (
-              <>
-                <strong>
-                  <span aria-hidden="true">// LOW_SHADE:</span>
-                  <span className={styles.visuallyHidden}>LOW SHADE:</span>
-                </strong>{' '}
-                {Math.round(displayShade(selected.properties.shade_fraction) * 100)}% shaded over{' '}
-                {formatDistance(selected.properties.length_m)} — expect mostly direct sun
-              </>
-            )}
-          </p>
-        </fieldset>
+            <p className={lowShade ? styles.lowShadeNote : styles.lowShadeEmpty} aria-live="polite">
+              {lowShade && shown && (
+                <>
+                  <strong>
+                    <span aria-hidden="true">// LOW_SHADE:</span>
+                    <span className={styles.visuallyHidden}>LOW SHADE:</span>
+                  </strong>{' '}
+                  {Math.round(displayShade(shown.properties.shade_fraction) * 100)}% shaded over{' '}
+                  {formatDistance(shown.properties.length_m)} — expect mostly direct sun
+                </>
+              )}
+            </p>
+          </fieldset>
+        </div>
       </div>
     </>
   )

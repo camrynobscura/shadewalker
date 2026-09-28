@@ -27,6 +27,28 @@ afterEach(() => {
 const A = { lat: 40.68, lon: -73.99 }
 const B = { lat: 40.686, lon: -73.984 }
 
+describe('fetchRoute time', () => {
+  function requestedParams(): URLSearchParams {
+    const url = vi.mocked(fetch).mock.calls[0][0] as string
+    return new URL(url, 'http://localhost').searchParams
+  }
+
+  it('sends no time for "now", so the server uses its own clock', async () => {
+    mockFetchOnce({})
+    await fetchRoute(A, B, [0], new AbortController().signal, null)
+    for (const key of ['month', 'day', 'hour', 'minute']) expect(requestedParams().has(key)).toBe(false)
+  })
+
+  it('sends all four parts of a picked time, and no year', async () => {
+    mockFetchOnce({})
+    const time = { year: 2028, month: 2, day: 29, hour: 9, minute: 5 }
+    await fetchRoute(A, B, [0], new AbortController().signal, time)
+    const params = requestedParams()
+    expect(['month', 'day', 'hour', 'minute'].map((key) => params.get(key))).toEqual(['2', '29', '9', '5'])
+    expect(params.has('year')).toBe(false)
+  })
+})
+
 describe('fetchRoute errors', () => {
   it("shows the server's detail for a 4xx that carries one", async () => {
     mockFetchOnce({ detail: 'No path between these points' }, false, 422)

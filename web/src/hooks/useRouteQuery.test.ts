@@ -164,6 +164,96 @@ describe('useRouteQuery', () => {
     expect(result.current.snappedStart).toBeNull()
   })
 
+  it('sends the set walk time; a new time waits for FIND_ROUTE', async () => {
+    fetchRoute.mockResolvedValue(fakeResponse())
+    const sunday = { year: 2026, month: 9, day: 27, hour: 9, minute: 0 }
+    const { result } = renderHook(() => useRouteQuery(START, END, 15, sunday))
+    await waitFor(() => expect(result.current.route).not.toBeNull())
+    expect(fetchRoute).toHaveBeenCalledTimes(1)
+    expect(fetchRoute.mock.calls[0][4]).toEqual(sunday)
+
+    act(() => result.current.setWalkTime(null))
+    expect(fetchRoute).toHaveBeenCalledTimes(1) // editing alone never routes
+
+    act(() => result.current.findRoute())
+    await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(2))
+    expect(fetchRoute.mock.calls[1][4]).toBeNull()
+  })
+
+  it('without points at mount, routes only on FIND_ROUTE', async () => {
+    fetchRoute.mockResolvedValue(fakeResponse())
+    const { result } = renderHook(() => useRouteQuery(null, null, 15))
+    act(() => result.current.setStart(START))
+    act(() => result.current.setEnd(END))
+    expect(fetchRoute).not.toHaveBeenCalled()
+
+    act(() => result.current.findRoute())
+    await waitFor(() => expect(result.current.route).not.toBeNull())
+    expect(fetchRoute).toHaveBeenCalledTimes(1)
+  })
+
+  it('editing a point keeps the drawn route until FIND_ROUTE; the same trip again is not re-fetched', async () => {
+    fetchRoute.mockResolvedValue(fakeResponse())
+    const { result } = renderHook(() => useRouteQuery(START, END, 15))
+    await waitFor(() => expect(result.current.route).not.toBeNull())
+
+    act(() => result.current.findRoute()) // back, then FIND_ROUTE on the same trip
+    expect(fetchRoute).toHaveBeenCalledTimes(1)
+
+    act(() => result.current.setEnd({ lat: 40.69, lon: -73.98 }))
+    expect(result.current.route).not.toBeNull()
+    expect(fetchRoute).toHaveBeenCalledTimes(1)
+
+    act(() => result.current.findRoute())
+    await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(2))
+  })
+
+  it('emptying a field clears the route: there is no trip left', async () => {
+    fetchRoute.mockResolvedValue(fakeResponse())
+    const { result } = renderHook(() => useRouteQuery(START, END, 15))
+    await waitFor(() => expect(result.current.route).not.toBeNull())
+
+    act(() => result.current.setStart(null))
+    await waitFor(() => expect(result.current.route).toBeNull())
+  })
+
+  it('auto (desktop): routes as soon as both points are set, and again on every change', async () => {
+    fetchRoute.mockResolvedValue(fakeResponse())
+    const { result } = renderHook(() => useRouteQuery(null, null, 15, null, true))
+    act(() => result.current.setStart(START))
+    expect(fetchRoute).not.toHaveBeenCalled()
+    act(() => result.current.setEnd(END))
+    await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(1))
+
+    act(() => result.current.setWalkTime({ year: 2026, month: 9, day: 27, hour: 9, minute: 0 }))
+    await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(2))
+    // The same trip again is no change: no third fetch.
+    act(() => result.current.setWalkTime({ year: 2026, month: 9, day: 27, hour: 9, minute: 0 }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(fetchRoute).toHaveBeenCalledTimes(2)
+  })
+
+  it('FIND_ROUTE retries the same trip after it failed', async () => {
+    fetchRoute.mockRejectedValueOnce(new Error('network down'))
+    const { result } = renderHook(() => useRouteQuery(START, END, 15))
+    await waitFor(() => expect(result.current.error).not.toBeNull())
+
+    fetchRoute.mockResolvedValue(fakeResponse())
+    act(() => result.current.findRoute())
+    await waitFor(() => expect(result.current.route).not.toBeNull())
+    expect(fetchRoute).toHaveBeenCalledTimes(2)
+  })
+
+  it('setting an equal walk time again does not re-fetch', async () => {
+    fetchRoute.mockResolvedValue(fakeResponse())
+    const sunday = { year: 2026, month: 9, day: 27, hour: 9, minute: 0 }
+    const { result } = renderHook(() => useRouteQuery(START, END, 15, sunday))
+    await waitFor(() => expect(result.current.route).not.toBeNull())
+
+    act(() => result.current.setWalkTime({ ...sunday }))
+    expect(fetchRoute).toHaveBeenCalledTimes(1)
+  })
+
   // clear() was removed with the CLEAR_ROUTE button (2026-09-02): fields
   // clear individually via each field's ✕, and the wordmark's home link
   // is the full reset.

@@ -1,5 +1,6 @@
-import { divIcon, type Map as LeafletMap } from 'leaflet'
-import { useEffect, useId, useRef } from 'react'
+import { Control, DomEvent, divIcon, type Map as LeafletMap } from 'leaflet'
+import { useEffect, useId, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Circle,
   CircleMarker,
@@ -191,8 +192,10 @@ function Legend({ hasRoute }: { hasRoute: boolean }) {
     // clue what the list IS (2026-08-30 tree-read finding).
     <ul className={styles.legend} aria-label="Map legend">
       <li className={styles.legendRow}>
+        {/* The picked preset's route, whichever it is: "shadiest" was wrong
+          for MED, LOW and NONE (user, 2026-09-28). */}
         <span className={styles.legendSwatch} aria-hidden="true" />
-        shadiest route
+        your route
       </li>
       <li className={styles.legendRow}>
         <span className={`${styles.legendSwatch} ${styles.legendSwatchDashed}`} aria-hidden="true" />
@@ -242,11 +245,31 @@ function MapA11y({ describedBy }: { describedBy: string }) {
   return null
 }
 
-/** "Locate me" — rendered inside the map so useMap() can pan it. */
+/** "Locate me" — a Leaflet control in the bottom-right corner, the React
+ * button portaled into the control's container. A control, not a plain
+ * button inside the map, for disableClickPropagation, as Leaflet's own
+ * controls have: without it a tap on the button ALSO reached the map as
+ * a click and dropped a route point under it (found 2026-09-27; e2e
+ * location.spec pins it). */
 function LocateButton({ position }: { position: GeoPosition | null }) {
   const map = useMap()
+  const [container] = useState(() => {
+    const div = document.createElement('div')
+    DomEvent.disableClickPropagation(div)
+    return div
+  })
+  const visible = position !== null
+  useEffect(() => {
+    if (!visible) return
+    const control = new Control({ position: 'bottomright' })
+    control.onAdd = () => container
+    control.addTo(map)
+    return () => {
+      control.remove()
+    }
+  }, [map, container, visible])
   if (!position) return null
-  return (
+  return createPortal(
     <button
       type="button"
       className={styles.locateButton}
@@ -257,7 +280,8 @@ function LocateButton({ position }: { position: GeoPosition | null }) {
           glyph renders as tofu in iOS's mono fallback chain (2026-09-02),
           and it's the same mark as the start field's location accessory. */}
       <CrosshairIcon /> Locate me
-    </button>
+    </button>,
+    container,
   )
 }
 

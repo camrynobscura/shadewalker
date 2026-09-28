@@ -389,6 +389,16 @@ def test_route_rejects_bad_time_parameters(client, params):
     assert _get(client, **params).status_code == 400
 
 
+def test_route_takes_feb_29_in_a_common_year(client, monkeypatch):
+    """The shade table has no year, so Feb 29 -- picked for a leap year, or
+    in a link opened a year later -- is a real day. It used to be checked
+    against the current year and refused three years in four."""
+    monkeypatch.setattr(server_app, "PINNED_NOW", datetime(2026, 7, 15, 12, tzinfo=server_app.NYC_TZ))
+    response = _get(client, month=2, day=29, hour=12)
+    assert response.status_code == 200
+    assert response.json()["day"] == 29
+
+
 def test_route_uses_the_hour_it_is_given(client):
     morning = _get(client, month=7, hour=9, tree_weights=[15.0]).json()["routes"][0]["properties"]
     noon = _get(client, month=7, hour=12, tree_weights=[15.0]).json()["routes"][0]["properties"]

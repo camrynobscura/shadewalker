@@ -1,0 +1,262 @@
+.visuallyHidden {
+  composes: visuallyHidden from '../shared.module.css';
+}
+
+/* The time box borrows the address field's parts, so the three match. */
+.whenField {
+  composes: addressField from './Controls.module.css';
+}
+
+.whenHead {
+  composes: fieldHead from './Controls.module.css';
+}
+
+.whenLabel {
+  composes: fieldLabel from './Controls.module.css';
+}
+
+.whenWrap {
+  composes: suggestWrap from './Controls.module.css';
+}
+
+.whenMarker {
+  composes: fieldMarker from './Controls.module.css';
+}
+
+/* 14, not 13: inside the 20px chip that leaves 3px a side, where 13
+   left 3.5 and a phone rounded the half pixel to one side. */
+.whenMarker svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* One line, always: "…" if a narrow phone can't fit even the short form. */
+.whenBox {
+  composes: addressInput from './Controls.module.css';
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  cursor: pointer;
+}
+
+.whenChevron {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: var(--target-min);
+  height: var(--target-min);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* Desktop: a card in the panel under the box (dialog.show()). The UA's
+   dialog positioning is undone so it sits where the flex column puts it. */
+.picker {
+  position: static;
+  width: 100%;
+  margin: 0;
+  padding: var(--space-md);
+  background: var(--panel-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(11, 36, 24, 0.2);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  composes: sectionLabel from '../shared.module.css';
+  margin: 0;
+  font-weight: normal;
+}
+
+.cancel {
+  display: none;
+  min-height: var(--target-min);
+  padding: var(--space-sm);
+  background: none;
+  border: none;
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.1em;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.modes {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+/* LEAVE NOW / DEPART AT: radio buttons drawn as one segmented bar.
+   Markup: .segmented > label.segment > input.segmentInput + span.segmentText. */
+.segmented {
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 0;
+}
+
+/* cursor on the label, not only the input: WebKit renders the absolute
+   radio at its native 12px, so the input alone covers a corner. */
+.segment {
+  flex: 1;
+  position: relative;
+  cursor: pointer;
+}
+
+/* The real radio, invisible but stretched over the segment so clicks,
+   focus, and arrow keys hit the native input. opacity, not display:none,
+   which would drop it from the tab order. */
+.segmentInput {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.segmentText {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--target-min);
+  border-radius: 0;
+  font-size: var(--font-size-sm);
+  color: var(--muted);
+}
+
+.segmentInput:checked + .segmentText {
+  background: var(--magenta);
+  color: var(--text); /* ink on neon magenta: 5.1:1 — white would fail AA */
+  font-weight: 600;
+}
+
+/* Forced colors strip the fill; weight alone can't carry checked state. */
+@media (forced-colors: active) {
+  .segmentInput:checked + .segmentText {
+    background: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
+  }
+}
+
+/* Re-drawn on the label because the real radio is invisible; same values
+   as the global :focus-visible ring in base.css. */
+.segmentInput:focus-visible + .segmentText {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.segmentInput:hover:not(:checked) + .segmentText {
+  color: var(--text);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.fieldLabel {
+  font-size: var(--label-font-size);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.input {
+  min-height: var(--target-min);
+  padding: var(--space-sm) var(--control-pad-x);
+  background: var(--panel-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  font-size: var(--font-size-input);
+}
+
+.caption {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-xs);
+}
+
+.done {
+  min-height: var(--target-min);
+  padding: 0 var(--space-lg);
+  background: var(--green-dim);
+  color: var(--on-accent);
+  border: 1px solid var(--green-dim);
+  border-radius: 0;
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+/* Phone: the whole screen (dialog.showModal()), like address search. */
+@media (max-width: 720px) {
+  .picker {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    padding: var(--space-lg);
+    background: var(--panel);
+    border: none;
+    box-shadow: none;
+  }
+
+  .form {
+    gap: var(--space-lg);
+  }
+
+  .cancel {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* iOS draws date/time inputs as small centred grey pills; this makes
+     them full-width boxes like the address fields. */
+  .input {
+    appearance: none;
+    width: 100%;
+    text-align: left;
+  }
+
+  .input::-webkit-date-and-time-value {
+    text-align: left;
+  }
+
+  .actions {
+    margin-top: 0;
+  }
+
+  .done {
+    flex: 1;
+  }
+}

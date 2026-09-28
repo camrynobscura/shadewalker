@@ -291,73 +291,184 @@
   margin-bottom: var(--space-sm);
 }
 
-.segmented {
-  display: flex;
-  gap: 1px;
-  padding: 2px;
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
+/* Phone only (the media block below shows it): desktop routes by itself. */
+.findRoute {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--target-min);
+  margin: 0;
+  background: var(--green-dim);
+  color: var(--on-accent);
+  border: 1px solid var(--green-dim);
   border-radius: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  cursor: pointer;
 }
 
-/* cursor on the label, not only the input: WebKit renders the absolute
-   radio at its native 12px, so the input alone covers a corner. */
-.segment {
+.findRoute:disabled {
+  background: var(--panel-raised);
+  color: var(--muted);
+  border-color: var(--line);
+  font-weight: 400;
+  cursor: not-allowed;
+}
+
+/* Phone only; the media block below shows it. */
+.trip {
+  display: none;
+}
+
+.trip svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.tripWhere {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tripArrow {
+  margin: 0 0.4em;
+}
+
+.tripWhen {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.tripWhen svg {
+  width: 12px;
+  height: 12px;
+}
+
+.routeRows {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+}
+
+.routeRow {
   position: relative;
   cursor: pointer;
 }
 
-/* The real radio, invisible but stretched over the segment so clicks,
-   focus, and arrow keys hit the native input. opacity, not display:none,
-   which would drop it from the tab order. */
-.segmentInput {
+.routeRow + .routeRow {
+  border-top: 1px solid var(--line);
+}
+
+/* The real radio, invisible but stretched over the row: clicks, focus
+   and arrow keys hit the input. */
+.routeInput {
   position: absolute;
   inset: 0;
-  opacity: 0;
   margin: 0;
+  opacity: 0;
   cursor: pointer;
 }
 
-.segmentText {
+.routeFace {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: var(--space-sm);
   min-height: var(--target-min);
-  border-radius: 0;
+  /* Deeper at the bottom: the meter sits there, clear of wrapped text. */
+  padding: var(--space-sm) var(--space-md) var(--space-md);
   font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
 
-.segmentInput:checked + .segmentText {
-  background: var(--magenta);
-  color: var(--text); /* ink on neon magenta: 5.6:1 — white would fail AA */
-  font-weight: 600;
+.routeInput:checked + .routeFace {
+  color: var(--text);
 }
 
-/* Forced colors strip the fill; weight alone can't carry checked state. */
+.routeInput:hover:not(:checked) + .routeFace {
+  color: var(--text);
+}
+
+/* Re-drawn on the row because the real radio is invisible; same values
+   as the global :focus-visible ring in base.css. */
+.routeInput:focus-visible + .routeFace {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Forced colors strip the meters, so the fill carries the state. */
 @media (forced-colors: active) {
-  .segmentInput:checked + .segmentText {
+  .routeInput:checked + .routeFace {
     background: Highlight;
     color: HighlightText;
     forced-color-adjust: none;
   }
 }
 
-/* Re-drawn on the label because the real radio is invisible; same values
-   as the global :focus-visible ring in base.css. */
-.segmentInput:focus-visible + .segmentText {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
+/* 5ch: four letters plus their 0.1em tracking, so NONE clears its
+   minutes and every row's numbers start on one line. */
+.routeName {
+  flex: none;
+  width: 5ch;
+  letter-spacing: 0.1em;
 }
 
-.segmentInput:hover:not(:checked) + .segmentText {
-  color: var(--text);
+.routeInput:checked + .routeFace .routeName {
+  font-weight: 700;
 }
 
-/* Sans-serif set on the shared parent: mono figures read gappy, and both
-   subtitle lines must share character spacing. */
-.comparisonHint {
+.routeMeta {
+  flex: 1;
+  min-width: 0;
+}
+
+.routeShade {
+  flex: none;
+  white-space: nowrap;
+}
+
+.routeShade strong {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+/* The route's shade %, as a bar on a 0–100 track. */
+.routeMeter {
+  position: absolute;
+  inset-inline: var(--space-md);
+  bottom: var(--space-sm);
+  height: 3px;
+  background: var(--meter-track);
+}
+
+.routeMeterFill {
+  display: block;
+  height: 100%;
+  background: var(--meter-fill);
+  transform-origin: left;
+}
+
+/* The map's route green, so the bar and the line read as one route. */
+.routeInput:checked + .routeFace .routeMeterFill {
+  background: var(--green);
+  animation: meter-grow 0.5s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes meter-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.routeHint {
   margin: var(--space-sm) 0 0;
 }
 
@@ -372,7 +483,7 @@
   font-weight: 600;
 }
 
-.comparisonLine {
+.treeLine {
   margin: var(--space-xs) 0 0;
   font-size: var(--font-size-sm);
   color: var(--text);
@@ -381,17 +492,6 @@
 .promptSymbol {
   color: var(--text);
   margin-right: 0.75em;
-}
-
-.sep {
-  color: var(--muted);
-  margin: 0 0.45em;
-}
-
-/* Margin instead of a space character: mono's full cell read too wide,
-   zero too tight — this is the exact-gap knob. */
-.plusSign {
-  margin-right: 3px;
 }
 
 .numberHighlight {
@@ -412,6 +512,49 @@
 /* Tighter rhythm for the stacked mobile layout, where the panel is a
    short scroll window under a 45vh map. */
 @media (max-width: 720px) {
+  /* The phone's two screens (App's data-view): one shows at a time. */
+  :global([data-view='route']) .addressGroup,
+  :global([data-view='plan']) .routeGroup {
+    display: none;
+  }
+
+  /* Flex so the trip line's negative margins don't collapse into the
+     next section's. */
+  .routeGroup {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .findRoute {
+    display: flex;
+  }
+
+  /* The tap area stays 44px; the negative margins hand back what the
+     ~18px line doesn't use, so the line, not the box, sets the spacing. */
+  .trip {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    width: 100%;
+    min-height: var(--target-min);
+    margin: -13px 0;
+    padding: 0;
+    background: none;
+    color: var(--green-dim);
+    border: none;
+    border-radius: 0;
+    font-size: var(--font-size-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  /* No divider under the trip line: the rows start right below it. */
+  .routeGroup .sectionDivider {
+    margin-top: var(--space-md);
+    padding-top: 0;
+    border-top: none;
+  }
+
   .addressFields {
     gap: var(--space-sm);
   }

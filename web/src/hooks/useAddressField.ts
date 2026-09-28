@@ -69,6 +69,11 @@ export function useAddressField(
   // gets dropped instead of refilling the field (the ✕-mid-lookup
   // resurrection, caught 2026-09-03).
   const resolveSeqRef = useRef(0)
+  // The lookup resolve() has in flight, so a second caller waits for it
+  // instead of starting another: FIND_ROUTE's tap blurs this field (which
+  // resolves) a moment before its click asks every field to resolve, and
+  // it must wait for THAT answer before routing.
+  const inflightRef = useRef<Promise<void> | null>(null)
   // Previous externalPoint, so the effect below can tell a point being
   // CLEARED (value -> null) from the steady "no point yet" state while
   // someone types a fresh address.
@@ -187,7 +192,16 @@ export function useAddressField(
   // new text to resolve — not every time Enter is pressed again. The one
   // exception is 'unavailable': an outage is worth retrying on the same
   // text, so Enter (or a blur) tries again without retyping.
-  async function resolve() {
+  function resolve(): Promise<void> {
+    if (inflightRef.current) return inflightRef.current
+    const run = lookUp().finally(() => {
+      if (inflightRef.current === run) inflightRef.current = null
+    })
+    inflightRef.current = run
+    return run
+  }
+
+  async function lookUp() {
     setSuggestOn(false) // submitting is the end of the suggestion phase
     if (!query.trim() || (status !== 'idle' && status !== 'unavailable')) return
     setStatus('searching')

@@ -23,87 +23,10 @@
   gap: var(--space-sm);
 }
 
-.subTitle {
-  composes: sectionLabel from '../shared.module.css';
-  margin: 0;
-  font-weight: normal;
-}
-
 /* No margins, unlike Controls' twin: this wraps the always-mounted
    aria-live region, whose spacing when empty must be zero. */
 .sectionDivider {
   composes: sectionDivider from '../shared.module.css';
-}
-
-/* list-style: none strips list semantics in Safari; the <ul> carries
-   role="list" — don't remove one without the other. */
-.statRow {
-  display: flex;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border: 1px solid var(--green-dim);
-  background: var(--green-wash);
-}
-
-/* Equal cells; min-width stays `auto` so an outgrowing stat widens its
-   box instead of clipping. */
-.stat {
-  flex: 1;
-  padding: var(--space-sm) var(--control-pad-x);
-  border-left: 1px solid var(--line);
-  line-height: 1.25;
-}
-
-.stat:first-child {
-  border-left: 0;
-}
-
-.statVal {
-  display: block;
-  font-size: var(--font-size-lg);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--green-dim);
-  white-space: nowrap;
-}
-
-.statVal small {
-  font-size: 0.62em;
-  font-weight: 500;
-  color: var(--muted);
-}
-
-/* Very narrow screens: 2×2, because the cells refuse to clip (see .stat)
-   and an hour-scale ETA pushed the last cell out of the frame. */
-@media (max-width: 400px) {
-  .statRow {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .stat:nth-child(odd) {
-    border-left: 0;
-  }
-
-  .stat:nth-child(n + 3) {
-    border-top: 1px solid var(--line);
-  }
-
-  /* Three stats (tree count hidden): the odd last cell spans the bottom
-     row instead of leaving a bare quarter of frame. */
-  .stat:last-child:nth-child(odd) {
-    grid-column: 1 / -1;
-  }
-}
-
-.statLabel {
-  display: block;
-  margin-bottom: 2px;
-  font-size: var(--label-font-size);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--muted);
 }
 
 .description {

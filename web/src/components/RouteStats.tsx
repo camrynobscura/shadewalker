@@ -1,8 +1,7 @@
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { RouteFeature, RouteStep } from '../api'
-import { formatDistance, formatDistanceParts, formatEtaParts, spokenDistance, spokenEta } from '../format'
+import { formatDistance, spokenDistance } from '../format'
 import { ShareIcon } from './icons'
-import { displayShade } from '../shade'
 import styles from './RouteStats.module.css'
 
 /** One step's instruction text, minus the distance (the <li> appends
@@ -121,30 +120,6 @@ function StepGlyph({ action }: { action: RouteStep['action'] }) {
     </svg>
   )
 }
-
-/** When at least this share of the route's tree score is park-canopy AREA
- * credit (not countable trees), hide the "trees: N" stat -- the count
- * can't see area credit, so it undersells exactly the routes with the
- * most real cover ("83% shaded, 3 trees").
- *
- * 0.25, user decision 2026-08-28: the count is flavor, so it should be
- * accurate or absent. Because canopy credit shares units with per-tree
- * credit, the share IS the fraction of shade the count can't see -- so
- * a shown count always covers at least 75% of the route's shade story.
- * Calibrated against 250 seeded citywide routes at the default preset
- * (seed 20260829, weight 15, July; method in history/quick-fixes.md):
- *   - hides the stat on 20.0% of sampled routes (the 2026-08-17 guess
- *     of 1/3 hid 13.2%);
- *   - a 60/40 street/park route (share ~0.4) HIDES: the walker can SEE
- *     the park trees the number ignores, and that visible contradiction
- *     -- not any internal score ratio -- is the harm model here;
- *   - 0.5 ("hide only when the count stops being the majority of the
- *     score") was derived first and REJECTED: score-majority is
- *     invisible to a walker, uncounted trees in plain view are not.
- *     Don't re-raise it without evidence about perception, not scores;
- *   - share 0.75+ is the absurd case either way (count 3 vs ~117
- *     unseen tree-equivalents; pure-canopy routes counting 0). */
-const CANOPY_SHARE_HIDES_TREE_COUNT = 0.25
 
 interface RouteStatsProps {
   /** The currently selected Shade_priority preset's route -- /route
@@ -329,116 +304,19 @@ function ShareButton() {
 
 function StatsBody({ route, description }: { route: RouteFeature; description: string }) {
   const stats = route.properties
-  // Computed once and used by BOTH the stat and the warning below --
-  // the invariant that the warning can never disagree with the number
-  // now includes agreeing about the display curve.
-  const shownShadePct = Math.round(displayShade(stats.shade_fraction) * 100)
-  const dist = formatDistanceParts(stats.length_m)
 
   return (
     <>
-      {/* Same visual label style Start_point/End_point and the
-          Shade_priority legend already use, but a real heading here (the
-          only one below the page's own <h1>) -- unlike those two, this
-          text isn't captioning a form control, it's introducing a block
-          of read-only output (the stats and directions below), so it
-          gets a heading's own navigation benefit (screen readers can jump
-          between headings) instead of a label/legend's control-naming
-          role, which wouldn't apply here. Kept as a plain sibling of
-          .routeBody, not a child of it, so its own margin-bottom controls
-          the title-to-content gap directly -- a child would pick up that
-          flex container's uniform --space-lg gap instead, which is right
-          for the *other* gaps inside it (stat row to directions list) but
-          too loose for a title hugging its own content, the same tight
-          relationship the Shade_priority legend's margin-bottom gets. */}
-      {/* Content split, not aria-label: inside the aria-live wrapper a
-          label AND the text can both be announced -- "My route" twice
-          (VoiceOver pass). aria-hidden text is excluded from both the
-          announcement and the heading's name; the sr twin serves both. */}
-      <h2 className={styles.sectionTitle}>
-        <span aria-hidden="true">My_route</span>
-        <span className={styles.visuallyHidden}>My route</span>
-      </h2>
+      {/* A real heading (the only one below the page's own <h1>): this
+          introduces read-only output, the chosen route's directions, so
+          it gets a heading's navigation benefit rather than a label's.
+          Was "My_route" over a stats box until 2026-09-27, when the
+          route numbers moved into the Shade_priority rows (PLAN
+          `phone-space`); plain "Directions" has no underscore to split
+          into a spoken twin. */}
+      <h2 className={styles.sectionTitle}>Directions</h2>
       <div className={styles.routeBody}>
-        {/* Label above value (user call 2026-08-28), eta leading — the
-            question a walker asks first. A plain named list, not a <dl>:
-            it WAS a definition list (2026-08-30 to 2026-09-09), but every
-            <dt> was aria-hidden, so the term-to-value pairing a <dl>
-            promises never reached AT — each value speaks a self-contained
-            phrase ("74 percent shaded") instead, a VoiceOver-pass call
-            (2026-08-31: "eta" read as a word, and the values stand on
-            their own). The markup now claims exactly that: four items.
-            role="list" because .statRow sets list-style: none, which
-            strips the role in Safari (same as the directions list). */}
-        <ul className={styles.statRow} role="list" aria-label="Route stats">
-          <li className={styles.stat}>
-            {/* The visible labels are aria-hidden (see above); each value
-                carries its own spoken twin with full words. */}
-            <span className={styles.statLabel} aria-hidden="true">
-              eta
-            </span>
-            {/* The compact visual ("2 hr 9 min") is aria-hidden; the
-                sr-only twin speaks full words. Same pattern on distance. */}
-            <span className={styles.statVal}>
-              <span aria-hidden="true">
-                {formatEtaParts(stats.minutes).map((part, i) => (
-                  <Fragment key={part.unit}>
-                    {i > 0 ? ' ' : null}
-                    {part.value}
-                    <small> {part.unit}</small>
-                  </Fragment>
-                ))}
-              </span>
-              <span className={styles.visuallyHidden}>{spokenEta(stats.minutes)}</span>
-            </span>
-          </li>
-          <li className={styles.stat}>
-            {/* Unit in the same lighter <small> the eta box's "min" gets --
-                the value is the datum, the unit is context. */}
-            <span className={styles.statLabel} aria-hidden="true">
-              distance
-            </span>
-            <span className={styles.statVal}>
-              <span aria-hidden="true">
-                {dist.value}
-                <small> {dist.unit}</small>
-              </span>
-              <span className={styles.visuallyHidden}>{spokenDistance(stats.length_m)}</span>
-            </span>
-          </li>
-          <li className={styles.stat}>
-            <span className={styles.statLabel} aria-hidden="true">
-              shaded
-            </span>
-            <span className={styles.statVal}>
-              {/* Same <small> treatment AND same leading space as eta's
-                  "min" and distance's "mi" -- the unit gap matches across
-                  all three boxes (user call, 2026-08-31). */}
-              <span aria-hidden="true">
-                {shownShadePct}
-                <small> %</small>
-              </span>
-              <span className={styles.visuallyHidden}>{shownShadePct} percent shaded</span>
-            </span>
-          </li>
-          {stats.park_canopy_share < CANOPY_SHARE_HIDES_TREE_COUNT && (
-            <li className={styles.stat}>
-              <span className={styles.statLabel} aria-hidden="true">
-                trees
-              </span>
-              <span className={styles.statVal}>
-                <span aria-hidden="true">{stats.tree_count}</span>
-                <span className={styles.visuallyHidden}>
-                  {`${stats.tree_count} ${stats.tree_count === 1 ? 'tree' : 'trees'}`}
-                </span>
-              </span>
-            </li>
-          )}
-        </ul>
-
         <div className={styles.directionsGroup}>
-          <h3 className={styles.subTitle}>Directions</h3>
-
           {/* The one caution the product owes every route (user-approved
               wording, 2026-08-28), ABOVE the list so it reads before the
               instructions do (user call, 2026-08-28). Deliberately GENERAL:

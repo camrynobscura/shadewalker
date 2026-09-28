@@ -1,6 +1,14 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Locator } from '@playwright/test'
-import { atNight, mockGeocode, POINT_A, POINT_B, POINT_OUTSIDE_COVERAGE, routeUrl } from './fixtures'
+import {
+  atNight,
+  mockGeocode,
+  POINT_A,
+  POINT_B,
+  POINT_OUTSIDE_COVERAGE,
+  routeDrawn,
+  routeUrl,
+} from './fixtures'
 
 // axe-core catches markup-detectable WCAG issues (missing labels, contrast,
 // ARIA misuse) across the app's real, distinct states — not a replacement
@@ -20,7 +28,7 @@ test('a drawn route has no violations', async ({ page }) => {
   // into the address fields on load -- mock it or this hits live Nominatim.
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
-  await expect(page.getByText('distance', { exact: true })).toBeVisible()
+  await expect(routeDrawn(page)).toBeVisible()
 
   const results = await new AxeBuilder({ page }).analyze()
   expect(results.violations).toEqual([])
@@ -36,6 +44,25 @@ test('a route after dark has no violations', async ({ page }) => {
 
   const results = await new AxeBuilder({ page }).analyze()
   expect(results.violations).toEqual([])
+})
+
+test('the open time picker, and a set departure on the time button, have no violations', async ({ page }) => {
+  // Both only exist after a tap: the picker (a dialog, segmented radios,
+  // native date/time inputs, the button's aria-expanded/-controls) and
+  // the button's "Depart ..." text once a time is applied.
+  await mockGeocode(page)
+  await page.goto(routeUrl(POINT_A, POINT_B))
+  await expect(routeDrawn(page)).toBeVisible()
+  await page.getByRole('button', { name: 'Leave now' }).click()
+  const picker = page.getByRole('dialog', { name: 'Start time' })
+  await picker.getByRole('radio', { name: 'Depart at' }).check()
+  await expect(picker.getByLabel('date', { exact: true })).toBeVisible()
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
+
+  await picker.getByLabel('time', { exact: true }).fill('09:05')
+  await page.getByRole('button', { name: 'DONE' }).click()
+  await expect(page.getByRole('button', { name: /Depart .*9:05/ })).toBeVisible()
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
 })
 
 test('an open autocomplete listbox has no violations', async ({ page }) => {
@@ -68,7 +95,7 @@ test('an open recents listbox has no violations', async ({ page }) => {
   await page.getByRole('combobox', { name: 'End point' }).fill('3rd St & 3rd Ave')
   await page.keyboard.press('Enter')
   // Recents only exist once a route draws — commit rides route arrival.
-  await expect(page.getByText('distance', { exact: true })).toBeVisible()
+  await expect(routeDrawn(page)).toBeVisible()
   await page.getByRole('button', { name: 'Clear start point' }).click()
   await start.click()
   await expect(page.getByRole('listbox', { name: 'Start point recent addresses' })).toBeVisible()
@@ -167,18 +194,20 @@ test('header tagline and instructions meet AA text contrast', async ({ page }) =
 })
 
 // Windows High Contrast (forced-colors) strips every author background,
-// which used to leave the checked Shade_priority segment marked by font
-// weight alone (audit 2026-09-09). Chromium is the only engine that
+// which used to leave the checked Shade_priority segment (a row since
+// 2026-09-27) marked by font weight alone (audit 2026-09-09). Chromium is the only engine that
 // emulates the media feature, and it's the one project here.
 test.describe('forced colors', () => {
   test.use({ forcedColors: 'active' })
   test('the checked preset keeps a fill distinct from the canvas', async ({ page }) => {
     await page.goto('/')
-    await expect(page.getByRole('radio', { name: 'Medium' })).toBeChecked()
-    const [checkedBg, canvasBg] = await page.evaluate(() => [
-      getComputedStyle(document.querySelector('input[type=radio]:checked + span')!).backgroundColor,
-      getComputedStyle(document.body).backgroundColor,
-    ])
+    // A fresh load checks the default, MAX.
+    const maximum = page.getByRole('radio', { name: 'Maximum' })
+    await expect(maximum).toBeChecked()
+    // The row's visible face is the radio's next sibling (the radio
+    // itself is invisible, stretched over the row).
+    const checkedBg = await maximum.evaluate((el) => getComputedStyle(el.nextElementSibling!).backgroundColor)
+    const canvasBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
     expect(checkedBg).not.toBe(canvasBg)
   })
 })

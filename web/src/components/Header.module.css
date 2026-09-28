@@ -41,10 +41,63 @@
   color: var(--green-dim);
 }
 
-/* The map page's ABOUT has two forms in one link (see Header.tsx): the
-   word, swapped for the ⓘ icon in the media block below. */
-.navIcon {
+/* The map page's ABOUT: the word here, the ⓘ and its pop-up on phones
+   (swapped in the media block below; see Header.tsx). */
+.aboutPopover {
   display: none;
+  position: relative;
+}
+
+.infoButton {
+  composes: navLink;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Invisible, under the panel: takes the dismissing tap off the map. */
+.infoBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1499;
+}
+
+/* Above Leaflet's controls (1000). */
+.infoPanel {
+  position: absolute;
+  top: calc(100% + var(--space-md));
+  right: 0;
+  z-index: 1500;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  /* Wide enough for the tagline on one line (40 mono characters). */
+  width: min(340px, calc(100vw - 2 * var(--space-lg)));
+  padding: var(--space-md) var(--space-md) 0;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(11, 36, 24, 0.2);
+  font-size: var(--font-size-sm);
+  color: var(--text);
+}
+
+.infoPanel p {
+  margin: 0;
+  font-style: italic;
+  /* Hanging indent: wrapped lines start under the text, past the "> ". */
+  padding-left: 2ch;
+  text-indent: -2ch;
+}
+
+/* 44px tap target, pulled up 8px so it doesn't read as a gap. */
+.infoAbout {
+  composes: pageLink from '../shared.module.css';
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  min-height: var(--target-min);
+  margin-top: calc(-1 * var(--space-sm));
 }
 
 .homeLink {
@@ -90,6 +143,13 @@
   }
 }
 
+/* Hanging indent, as in the ⓘ pop-up: wrapped lines start past the "> ". */
+.tagline,
+.instructions {
+  padding-left: 2ch;
+  text-indent: -2ch;
+}
+
 .tagline {
   margin: 0;
   font-weight: 400;
@@ -109,7 +169,7 @@
 
 @media (max-width: 720px) {
   .header {
-    padding: var(--space-lg);
+    padding: var(--space-sm) var(--space-lg);
     /* Row gap 2px on purpose: the 4px token read too loose here.
        Column gap down from 2xl — its 30px of minimum width wrapped the
        ⓘ below the wordmark at the 320px reflow floor (smoke.spec
@@ -117,25 +177,31 @@
     gap: 2px var(--space-sm);
   }
 
-  /* Phone header = wordmark + tagline only; the instructions line is
-     out of the a11y tree too — on mobile it isn't the interface. */
-  .instructions {
+  /* Phone header = wordmark + ⓘ only: the tagline and instructions are
+     out of the a11y tree too — room for the panel's two screens. */
+  .headerText {
     display: none;
   }
 
-  /* ABOUT slims to the ⓘ icon. About's own MAP link has no icon form,
-     so its header is untouched. */
-  .navText {
+  /* ABOUT becomes the ⓘ and its pop-up. About's own MAP link has no
+     other form, so its header is untouched. */
+  .aboutWord {
     display: none;
   }
 
-  .navIcon {
-    display: flex;
+  .aboutPopover {
+    display: block;
   }
 
-  /* 44px hit box, 36px layout footprint: the full 44 wrapped the ⓘ
-     under the wordmark at 320px in WebKit (291px needed, 288 available). */
+  .title {
+    font-size: var(--font-size-xl);
+  }
+
+  /* 44px hit box, 36 x 28px layout footprint: the full 44 wrapped the ⓘ
+     under the wordmark at 320px in WebKit (291px needed, 288 available),
+     and its height, not the wordmark's, set the header's. */
   .navLink {
+    margin-block: -8px;
     margin-inline: -4px;
   }
 }

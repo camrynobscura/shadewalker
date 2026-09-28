@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Header } from './Header.tsx'
+import shared from '../shared.module.css'
 
 /* The About page: a second React entry (decided 2026-09-01, reversing
    2026-08-30's plain-HTML call) so its header is the SAME component the
@@ -135,9 +136,8 @@ export function AboutPage() {
             When you ask for a route, the app weighs your walking time and the shade along your potential
             routes. The Shade_priority setting is the exchange rate between them. NONE ignores shade entirely
             and gives you the plain fastest walk. LOW takes a shadier street only when it costs nearly
-            nothing. MED accepts short detours. MAX will take the longest detour to stay under the trees. The
-            panel below the priority switcher shows what the shadier choice costs you in minutes/distance but
-            also gets you in terms of shade/trees.
+            nothing. MED accepts short detours. MAX will take the longest detour to stay under the trees. Each
+            row shows that route's minutes, distance and shade, so you can compare them at a glance.
           </p>
         </section>
 
@@ -219,8 +219,8 @@ export function AboutPage() {
 
       <footer className="footer">
         <p>
-          <a href="/">
-            <span aria-hidden="true">&#62; </span>back to the map
+          <a className={shared.pageLink} href="/">
+            Back to the map <span aria-hidden="true">→</span>
           </a>
         </p>
       </footer>

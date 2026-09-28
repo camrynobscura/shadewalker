@@ -12,7 +12,7 @@
      --muted on --panel is ~5:1. Where a neon carries text it pairs with a
      color that passes: jade deepens to #007a4d (5.4:1 with white), the
      bright glitch magenta keeps its full #ff2bd6 punch by carrying INK
-     text instead of white (5.6:1), cyan deepens to #0077a3 (4.7:1). */
+     text instead of white (5.1:1), cyan deepens to #0077a3 (4.7:1). */
   --bg: #e6f2e9;
   --panel: #eff8f1;
   --panel-raised: #ffffff;
@@ -56,15 +56,15 @@
      appears. */
   --target-min: 44px;
 
-  /* The translucent jade wash marking "data readout, not clickable"
-     (stat boxes, the mode/comparison hint). One token so it moves with
-     --green if that ever changes. */
-  --green-wash: rgba(0, 168, 107, 0.08);
+  /* The route rows' shade meters: --green-dim at 10% (the 0–100 track)
+     and 38% (the other rows' bars). */
+  --meter-track: rgba(0, 122, 77, 0.1);
+  --meter-fill: rgba(0, 122, 77, 0.38);
 
   /* Mono everywhere is the theme's voice (ui-monospace resolves to SF
      Mono on macOS; the rest is the fallback chain). The sans stack is
      the ONE deliberate exception: proportional figures where mono's
-     full character cell reads gappy (the comparison numbers), and
+     full character cell reads gappy (the tree count), and
      About's long-form prose. */
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;

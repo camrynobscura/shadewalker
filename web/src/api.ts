@@ -6,6 +6,8 @@
  * a compile error instead of a runtime surprise.
  */
 
+import type { WalkTime } from './walkTime'
+
 export interface Point {
   lat: number
   lon: number
@@ -71,10 +73,9 @@ export interface RouteResponse {
    * may sit mid-block. One shared pair (not per-route): the snap itself
    * doesn't depend on tree_weight. */
   snapped: { start: Point; end: Point }
-  /** The moment the shade was computed for, New York clock. The frontend
-   * sends no time, so this is the server's "now" (or the anchor day, the
-   * 15th, when a request pins only the month); echoed so a client can
-   * show it or, one day, pin it. */
+  /** The moment the shade was computed for, New York clock: the set
+   * departure time, or the server's "now" when none was (or
+   * the anchor day, the 15th, when a request pins only the month). */
   month: number
   day: number
   hour: number
@@ -107,11 +108,15 @@ async function errorDetail(res: Response): Promise<string | null> {
   return null
 }
 
+/** `time` null = now: no time goes out, and the server uses New York's
+ * clock. A picked time sends all four parts -- never the year, which the
+ * server's shade table doesn't have (see WalkTime). */
 export async function fetchRoute(
   from: Point,
   to: Point,
   treeWeights: number[],
   signal: AbortSignal,
+  time: WalkTime | null = null,
 ): Promise<RouteResponse> {
   const params = new URLSearchParams({
     from_lat: String(from.lat),
@@ -120,6 +125,12 @@ export async function fetchRoute(
     to_lon: String(to.lon),
   })
   for (const weight of treeWeights) params.append('tree_weights', String(weight))
+  if (time) {
+    params.set('month', String(time.month))
+    params.set('day', String(time.day))
+    params.set('hour', String(time.hour))
+    params.set('minute', String(time.minute))
+  }
   const res = await fetch(`/route?${params}`, { signal })
   if (!res.ok) {
     const detail = await errorDetail(res)

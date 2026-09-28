@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { type Point } from './api'
 import { Controls } from './components/Controls'
 import { DEFAULT_TREE_WEIGHT, snapToPreset } from './presets'
@@ -8,12 +8,16 @@ import { RouteStats } from './components/RouteStats'
 import { useLocationFill } from './hooks/useLocationFill'
 import { MOBILE_LAYOUT_QUERY, useMediaQuery } from './hooks/useMediaQuery'
 import { useRouteQuery } from './hooks/useRouteQuery'
+import { formatWalkTime, parseWalkTime } from './walkTime'
 import styles from './App.module.css'
 
 /* ── URL state ────────────────────────────────────────────────────────────
-   The whole route request lives in the query string (?from=lat,lon&to=…&w=…)
-   so any route is bookmarkable and shareable. Read once at startup, write on
-   every change with replaceState (which doesn't pollute Back-button history). */
+   The whole route request lives in the query string (?from=lat,lon&to=…&w=…,
+   plus &at=2026-09-27T09:00 once a departure time is set) so any
+   route is bookmarkable and shareable. Read once at startup, write on
+   every change with replaceState (which doesn't pollute Back-button history).
+   The one entry the app adds is a phone's route screen, so Back returns to
+   the plan screen instead of leaving the site (see App's history effects). */
 
 function parsePoint(value: string | null): Point | null {
   if (!value) return null
@@ -44,10 +48,14 @@ function initialLabel(params: URLSearchParams, labelKey: string, pointKey: strin
 }
 
 export default function App() {
+  // Phone or desktop decides the panel's shape: the phone's two screens
+  // with FIND_ROUTE, or desktop's one panel that routes by itself.
+  const isMobile = useMediaQuery(MOBILE_LAYOUT_QUERY)
   const {
     start,
     end,
     treeWeight,
+    walkTime,
     route,
     selected,
     baseline,
@@ -58,10 +66,14 @@ export default function App() {
     setTreeWeight,
     setStart: updateStart,
     setEnd: updateEnd,
+    setWalkTime,
+    findRoute,
   } = useRouteQuery(
     parsePoint(initialParams.get('from')),
     parsePoint(initialParams.get('to')),
     initialTreeWeight(initialParams),
+    parseWalkTime(initialParams.get('at')),
+    !isMobile,
   )
 
   /* The fields' display labels, mirrored to the URL beside the points so a
@@ -108,9 +120,36 @@ export default function App() {
      `mapExpanded` is derived, not stored, so resizing/rotating past the
      breakpoint restores the full layout on its own — the raw flag just
      waits, harmlessly, for the next mobile-width render. */
-  const isMobile = useMediaQuery(MOBILE_LAYOUT_QUERY)
   const [wantMapExpanded, setWantMapExpanded] = useState(false)
   const mapExpanded = wantMapExpanded && isMobile
+
+  /* The panel's two screens on a phone (PLAN `phone-space`, user
+     2026-09-27): 'plan' (addresses, time, FIND_ROUTE) and 'route' (the
+     trip summary, the four routes, directions). CSS does the hiding, on
+     phones only, from the section's data-view -- desktop shows both at
+     once. A shared link opens on 'route': its trip is already chosen.
+     An error sends the view back to 'plan', where the alert and the
+     fields that caused it are. */
+  const [view, setView] = useState<'plan' | 'route'>(() =>
+    parsePoint(initialParams.get('from')) && parsePoint(initialParams.get('to')) ? 'route' : 'plan',
+  )
+  const showRoute = view === 'route' && !error
+
+  /* FIND_ROUTE lands here only after Controls has let both fields finish
+     resolving typed text, so the points they found are already queued
+     ahead of this flag -- which is why the decision is made on the NEXT
+     render (React's "adjust state while rendering"), where start/end are
+     current, rather than in the click's closure, where they aren't. A
+     field that found nothing leaves its point empty: then nothing
+     happens beyond its own NOT_FOUND, and nothing jumps ahead later. */
+  const [findPending, setFindPending] = useState(false)
+  if (findPending) {
+    setFindPending(false)
+    if (start && end) {
+      findRoute()
+      setView('route')
+    }
+  }
 
   // Escape backs out of the expanded map, matching every other dismissable
   // state in the app. Window-level and expanded-only: the panel (where the
@@ -126,7 +165,10 @@ export default function App() {
   }, [mapExpanded])
 
   // Mirror state → URL (labels included — the point is the truth, the
-  // label is what the field showed for it).
+  // label is what the field showed for it). The time only when one was
+  // picked (user, 2026-09-26): a link without it means "now" whenever
+  // it's opened, which is what most shared routes want.
+  const searchRef = useRef('')
   useEffect(() => {
     const params = new URLSearchParams()
     if (start) params.set('from', formatPoint(start))
@@ -134,11 +176,57 @@ export default function App() {
     if (end) params.set('to', formatPoint(end))
     if (end && endLabel) params.set('toq', endLabel)
     params.set('w', String(treeWeight))
-    window.history.replaceState(null, '', `?${params}`)
-  }, [start, end, treeWeight, startLabel, endLabel])
+    if (walkTime) params.set('at', formatWalkTime(walkTime))
+    searchRef.current = `?${params}`
+    // Keeps the entry's state: it marks a phone's route screen.
+    window.history.replaceState(window.history.state, '', searchRef.current)
+  }, [start, end, treeWeight, walkTime, startLabel, endLabel])
 
-  // Map clicks fill A, then B, then start a fresh route.
+  /* A phone's route screen is its own history entry (state
+     { screen: 'route' }), so Back -- a swipe, Android's button -- returns
+     to the plan screen rather than leaving the site; a shared link that
+     opens on the route screen gets one too. An error sends the view back
+     to 'plan', so its entry goes with it: otherwise the first Back would
+     land on a screen already showing. Desktop has no screens to go
+     between and adds nothing. */
+  useEffect(() => {
+    if (!isMobile) return
+    const onRouteEntry = window.history.state?.screen === 'route'
+    if (showRoute && !onRouteEntry) {
+      window.history.pushState({ screen: 'route' }, '', window.location.href)
+    } else if (error && onRouteEntry) {
+      window.history.back()
+    }
+  }, [isMobile, showRoute, error])
+
+  useEffect(() => {
+    function onPopState() {
+      // The entry Back or Forward landed on still holds the URL from when
+      // it was left; the trip may have changed since (a preset picked on
+      // the route screen).
+      window.history.replaceState(window.history.state, '', searchRef.current)
+      // Forward onto a route entry is FIND_ROUTE again, for the trip as
+      // it is now.
+      if (window.history.state?.screen === 'route') setFindPending(true)
+      else setView('plan')
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  /** Back to the plan screen the way Back does, so the trip box and a
+   * map tap don't leave a stale route entry behind in history. */
+  function leaveRoute() {
+    if (window.history.state?.screen === 'route') window.history.back()
+    else setView('plan')
+  }
+
+  // Map clicks fill A, then B, then start a fresh route. On a phone's
+  // route screen that fresh start also goes back to the plan screen,
+  // where B and FIND_ROUTE are (user, 2026-09-27: tapping the map there
+  // is still useful -- it replaced "taps do nothing on the route screen").
   function handleMapClick(p: Point) {
+    if (isMobile && showRoute) leaveRoute()
     if (!start || (start && end)) {
       setStart(p)
       setEnd(null)
@@ -205,6 +293,7 @@ export default function App() {
           id="controls"
           tabIndex={-1}
           className={mapExpanded ? `${styles.panel} ${styles.panelHidden}` : styles.panel}
+          data-view={showRoute ? 'route' : 'plan'}
           aria-label="Route controls and details"
         >
           <Controls
@@ -222,10 +311,18 @@ export default function App() {
             onUseLocation={location.request}
             error={error}
             selected={selected}
-            baseline={baseline}
             night={route?.night ?? false}
+            walkTime={walkTime}
+            onWalkTimeChange={setWalkTime}
+            routes={route?.routes ?? null}
+            loading={loading}
+            view={showRoute ? 'route' : 'plan'}
+            onFindRoute={() => setFindPending(true)}
+            onBack={leaveRoute}
           />
-          <RouteStats route={selected} description={route?.description ?? ''} loading={loading} />
+          <div className={styles.routeOnly}>
+            <RouteStats route={selected} description={route?.description ?? ''} loading={loading} />
+          </div>
         </section>
       </main>
     </div>

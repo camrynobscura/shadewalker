@@ -83,6 +83,10 @@ from server.graph_store import GraphStore, SHADE_ANCHOR_DAY, SHADE_LAYERS, clamp
 # the OS having zone files.
 NYC_TZ = ZoneInfo("America/New_York")
 
+# Any leap year: /route checks a requested day against it, so Feb 29 is
+# valid whatever year it is now (see the check for why).
+LEAP_YEAR = 2028
+
 
 def parse_pinned_now(raw: str | None) -> datetime | None:
     """SHADEWALKER_NOW -> the moment /route treats as "now", or None.
@@ -279,10 +283,9 @@ def route(
     minute: int | None = None,     # (hour given, minute not: 0 -- the anchor)
     layers: str = "both",          # "trees" | "buildings" | "both": which shade the cost sees
 ) -> dict:
-    # Time is the server's: the frontend sends nothing, so "now" is New
-    # York's now. The parameters exist for tests, tools and curl -- and are
-    # exactly what a time-of-day control would send if one is ever built.
-    # One clock read, so month/day/hour/minute can't straddle a boundary.
+    # No time given means New York's now -- what the frontend sends until
+    # someone sets a departure time, which then sends all four parts. One clock read, so month/day/hour/minute can't straddle a
+    # boundary.
     now = PINNED_NOW or datetime.now(NYC_TZ)
     if month is None:
         month, day = now.month, now.day if day is None else day
@@ -294,8 +297,13 @@ def route(
         minute = 0
     if not 1 <= month <= 12:
         raise HTTPException(status_code=400, detail="month must be 1-12")
-    if not 1 <= day <= calendar.monthrange(now.year, month)[1]:
-        raise HTTPException(status_code=400, detail=f"day must be 1-{calendar.monthrange(now.year, month)[1]} for month {month}")
+    # Checked against a LEAP year, not this one: the shade table has no
+    # year (every month is the anchor year's), so Feb 29 is always a real
+    # day to ask about -- a date picked in a leap year, or a shared link
+    # opened in the next one. _month_blend lands it half-way to March.
+    last_day = calendar.monthrange(LEAP_YEAR, month)[1]
+    if not 1 <= day <= last_day:
+        raise HTTPException(status_code=400, detail=f"day must be 1-{last_day} for month {month}")
     if not 0 <= hour <= 23:
         raise HTTPException(status_code=400, detail="hour must be 0-23")
     if not 0 <= minute <= 59:
