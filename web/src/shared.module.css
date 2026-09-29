@@ -34,6 +34,14 @@
   border-top: 1px solid var(--line);
 }
 
+/* The phone's tighter rhythm. Here, not in each composer: a composer's
+   own @media rule loses to this file, which loads after it. */
+@media (max-width: 720px) {
+  .sectionDivider {
+    padding-top: var(--space-lg);
+  }
+}
+
 /* A link to the other page (the ⓘ pop-up's ABOUT, About's way back):
    caps, tracked, and one run of text so the underline carries through
    the space to the arrow. */

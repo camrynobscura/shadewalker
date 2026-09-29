@@ -88,3 +88,32 @@ test('a preset switch that pushes the route off screen still reframes', async ({
     expect(box!.y + box!.height).toBeLessThanOrEqual(mapBox!.y + mapBox!.height)
   }
 })
+
+test.describe('on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
+
+  test('two tapped points frame in the middle of the map, not its right side', async ({ page }) => {
+    // The fit's left padding was 190px "for the legend" (2026-09-29): half
+    // a phone's map, so a tapped pair framed into its right side and
+    // zoomed out -- midpoint at x=260 of 390. The legend is already kept
+    // clear by the bottom padding.
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.goto('/')
+    const map = (await page.locator('.leaflet-container').boundingBox())!
+    await page.touchscreen.tap(map.x + map.width * 0.4, map.y + map.height * 0.45)
+    await expect(page.locator('[class*="markerStart"]')).toBeVisible()
+    // A person's pace: two taps in quick succession are a double-tap, which
+    // Leaflet reads as zoom in (Chromium fired it here, WebKit didn't).
+    await page.waitForTimeout(600)
+    await page.touchscreen.tap(map.x + map.width * 0.6, map.y + map.height * 0.55)
+    await expect(page.locator('[class*="markerEnd"]')).toBeVisible()
+    await settledMarkerBox(page)
+
+    const centre = async (selector: string) => {
+      const box = (await page.locator(selector).boundingBox())!
+      return box.x + box.width / 2 - map.x
+    }
+    const midpoint = ((await centre('[class*="markerStart"]')) + (await centre('[class*="markerEnd"]'))) / 2
+    expect(Math.abs(midpoint - map.width / 2)).toBeLessThan(12)
+  })
+})
