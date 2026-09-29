@@ -181,6 +181,36 @@ describe('useRouteQuery', () => {
     expect(fetchRoute.mock.calls[1][4]).toBeNull()
   })
 
+  it('sends the shade pick; a new pick waits for FIND_ROUTE', async () => {
+    fetchRoute.mockResolvedValue(fakeResponse())
+    const { result } = renderHook(() => useRouteQuery(START, END, 15, null, false, 'trees'))
+    await waitFor(() => expect(result.current.route).not.toBeNull())
+    expect(fetchRoute).toHaveBeenCalledTimes(1)
+    expect(fetchRoute.mock.calls[0][5]).toBe('trees')
+
+    act(() => result.current.setLayers('buildings'))
+    expect(result.current.layers).toBe('buildings')
+    expect(fetchRoute).toHaveBeenCalledTimes(1) // picking alone never routes
+
+    act(() => result.current.findRoute())
+    await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(2))
+    expect(fetchRoute.mock.calls[1][5]).toBe('buildings')
+  })
+
+  it('auto (desktop): a new shade pick routes at once; the same pick again does not', async () => {
+    fetchRoute.mockResolvedValue(fakeResponse())
+    const { result } = renderHook(() => useRouteQuery(START, END, 15, null, true))
+    await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(1))
+    expect(fetchRoute.mock.calls[0][5]).toBe('both')
+
+    act(() => result.current.setLayers('trees'))
+    await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(2))
+    expect(fetchRoute.mock.calls[1][5]).toBe('trees')
+    act(() => result.current.setLayers('trees'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(fetchRoute).toHaveBeenCalledTimes(2)
+  })
+
   it('without points at mount, routes only on FIND_ROUTE', async () => {
     fetchRoute.mockResolvedValue(fakeResponse())
     const { result } = renderHook(() => useRouteQuery(null, null, 15))

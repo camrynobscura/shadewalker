@@ -60,6 +60,25 @@ describe('fetchRoute time', () => {
   })
 })
 
+describe('fetchRoute shade', () => {
+  function requestedParams(): URLSearchParams {
+    const url = vi.mocked(fetch).mock.calls[0][0] as string
+    return new URL(url, 'http://localhost').searchParams
+  }
+
+  it('sends no layers for all shade, the server default', async () => {
+    mockFetchOnce({})
+    await fetchRoute(A, B, [0], new AbortController().signal, null, 'both')
+    expect(requestedParams().has('layers')).toBe(false)
+  })
+
+  it.each(['trees', 'buildings'] as const)('sends a picked %s', async (layers) => {
+    mockFetchOnce({})
+    await fetchRoute(A, B, [0], new AbortController().signal, null, layers)
+    expect(requestedParams().get('layers')).toBe(layers)
+  })
+})
+
 describe('fetchRoute errors', () => {
   it("shows the server's detail for a 4xx that carries one", async () => {
     mockFetchOnce({ detail: 'No path between these points' }, false, 422)

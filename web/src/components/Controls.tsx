@@ -8,7 +8,9 @@ import { AddressField } from './AddressField'
 import { BackIcon, CrosshairIcon } from './icons'
 import { TREE_PRESETS } from '../presets'
 import { CANOPY_SHARE_HIDES_TREE_COUNT, displayShade, LOW_SHADE_FRACTION } from '../shade'
+import type { ShadeLayers } from '../shadeLayers'
 import { describeClock, leaveTime, type WalkTime } from '../walkTime'
+import { ShadeControl } from './ShadeControl'
 import { TimeControl } from './TimeControl'
 import styles from './Controls.module.css'
 
@@ -50,11 +52,16 @@ interface ControlsProps {
   /** The walk's departure or arrival time, or null for "leave now". */
   walkTime: WalkTime | null
   onWalkTimeChange: (time: WalkTime | null) => void
+  /** The shade pill's pick: which kinds of shade the routes are scored by. */
+  layers: ShadeLayers
+  onLayersChange: (layers: ShadeLayers) => void
   /** Every preset's route from the last FIND_ROUTE, for the rows' numbers. */
   routes: RouteFeature[] | null
   /** The walk time `routes` were fetched for: for an arrival, each row's
    * leave time counts back from it. */
   routeWalkTime: WalkTime | null
+  /** The shade `routes` were scored by (RouteResponse.layers). */
+  routeLayers: ShadeLayers
   /** A route request is in flight: the rows and lines hold back their
    * numbers rather than show the previous trip's. */
   loading: boolean
@@ -97,8 +104,11 @@ export function Controls({
   error,
   walkTime,
   onWalkTimeChange,
+  layers,
+  onLayersChange,
   routes,
   routeWalkTime,
+  routeLayers,
   loading,
   view,
   onFindRoute,
@@ -115,7 +125,12 @@ export function Controls({
   // The low-shade warning lives HERE, not with the route stats, since
   // 2026-08-31 (user call): Shade_priority is where the remedy is -- turn
   // the dial up and watch whether the warning goes away.
-  const lowShade = shown !== null && shown.properties.shade_fraction < LOW_SHADE_FRACTION
+  // Only for all shade (user, 2026-09-29): with one kind off, "expect
+  // mostly direct sun" could be false on a street the other kind shades.
+  // The box's last row shows when it has something to say.
+  const hasHint = night || shown !== null
+  const lowShade =
+    shown !== null && routeLayers === 'both' && shown.properties.shade_fraction < LOW_SHADE_FRACTION
   // The tree count, flavour the user wanted kept (2026-09-27): a line
   // under the rows (it didn't fit IN them on a phone), hidden by the same
   // park-canopy rule the old stat had.
@@ -300,12 +315,13 @@ export function Controls({
             onSubmit={() => void findRoute()}
           />
           {/* The trip's options, right under where (Google Maps' order),
-              as small pills: most walks are right now, so the time
-              shouldn't weigh what the addresses do (user, 2026-09-28).
-              Here a change waits for FIND_ROUTE, like the addresses; on
-              desktop it routes by itself. */}
+              as small pills: most walks are right now and by all shade,
+              so they shouldn't weigh what the addresses do (user,
+              2026-09-28). Here a change waits for FIND_ROUTE, like the
+              addresses; on desktop it routes by itself. */}
           <div className={styles.tripOptions}>
             <TimeControl walkTime={walkTime} onChange={onWalkTimeChange} />
+            <ShadeControl layers={layers} onChange={onLayersChange} />
           </div>
         </div>
         <button
@@ -347,6 +363,13 @@ export function Controls({
             walkTime={walkTime}
             onChange={(time) => {
               onWalkTimeChange(time)
+              onFindRoute()
+            }}
+          />
+          <ShadeControl
+            layers={layers}
+            onChange={(picked) => {
+              onLayersChange(picked)
               onFindRoute()
             }}
           />
@@ -434,59 +457,66 @@ export function Controls({
                   </label>
                 )
               })}
-            </div>
-            {/* The lines under the rows, once a route exists: what the chosen
-              preset does, and the tree count. (A "+31% shade | +3 min" line
-              compared it with NONE until the rows showed every route's
-              numbers side by side -- user, 2026-09-28.) aria-live: they
-              change with Shade_priority and when a route arrives;
-              aria-atomic re-reads the box as one unit. */}
-            <div className={styles.routeHint} aria-live="polite" aria-atomic="true">
-              {/* Spoken-only prefix: aria-atomic re-reads this whole box on
-                every route arrival and preset change, and without a name
-                the stream arrived as context-free "mode medium..."
-                (VoiceOver pass, 2026-08-31). Every announcement now opens
-                with which section is talking. */}
-              <span className={styles.visuallyHidden}>Shade priority: </span>
-              {night ? (
-                /* After dark (PLAN `night-shade`) every preset is the same
-                 fastest route at 100%: the mode hint would promise detours
-                 that don't happen, so one line replaces it (copy: user,
-                 2026-09-26). The buttons stay live -- they just agree. */
-                <p className={styles.modeLine}>
-                  <span aria-hidden="true">
-                    <span className={styles.promptSymbol}>&gt;</span>
-                    <span className={styles.modeVal}>after dark</span> // the whole city is in shade
-                  </span>
-                  <span className={styles.visuallyHidden}>
-                    After dark. The whole city is in shade, so every setting gives the fastest route.
-                  </span>
-                </p>
-              ) : (
-                /* Waits for a route: until one arrives (and while the next
-                 loads) the rows show these same descriptions themselves. */
-                shown && (
+              {/* The box's last row, once a route exists: what the chosen
+                preset does, and the tree count -- a footnote in the muted
+                green (user, 2026-09-29: two loose lines under the box looked
+                tacked on). (A "+31% shade | +3 min" line compared it with NONE
+                until the rows showed every route's numbers side by side --
+                user, 2026-09-28.) aria-live: they change with Shade_priority
+                and when a route arrives; aria-atomic re-reads the row as one
+                unit. Always mounted, so it can announce; empty, it takes no
+                room and draws no line. */}
+              <div
+                className={hasHint ? styles.routeHint : styles.routeHintEmpty}
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                {/* Spoken-only prefix: aria-atomic re-reads this whole box on
+                  every route arrival and preset change, and without a name
+                  the stream arrived as context-free "mode medium..."
+                  (VoiceOver pass, 2026-08-31). Every announcement now opens
+                  with which section is talking. */}
+                <span className={styles.visuallyHidden}>Shade priority: </span>
+                {night ? (
+                  /* After dark (PLAN `night-shade`) every preset is the same
+                   fastest route at 100%: the mode hint would promise detours
+                   that don't happen, so one line replaces it (copy: user,
+                   2026-09-26). The buttons stay live -- they just agree. */
                   <p className={styles.modeLine}>
-                    <span className={styles.promptSymbol} aria-hidden="true">
-                      &gt;
+                    <span aria-hidden="true">
+                      <span className={styles.promptSymbol}>&gt;</span>
+                      <span className={styles.modeVal}>after dark</span> // the whole city is in shade
                     </span>
-                    <span className={styles.modeVal}>{selectedPreset?.spoken.toLowerCase()}</span>{' '}
-                    <span aria-hidden="true">//</span> {selectedPreset?.hint}
+                    <span className={styles.visuallyHidden}>
+                      After dark. The whole city is in shade, so every setting gives the fastest route.
+                    </span>
                   </p>
-                )
-              )}
-              {treeCount !== null && (
-                <p className={styles.treeLine}>
-                  <span aria-hidden="true">
-                    <span className={styles.promptSymbol}>&gt;</span>
-                    <span className={styles.numberHighlight}>{treeCount}</span>{' '}
-                    {treeCount === 1 ? 'tree' : 'trees'} along the way
-                  </span>
-                  <span className={styles.visuallyHidden}>
-                    {`${treeCount} ${treeCount === 1 ? 'tree' : 'trees'} along the way`}
-                  </span>
-                </p>
-              )}
+                ) : (
+                  /* Waits for a route: until one arrives (and while the next
+                   loads) the rows show these same descriptions themselves. */
+                  shown && (
+                    <p className={styles.modeLine}>
+                      <span className={styles.promptSymbol} aria-hidden="true">
+                        &gt;
+                      </span>
+                      <span className={styles.modeVal}>{selectedPreset?.spoken.toLowerCase()}</span>{' '}
+                      <span aria-hidden="true">//</span> {selectedPreset?.hint}
+                    </p>
+                  )
+                )}
+                {treeCount !== null && (
+                  <p className={styles.treeLine}>
+                    <span aria-hidden="true">
+                      <span className={styles.promptSymbol}>&gt;</span>
+                      <span className={styles.numberHighlight}>{treeCount}</span>{' '}
+                      {treeCount === 1 ? 'tree' : 'trees'} along the way
+                    </span>
+                    <span className={styles.visuallyHidden}>
+                      {`${treeCount} ${treeCount === 1 ? 'tree' : 'trees'} along the way`}
+                    </span>
+                  </p>
+                )}
+              </div>
             </div>
             {/* Always mounted so its aria-live can announce the first
               appearance (same reasoning as RouteStats' wrapper); the

@@ -1119,6 +1119,17 @@ class GraphStore:
                 blended += weight * rows[slot].astype(np.float32)
         return blended / 255.0
 
+    def _dark_share(self, month: int, day: int, hour: int, minute: int = 0) -> float:
+        """How much of this moment is night: the blend weight of its dark
+        slots. 0.0 in daylight, 1.0 once is_night; in July it climbs from 0
+        at 20:00 to 0.5 at 20:30 and 1.0 at 21:00. 0.0 on an export without
+        a sun table."""
+        share = 0.0
+        for slot, weight in _blend_weights(month, day, hour, minute):
+            if self._dark_slots[slot]:
+                share += weight
+        return share
+
     def is_night(self, month: int, day: int, hour: int, minute: int = 0) -> bool:
         """True when every slot this moment blends is dark (zero-weight
         slots aside). Then _building_fraction is 1.0 on every edge, every
@@ -1144,10 +1155,13 @@ class GraphStore:
         `hour=None` means no time was given and building shade is left
         out -- exactly the trees-only behaviour every pre-shadow test and
         harness run pins with `month=7` alone (day defaults to the 15th,
-        where the trees' seasonal blend is exactly the month's value). `layers` is the switch a
-        layer selector would use: "trees", "buildings" or "both" (default);
-        it is validated by /route, not here. Cached per (month, day, hour,
-        minute, layers), a handful of entries.
+        where the trees' seasonal blend is exactly the month's value).
+        `layers` is the shade pill's pick: "trees", "buildings" or "both"
+        (default), validated by /route, not here. The dark belongs to every
+        layer: with a time given, dusk and night are shade in each of them
+        (the building blend carries it; without one, _dark_share does).
+        Cached per (month, day, hour, minute, layers), a handful of
+        entries.
 
         The tree half's history, kept in full because the cap decision was
         measured and the numbers are worth re-reading:
@@ -1205,8 +1219,19 @@ class GraphStore:
         if layers in ("trees", "both"):
             covered = self._tree_fraction(month, day)
         if layers in ("buildings", "both") and hour is not None and self._building_shade.shape[1]:
+            # The blend already counts a dark slot as full shade.
             buildings = self._building_fraction(month, day, hour, minute)
             covered = 1.0 - (1.0 - covered) * (1.0 - buildings)
+        elif hour is not None:
+            # No building term to carry the dark, but the dark is the sun's,
+            # not the buildings': "Tree shade" fades into full shade at dusk
+            # and is full shade at night like every layer (PLAN
+            # `time-and-layers`, user 2026-09-26/29; #112 had exempted it).
+            # Per slot that's 1 where dark, the trees where lit -- blended,
+            # exactly the union with the moment's dark share.
+            dark = self._dark_share(month, day, hour, minute)
+            if dark:
+                covered = 1.0 - (1.0 - covered) * (1.0 - dark)
         density = (covered * config.DENSITY_AT_FULL_COVERAGE).astype(np.float32)
         if len(self._density_cache) >= DENSITY_CACHE_SIZE:
             self._density_cache.pop(next(iter(self._density_cache)))

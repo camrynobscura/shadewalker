@@ -373,9 +373,10 @@ def route(
     # tree_weight prices an edge by its length alone and would find the
     # plain shortest path. Route it ONCE, at weight 0, and hand that route
     # to every weight: one Dijkstra instead of four, and the presets cannot
-    # split on a floating-point tie (PLAN `night-shade`). layers="trees" is
-    # the trees-alone view, and the dark belongs to the sun: no night there.
-    night = layers != "trees" and store.is_night(month, day, hour, minute)
+    # split on a floating-point tie (PLAN `night-shade`). In every layer:
+    # the dark is the sun's, so "Tree shade" after dark is full shade too
+    # (PLAN `time-and-layers`, user 2026-09-26; #112 had exempted it).
+    night = store.is_night(month, day, hour, minute)
     results = []
     if night:
         result = store.route(start, end, tree_weight=0.0, month=month,

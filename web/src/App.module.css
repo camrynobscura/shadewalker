@@ -59,8 +59,16 @@
     flex-direction: column;
   }
 
+  /* 40% of the visible screen (svh leaves out Safari's bars); the panel
+     takes the rest. The full-screen button is there for a big map. */
   .mapArea {
-    min-height: 45vh;
+    flex: none;
+    height: 40svh;
+  }
+
+  .mapAreaExpanded {
+    flex: 1;
+    height: auto;
   }
 
   .panel {

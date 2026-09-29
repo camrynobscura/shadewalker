@@ -8,13 +8,15 @@ import { RouteStats } from './components/RouteStats'
 import { useLocationFill } from './hooks/useLocationFill'
 import { MOBILE_LAYOUT_QUERY, useMediaQuery } from './hooks/useMediaQuery'
 import { useRouteQuery } from './hooks/useRouteQuery'
+import { shadeLayersFromLink } from './shadeLayers'
 import { formatWalkTime, walkTimeFromLink, walkTimeParam } from './walkTime'
 import styles from './App.module.css'
 
 /* ── URL state ────────────────────────────────────────────────────────────
    The whole route request lives in the query string (?from=lat,lon&to=…&w=…,
    plus &at=2026-09-27T09:00 once a departure time is set, or
-   &arrive=… for an arrival) so any
+   &arrive=… for an arrival, and &layers=trees|buildings once the shade
+   pill is set) so any
    route is bookmarkable and shareable. Read once at startup, write on
    every change with replaceState (which doesn't pollute Back-button history).
    The one entry the app adds is a phone's route screen, so Back returns to
@@ -57,6 +59,7 @@ export default function App() {
     end,
     treeWeight,
     walkTime,
+    layers,
     route,
     routeWalkTime,
     selected,
@@ -69,6 +72,7 @@ export default function App() {
     setStart: updateStart,
     setEnd: updateEnd,
     setWalkTime,
+    setLayers,
     findRoute,
   } = useRouteQuery(
     parsePoint(initialParams.get('from')),
@@ -76,6 +80,7 @@ export default function App() {
     initialTreeWeight(initialParams),
     walkTimeFromLink(initialParams),
     !isMobile,
+    shadeLayersFromLink(initialParams),
   )
 
   /* The fields' display labels, mirrored to the URL beside the points so a
@@ -179,10 +184,11 @@ export default function App() {
     if (end && endLabel) params.set('toq', endLabel)
     params.set('w', String(treeWeight))
     if (walkTime) params.set(walkTimeParam(walkTime), formatWalkTime(walkTime))
+    if (layers !== 'both') params.set('layers', layers)
     searchRef.current = `?${params}`
     // Keeps the entry's state: it marks a phone's route screen.
     window.history.replaceState(window.history.state, '', searchRef.current)
-  }, [start, end, treeWeight, walkTime, startLabel, endLabel])
+  }, [start, end, treeWeight, walkTime, layers, startLabel, endLabel])
 
   /* A phone's route screen is its own history entry (state
      { screen: 'route' }), so Back -- a swipe, Android's button -- returns
@@ -261,7 +267,7 @@ export default function App() {
           (craftsmanship review 2026-09-09). Each half is its own named
           region inside main: MapView's "Map", and the <section> below. */}
       <main className={styles.layout}>
-        <div className={styles.mapArea}>
+        <div className={mapExpanded ? `${styles.mapArea} ${styles.mapAreaExpanded}` : styles.mapArea}>
           {/* The wordmark <h1> left with the header, and a page with zero
               headings is a real hole in the a11y tree (axe caught it:
               page-has-heading-one), not a formality — so expanded mode
@@ -316,8 +322,11 @@ export default function App() {
             night={route?.night ?? false}
             walkTime={walkTime}
             onWalkTimeChange={setWalkTime}
+            layers={layers}
+            onLayersChange={setLayers}
             routes={route?.routes ?? null}
             routeWalkTime={routeWalkTime}
+            routeLayers={route?.layers ?? 'both'}
             loading={loading}
             view={showRoute ? 'route' : 'plan'}
             onFindRoute={() => setFindPending(true)}

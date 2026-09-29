@@ -9,9 +9,12 @@
   gap: var(--space-lg);
 }
 
+/* Trimmed to its capitals' top, like Shade_priority's: the divider's gap
+   above and below then look the same. */
 .sectionTitle {
   composes: sectionLabel from '../shared.module.css';
   margin: 0 0 var(--space-sm);
+  text-box: trim-start cap alphabetic;
 }
 
 .directionsGroup {

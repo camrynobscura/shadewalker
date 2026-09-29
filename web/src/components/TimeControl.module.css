@@ -9,8 +9,8 @@
 .fields {
   display: flex;
   gap: var(--space-sm);
-  margin: var(--space-xs) var(--space-lg) 0;
-  padding: var(--space-md) 0;
+  margin-inline: var(--space-lg);
+  padding-block: var(--space-md);
   border-top: 1px solid var(--line);
 }
 

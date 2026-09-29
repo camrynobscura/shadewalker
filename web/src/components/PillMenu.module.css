@@ -72,7 +72,6 @@
   width: var(--menu-width);
   max-height: calc(100% - 2 * var(--space-lg));
   overflow-y: auto;
-  padding: var(--space-xs) 0;
   background: var(--panel-raised);
   border: 1px solid transparent;
   border-radius: var(--menu-radius);
@@ -88,6 +87,8 @@
   border: none;
 }
 
+/* Edge to edge, so a highlight fills the line; the card's overflow trims
+   it to the round corners. */
 .choice {
   position: relative;
   display: flex;
@@ -96,6 +97,32 @@
   min-height: var(--target-min);
   padding: 0 var(--space-lg);
   cursor: pointer;
+}
+
+/* A hairline between lines, inset like the panel's dividers. A border,
+   not a fill: forced colors keep borders. */
+.choice + .choice::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  inset-inline: var(--space-lg);
+  border-top: 1px solid var(--line);
+  pointer-events: none;
+}
+
+/* The lines at the card's edges: a little air against the edge (inside
+   the line, so a highlight still fills it), and round like the card, so
+   their focus ring isn't cut. */
+.choice:first-of-type {
+  min-height: calc(var(--target-min) + var(--space-xs));
+  padding-top: var(--space-xs);
+  border-radius: calc(var(--menu-radius) - 1px) calc(var(--menu-radius) - 1px) 0 0;
+}
+
+.card > .choices:last-child .choice:last-of-type {
+  min-height: calc(var(--target-min) + var(--space-xs));
+  padding-bottom: var(--space-xs);
+  border-radius: 0 0 calc(var(--menu-radius) - 1px) calc(var(--menu-radius) - 1px);
 }
 
 @media (hover: hover) {

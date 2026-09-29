@@ -88,17 +88,19 @@ function InvalidateOnResize() {
 
 /* One padded rectangle, used in both directions: what fitBounds aims the
    route inside, and what the preset-switch guard in RouteFraming treats
-   as "already visible". Uneven padding, not a uniform one: the legend
-   (bottom-left, up to ~163x88px with all 3 rows shown), the Locate-me
-   button (bottom-right), and on mobile the expand toggle (top-right,
-   44px ending 54px from each edge) all float over the map itself, so a
-   plain 48px on every side still let a fitted point land right behind
-   one of them. paddingTopLeft's x covers the legend's width and its y
-   clears the expand toggle's depth; paddingBottomRight's x clears the
-   toggle's width and its y covers whichever bottom overlay is taller --
-   that alone keeps every fitted point out of the bottom strip entirely,
-   so it doesn't matter which corner it's actually closer to. */
-const FIT_PAD_TOP_LEFT: [number, number] = [190, 60]
+   as "already visible". Uneven padding, not a uniform one: the zoom
+   buttons (top-left, 48x92px ending 58px in and 102px down), the legend
+   (bottom-left, 146x57px ending 67px up), the map credits and Locate-me
+   (bottom-right), and on mobile the expand toggle (top-right, 44px ending
+   54px from each edge) all float over the map itself, so a plain 48px on
+   every side still let a fitted point land right behind one of them.
+   The bottom's 100px keeps every fitted point out of the whole bottom
+   strip, so it covers the legend in either corner; the sides' 60px clear
+   the zoom buttons and the toggle. The left was 190px "for the legend's
+   width" until 2026-09-29 -- redundant under that bottom strip, and on a
+   390px phone it was half the map: pairs framed into its right side and
+   zoomed out (measured: a tapped pair's midpoint at x=260 of 390). */
+const FIT_PAD_TOP_LEFT: [number, number] = [60, 60]
 const FIT_PAD_BOTTOM_RIGHT: [number, number] = [60, 100]
 
 /** Whether every point already sits inside the current view's padded

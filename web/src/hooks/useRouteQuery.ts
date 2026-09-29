@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchRoute, RouteError, type Point, type RouteFeature, type RouteResponse } from '../api'
 import { TREE_PRESETS } from '../presets'
+import type { ShadeLayers } from '../shadeLayers'
 import { sameWalkTime, type WalkTime } from '../walkTime'
 
 const TREE_WEIGHTS = TREE_PRESETS.map((preset) => preset.value)
@@ -18,6 +19,7 @@ interface RouteRequest {
   start: Point
   end: Point
   walkTime: WalkTime | null
+  layers: ShadeLayers
 }
 
 function sameRequest(a: RouteRequest | null, b: RouteRequest): boolean {
@@ -27,7 +29,8 @@ function sameRequest(a: RouteRequest | null, b: RouteRequest): boolean {
     a.start.lon === b.start.lon &&
     a.end.lat === b.end.lat &&
     a.end.lon === b.end.lon &&
-    sameWalkTime(a.walkTime, b.walkTime)
+    sameWalkTime(a.walkTime, b.walkTime) &&
+    a.layers === b.layers
   )
 }
 
@@ -37,6 +40,8 @@ export interface UseRouteQueryResult {
   treeWeight: number
   /** The set departure or arrival time, or null for "leave now". */
   walkTime: WalkTime | null
+  /** Which shade the routes are scored by: the shade pill's pick. */
+  layers: ShadeLayers
   route: RouteResponse | null
   /** The walk time `route` was fetched for. Not always `walkTime`: that
    * is already the next request's while it loads, and an arrival's route
@@ -60,6 +65,7 @@ export interface UseRouteQueryResult {
   setStart: (point: Point | null) => void
   setEnd: (point: Point | null) => void
   setWalkTime: (time: WalkTime | null) => void
+  setLayers: (layers: ShadeLayers) => void
   /** FIND_ROUTE: route the trip as the fields stand now. A no-op without
    * both points; the same trip again (after going back to look) keeps the
    * route already drawn, unless that one failed. */
@@ -100,13 +106,17 @@ export function useRouteQuery(
   initialTreeWeight: number,
   initialWalkTime: WalkTime | null = null,
   auto = false,
+  initialLayers: ShadeLayers = 'both',
 ): UseRouteQueryResult {
   const [start, setStartRaw] = useState<Point | null>(initialStart)
   const [end, setEndRaw] = useState<Point | null>(initialEnd)
   const [treeWeight, setTreeWeight] = useState<number>(initialTreeWeight)
   const [walkTime, setWalkTimeRaw] = useState<WalkTime | null>(initialWalkTime)
+  const [layers, setLayers] = useState<ShadeLayers>(initialLayers)
   const [request, setRequest] = useState<RouteRequest | null>(() =>
-    initialStart && initialEnd ? { start: initialStart, end: initialEnd, walkTime: initialWalkTime } : null,
+    initialStart && initialEnd
+      ? { start: initialStart, end: initialEnd, walkTime: initialWalkTime, layers: initialLayers }
+      : null,
   )
 
   const [route, setRoute] = useState<RouteResponse | null>(null)
@@ -120,7 +130,7 @@ export function useRouteQuery(
   // failed trip isn't retried until something in it changes -- the same
   // as before FIND_ROUTE existed.
   if (auto && start && end) {
-    const fields = { start, end, walkTime }
+    const fields = { start, end, walkTime, layers }
     if (!sameRequest(request, fields)) setRequest(fields)
   }
 
@@ -148,7 +158,7 @@ export function useRouteQuery(
 
   function findRoute() {
     if (!start || !end) return
-    const next = { start, end, walkTime }
+    const next = { start, end, walkTime, layers }
     // A failed request gets a fresh object, so the same trip retries.
     setRequest((current) => (sameRequest(current, next) && !error ? current : next))
   }
@@ -177,7 +187,7 @@ export function useRouteQuery(
     )
     setLoading(true)
     setError(null)
-    fetchRoute(request.start, request.end, TREE_WEIGHTS, controller.signal, request.walkTime)
+    fetchRoute(request.start, request.end, TREE_WEIGHTS, controller.signal, request.walkTime, request.layers)
       .then((data) => {
         setRoute(data)
         setRouteWalkTime(request.walkTime)
@@ -223,6 +233,7 @@ export function useRouteQuery(
     end,
     treeWeight,
     walkTime,
+    layers,
     route,
     routeWalkTime,
     selected,
@@ -235,6 +246,7 @@ export function useRouteQuery(
     setStart,
     setEnd,
     setWalkTime,
+    setLayers,
     findRoute,
   }
 }

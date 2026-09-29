@@ -170,6 +170,25 @@ export function ChevronDownIcon() {
   )
 }
 
+/** Two stacked sheets: the shade pill -- which kinds of shade count. */
+export function LayersIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    >
+      <polygon points="9,2.5 16,6.5 9,10.5 2,6.5" />
+      <polyline points="2,10 9,14 16,10" />
+    </svg>
+  )
+}
+
 /** A tick: the picked line in a pill's menu. */
 export function CheckIcon() {
   return (

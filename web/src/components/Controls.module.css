@@ -287,10 +287,13 @@
   margin-bottom: var(--space-xl);
 }
 
+/* Trimmed to its capitals' top: the font's own space above them made the
+   gap under the divider read 5px deeper than the one above it. */
 .presetLegend {
   composes: sectionLabel from '../shared.module.css';
   padding: 0;
   margin-bottom: var(--space-sm);
+  text-box: trim-start cap alphabetic;
 }
 
 /* Phone only (the media block below shows it): desktop routes by itself. */
@@ -350,6 +353,9 @@
   gap: var(--space-sm);
   padding-block: var(--tap-pad);
   margin-block: calc(-1 * var(--tap-pad));
+  /* 3px more room above than the tap pad (10px in all): a pill weighs
+     less than a field. A one-off, off the spacing scale. */
+  padding-top: calc(var(--tap-pad) + 3px);
 }
 
 /* Phone only; the media block below shows it. */
@@ -389,8 +395,9 @@
   align-items: center;
   gap: var(--space-sm);
   min-height: var(--target-min);
-  /* Deeper at the bottom: the meter sits there, clear of wrapped text. */
-  padding: var(--space-sm) var(--space-md) var(--space-md);
+  /* Deeper at the bottom: the meter sits there, 3px clear of the text.
+     The top's 2px past the scale is a one-off, for a little air. */
+  padding: calc(var(--space-sm) + 2px) var(--space-md) var(--space-lg);
   font-size: var(--font-size-sm);
   font-variant-numeric: tabular-nums;
   color: var(--muted);
@@ -453,7 +460,7 @@
 .routeMeter {
   position: absolute;
   inset-inline: var(--space-md);
-  bottom: var(--space-sm);
+  bottom: calc(var(--space-sm) + 2px);
   height: 3px;
   background: var(--meter-track);
 }
@@ -477,29 +484,36 @@
   }
 }
 
+/* The box's last row: a footnote, in the muted green. */
 .routeHint {
-  margin: var(--space-sm) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: calc(var(--space-sm) + 2px) var(--space-md) var(--space-md);
+  border-top: 1px solid var(--line);
+  font-size: var(--font-size-sm);
+  color: var(--muted);
+}
+
+.routeHintEmpty {
+  margin: 0;
 }
 
 .modeLine {
   min-height: 1.2em;
   margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--text);
 }
 
 .modeVal {
   font-weight: 600;
+  color: var(--text);
 }
 
 .treeLine {
-  margin: var(--space-xs) 0 0;
-  font-size: var(--font-size-sm);
-  color: var(--text);
+  margin: 0;
 }
 
 .promptSymbol {
-  color: var(--text);
   margin-right: 0.75em;
 }
 
@@ -552,20 +566,17 @@
     color: var(--green-dim);
     border: none;
     border-radius: 0;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-pill);
     text-align: left;
     cursor: pointer;
   }
 
-  /* One line that scrolls sideways, out to the screen edges. The bottom
-     margin also takes back FIND_ROUTE's wider gap (--space-md against
-     the fields' --space-sm), so the pill sits evenly between them. */
+  /* One line that scrolls sideways, out to the screen edges. */
   .tripOptions {
     flex-wrap: nowrap;
     overflow-x: auto;
     scrollbar-width: none;
     margin-inline: calc(-1 * var(--space-lg));
-    margin-bottom: calc(-1 * var(--tap-pad) - (var(--space-md) - var(--space-sm)));
     padding-inline: var(--space-lg);
   }
 
@@ -573,20 +584,14 @@
     display: none;
   }
 
-  /* 3px: the pill sits the same 12px under the trip line as above
-     Shade_priority. Its tap area overlaps the trip line's 44px box by
-     8px there; both stay 36px or more. */
+  /* -1.5px: the pill sits 10px under the trip line's words (the half
+     pixel is the words centred in their 44px box), 16px above the
+     divider. The two tap areas overlap by about 11px there; each keeps
+     about 32px of its own. */
   .routeTripOptions {
     display: flex;
-    margin-top: 3px;
+    margin-top: -1.5px;
     margin-bottom: calc(-1 * var(--tap-pad));
-  }
-
-  /* No divider under the trip line: the rows start right below it. */
-  .routeGroup .sectionDivider {
-    margin-top: var(--space-md);
-    padding-top: 0;
-    border-top: none;
   }
 
   .addressFields {
@@ -600,7 +605,6 @@
   .sectionDivider {
     margin-top: var(--space-lg);
     margin-bottom: var(--space-lg);
-    padding-top: var(--space-lg);
   }
 
   /* Collapsed labels go visually hidden, not display:none — the <label>
