@@ -83,8 +83,13 @@ test.describe('on desktop', () => {
     await expect(timePill(page, /Depart 9\/27, 9:05\sAM$/)).toBeVisible()
   })
 
-  test('typing a time waits for a pause, then routes once', async ({ page }) => {
+  test("a time's quick changes wait for a pause, then route once", async ({ page }) => {
     await mockGeocode(page)
+    // Paused: only runFor() moves the pause's timer, so the test can stand
+    // at 499ms and at 500ms exactly.
+    const t0 = new Date('2026-07-15T12:00:00')
+    await page.clock.install({ time: t0 })
+    await page.clock.pauseAt(t0)
     await page.goto(routeUrl(POINT_A, POINT_B))
     await expect(routeDrawn(page)).toBeVisible()
     await timePill(page, 'Leave now').click()
@@ -94,23 +99,24 @@ test.describe('on desktop', () => {
     page.on('request', (r) => {
       if (r.url().includes('/route?')) routes.push(r.url())
     })
-    // Key by key, a time input passes through 01:00 on the way to 13:00.
-    // Focused, not clicked: a click lands on whichever part (hour, minute,
-    // AM/PM) is under the pointer; focus starts at the hour.
+    // A time field changes value at every step: each key typed on desktop
+    // (13:00 passes through 01:00), each notch of a phone's wheel. fill()
+    // makes those changes the same way in every engine; what KEYS do to a
+    // time field doesn't (in CI, Linux WebKit's ignored them, 2026-09-29).
     const field = page.getByLabel('time (NYC)')
-    const before = await field.inputValue()
-    await field.focus()
-    await page.keyboard.type('0315PM', { delay: 50 })
+    for (const time of ['01:00', '13:00', '13:15']) {
+      await field.fill(time)
+      await page.clock.runFor(200)
+    }
+    await page.clock.runFor(299) // 499ms since the last change
+    // A "nothing was sent" check needs a moment for a request to show up.
+    await page.waitForTimeout(300)
     expect(routes).toHaveLength(0)
-    await expect.poll(() => routes.length).toBe(1)
-    // What the keys make of it is the engine's (Chrome: 15:15; Safari
-    // doesn't hop from hour to minute): the one route is for whatever the
-    // field shows once they stop.
-    const typed = await field.inputValue()
-    expect(typed).not.toBe(before)
-    const [hour, minute] = typed.split(':').map(Number)
-    const params = new URL(routes[0]).searchParams
-    expect([params.get('hour'), params.get('minute')]).toEqual([String(hour), String(minute)])
+
+    const sent = await nextRouteTime(page, () => page.clock.runFor(1))
+    expect(sent).toEqual(['7', '15', '13', '15', null])
+    await page.waitForTimeout(300)
+    expect(routes).toHaveLength(1)
   })
 
   test('closing the menu sends a time typed just before, without waiting for the pause', async ({ page }) => {
