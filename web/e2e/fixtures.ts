@@ -93,6 +93,17 @@ export async function atNight(page: Page): Promise<void> {
   )
 }
 
+/** Playwright's fake clock, PAUSED at `at` before the page loads: the
+ * app's own timers then move only when the test calls runFor(). Installed
+ * a minute early, because until it's paused the clock follows real time
+ * in steps of up to 100ms, and pausing at the very time it was installed
+ * at throws "Cannot fast-forward to the past" whenever a step lands in
+ * between -- the burn-in hit it on a loaded machine (2026-09-29). */
+export async function pauseClockAt(page: Page, at: Date): Promise<void> {
+  await page.clock.install({ time: new Date(at.getTime() - 60_000) })
+  await page.clock.pauseAt(at)
+}
+
 /** The chosen route's Directions heading: RouteStats renders it only
  * once a route has arrived, so it's the "a route drew" signal (the
  * stats box whose labels did that job left for the route rows,

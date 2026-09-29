@@ -55,6 +55,26 @@ jobs:
       - working-directory: web
         run: npm ci
       - working-directory: web
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium webkit
       - working-directory: web
         run: npm run test:e2e
+      # Burn-in: on a PR, the test files it changed run 10 more times, so a
+      # test that fails 1 run in 3 on these machines fails here, before it
+      # merges (a flaky WebKit test got through, 2026-09-29).
+      # --only-changed diffs against the base branch's tip; the checkout is
+      # shallow, so fetch that one commit.
+      - if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --depth=1 origin +refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}
+      - if: github.event_name == 'pull_request'
+        working-directory: web
+        run: npx playwright test --only-changed=origin/${{ github.base_ref }} --repeat-each=10 --pass-with-no-tests
+      # Every failed test's trace (web/playwright.config.ts keeps them in
+      # CI): download this, then `npx playwright show-trace <zip>` or drop
+      # the zip on trace.playwright.dev.
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-traces
+          path: web/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

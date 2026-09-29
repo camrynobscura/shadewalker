@@ -72,12 +72,22 @@ export default defineConfig({
   ],
   use: {
     baseURL: `http://localhost:${WEB_PORT}`,
-    trace: 'on-first-retry',
+    // CI keeps the trace of every failed test (uploaded by ci.yml): no
+    // retries there, so 'on-first-retry' would never record one.
+    trace: process.env.CI ? 'retain-on-failure' : 'on-first-retry',
   },
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+    },
+    // Safari's engine, for what Chromium can't see: a tapped radio isn't
+    // focused there (focus goes to the panel), which once made the time
+    // pill's menu close on the tap meant to pick (2026-09-29).
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
+      testMatch: 'time-picker.spec.ts',
     },
   ],
 })

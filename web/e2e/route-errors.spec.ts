@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { mockGeocode, POINT_A, POINT_B, routeUrl } from './fixtures'
+import { mockGeocode, pauseClockAt, POINT_A, POINT_B, routeUrl } from './fixtures'
 
 // What the panel says when the backend is broken, not merely refusing
 // (the refusals -- outside coverage, no path -- are covered elsewhere).
@@ -11,14 +11,11 @@ const ERROR = () => 'alert'
 
 test('a route request that never answers times out with its own message', async ({ page }) => {
   await mockGeocode(page)
-  // Installed AND PAUSED before navigation so the app's own setTimeout
-  // runs on a fake clock that only runFor() moves. An installed-but-
-  // running clock keeps ticking with real time through the page load,
-  // which ate into the 10s deadline and failed ~1 in 6 runs even on an
-  // idle machine (2026-09-25).
-  const t0 = new Date('2026-06-15T12:00:00')
-  await page.clock.install({ time: t0 })
-  await page.clock.pauseAt(t0)
+  // Paused before navigation so the app's own setTimeout runs on a fake
+  // clock that only runFor() moves. An installed-but-running clock keeps
+  // ticking with real time through the page load, which ate into the 10s
+  // deadline and failed ~1 in 6 runs even on an idle machine (2026-09-25).
+  await pauseClockAt(page, new Date('2026-06-15T12:00:00'))
   await page.route('**/route?*', () => {
     /* never fulfilled: a hung worker */
   })

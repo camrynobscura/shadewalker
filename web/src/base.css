@@ -62,6 +62,10 @@
   --meter-fill: rgba(0, 122, 77, 0.38);
   /* The trip-option pills: jade at 14%. */
   --pill-fill: rgba(0, 168, 107, 0.14);
+  /* A pill's menu: white, lifted by its shadow alone. Round like the pill. */
+  --menu-radius: 14px;
+  --menu-field-radius: 10px;
+  --menu-shadow: 0 8px 24px rgba(11, 36, 24, 0.18), 0 1px 3px rgba(11, 36, 24, 0.12);
 
   /* Mono everywhere is the theme's voice (ui-monospace resolves to SF
      Mono on macOS; the rest is the fallback chain). The sans stack is
