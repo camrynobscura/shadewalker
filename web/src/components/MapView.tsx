@@ -13,6 +13,7 @@ import {
 } from 'react-leaflet'
 import type { Point, RouteFeature } from '../api'
 import type { GeoPosition } from '../hooks/useGeolocation'
+import { MOBILE_LAYOUT_QUERY } from '../hooks/useMediaQuery'
 import { CollapseIcon, CrosshairIcon, ExpandIcon } from './icons'
 import styles from './MapView.module.css'
 
@@ -99,22 +100,39 @@ function InvalidateOnResize() {
    the zoom buttons and the toggle. The left was 190px "for the legend's
    width" until 2026-09-29 -- redundant under that bottom strip, and on a
    390px phone it was half the map: pairs framed into its right side and
-   zoomed out (measured: a tapped pair's midpoint at x=260 of 390). */
+   zoomed out (measured: a tapped pair's midpoint at x=260 of 390).
+
+   Phones take less top and bottom: their map is 40% of the screen, and
+   160px of padding left an iPhone SE's 220px map 60px for the pair -- a
+   Brooklyn-Manhattan trip framed at zoom 9, its markers 37px apart (user,
+   2026-09-29). The sides already clear both top controls, so the top
+   keeps only half a marker (15px) and a little; the bottom clears the
+   legend's 67px and half a marker. */
 const FIT_PAD_TOP_LEFT: [number, number] = [60, 60]
 const FIT_PAD_BOTTOM_RIGHT: [number, number] = [60, 100]
+const PHONE_FIT_PAD_TOP_LEFT: [number, number] = [60, 20]
+const PHONE_FIT_PAD_BOTTOM_RIGHT: [number, number] = [60, 85]
+
+/** The padded rectangle for the layout on screen right now. */
+function fitPadding(): { topLeft: [number, number]; bottomRight: [number, number] } {
+  return window.matchMedia(MOBILE_LAYOUT_QUERY).matches
+    ? { topLeft: PHONE_FIT_PAD_TOP_LEFT, bottomRight: PHONE_FIT_PAD_BOTTOM_RIGHT }
+    : { topLeft: FIT_PAD_TOP_LEFT, bottomRight: FIT_PAD_BOTTOM_RIGHT }
+}
 
 /** Whether every point already sits inside the current view's padded
  * rectangle -- checked in screen pixels so the padding means exactly
  * what it means to fitBounds. */
 function fullyVisible(map: LeafletMap, points: [number, number][]): boolean {
   const size = map.getSize()
+  const { topLeft, bottomRight } = fitPadding()
   return points.every((point) => {
     const px = map.latLngToContainerPoint(point)
     return (
-      px.x >= FIT_PAD_TOP_LEFT[0] &&
-      px.y >= FIT_PAD_TOP_LEFT[1] &&
-      px.x <= size.x - FIT_PAD_BOTTOM_RIGHT[0] &&
-      px.y <= size.y - FIT_PAD_BOTTOM_RIGHT[1]
+      px.x >= topLeft[0] &&
+      px.y >= topLeft[1] &&
+      px.x <= size.x - bottomRight[0] &&
+      px.y <= size.y - bottomRight[1]
     )
   })
 }
@@ -165,9 +183,10 @@ function RouteFraming({
     // switching to MAX while zoomed in on a MED detail -- still falls
     // through to the fit, pan and zoom both.
     if (pair === framedPairRef.current && fullyVisible(map, points)) return
+    const { topLeft, bottomRight } = fitPadding()
     map.fitBounds(points, {
-      paddingTopLeft: FIT_PAD_TOP_LEFT,
-      paddingBottomRight: FIT_PAD_BOTTOM_RIGHT,
+      paddingTopLeft: topLeft,
+      paddingBottomRight: bottomRight,
       maxZoom: 17,
       animate: !reducedMotion(),
     })
@@ -176,7 +195,9 @@ function RouteFraming({
     // the instant point A lands was more disruptive than useful in
     // practice -- it re-centers/zooms the view around a point the user
     // likely just clicked while already looking straight at it. Wait for
-    // the pair to frame together instead.
+    // the pair to frame together instead. A lone point TYPED or picked in
+    // a field is different -- usually somewhere else -- and is
+    // RevealLonePoint's.
   }, [start, end, selected, baseline, map])
 
   return null
@@ -219,6 +240,45 @@ function PanTo({ point }: { point: Point | null }) {
   useEffect(() => {
     if (point) map.setView([point.lat, point.lon], 16, { animate: !reducedMotion() })
   }, [point, map])
+  return null
+}
+
+/** The one endpoint that's set while the other isn't, or null. */
+function lonePoint(start: Point | null, end: Point | null): Point | null {
+  if (start && !end) return start
+  if (end && !start) return end
+  return null
+}
+
+/** Pans to an address typed or picked for A or B while the other point is
+ * still empty, keeping the zoom, when it's outside the padded view: the
+ * marker used to land off-screen, so a pick looked like it did nothing
+ * (user, 2026-09-29). Map taps never come through here -- a tap lands
+ * where the user is already looking (RouteFraming's note). `point` is a
+ * fresh object per entry, handled once, against the endpoints of the
+ * render it arrived in: if the other field filled meanwhile, the pair is
+ * RouteFraming's and nothing moves here. */
+function RevealLonePoint({
+  point,
+  start,
+  end,
+}: {
+  point: Point | null
+  start: Point | null
+  end: Point | null
+}) {
+  const map = useMap()
+  const handledRef = useRef<Point | null>(null)
+  useEffect(() => {
+    if (!point || point === handledRef.current) return
+    handledRef.current = point
+    const lone = lonePoint(start, end)
+    if (!lone || lone.lat !== point.lat || lone.lon !== point.lon) return
+    if (fullyVisible(map, [[lone.lat, lone.lon]])) return
+    // No options: Leaflet animates a pan shorter than the map and jumps a
+    // longer one (Map.js _tryAnimatedPan), so a far address doesn't swoop.
+    map.panTo([lone.lat, lone.lon], reducedMotion() ? { animate: false } : undefined)
+  }, [point, start, end, map])
   return null
 }
 
@@ -299,6 +359,8 @@ interface MapViewProps {
   position: GeoPosition | null
   /** Imperative pan target — see PanTo. */
   panTo: Point | null
+  /** The latest address typed or picked in a field — see RevealLonePoint. */
+  reveal: Point | null
   onMapClick: (p: Point) => void
   /** Whether the mobile full-screen map mode is on — flips the toggle's
    * icon and pressed state. The layout change itself (hiding the header
@@ -316,11 +378,16 @@ export function MapView({
   baseline,
   position,
   panTo,
+  reveal,
   onMapClick,
   expanded,
   onToggleExpanded,
 }: MapViewProps) {
   const helpId = useId()
+  // A link with only A (or only B) opens on that point, not the Village,
+  // so its marker is on screen from the start. Read once: MapContainer
+  // applies `center` at mount only.
+  const [openAt] = useState(() => lonePoint(start, end))
   return (
     <div className={styles.mapRegion} role="region" aria-label="Map">
       {/* A landmark's aria-label is re-read every time a screen reader user
@@ -348,7 +415,12 @@ export function MapView({
           asks for. Mount-time read by design: react-leaflet map options
           are immutable, and a mid-session OS toggle is rare enough to
           not chase. */}
-      <MapContainer center={INITIAL_CENTER} zoom={15} zoomAnimation={!reducedMotion()} className={styles.map}>
+      <MapContainer
+        center={openAt ? [openAt.lat, openAt.lon] : INITIAL_CENTER}
+        zoom={15}
+        zoomAnimation={!reducedMotion()}
+        className={styles.map}
+      >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url={TILE_URL}
@@ -381,6 +453,7 @@ export function MapView({
         <ClickHandler onMapClick={onMapClick} />
         <InvalidateOnResize />
         <PanTo point={panTo} />
+        <RevealLonePoint point={reveal} start={start} end={end} />
         <RouteFraming start={start} end={end} selected={selected} baseline={baseline} />
 
         {/* Baseline first so the selected route draws on top of it. Routes

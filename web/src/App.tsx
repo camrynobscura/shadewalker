@@ -113,6 +113,20 @@ export default function App() {
      to the same spot. */
   const [panTarget, setPanTarget] = useState<Point | null>(null)
 
+  /* The latest address typed or picked in a field, for the map to bring
+     into view while it's the only point (MapView's RevealLonePoint): its
+     marker used to land off-screen (user, 2026-09-29). Only the fields
+     set it -- a map tap lands where the user is already looking. */
+  const [revealPoint, setRevealPoint] = useState<Point | null>(null)
+  function setStartFromField(p: Point | null) {
+    setStart(p)
+    if (p) setRevealPoint(p)
+  }
+  function setEndFromField(p: Point | null) {
+    setEnd(p)
+    if (p) setRevealPoint(p)
+  }
+
   const location = useLocationFill((fix) => {
     setStart({ lat: fix.lat, lon: fix.lon })
     setPanTarget({ lat: fix.lat, lon: fix.lon })
@@ -285,6 +299,7 @@ export default function App() {
             baseline={baseline}
             position={location.position}
             panTo={panTarget}
+            reveal={revealPoint}
             onMapClick={handleMapClick}
             expanded={mapExpanded}
             onToggleExpanded={isMobile ? () => setWantMapExpanded((v) => !v) : null}
@@ -309,8 +324,8 @@ export default function App() {
             onTreeWeightChange={setTreeWeight}
             start={start}
             end={end}
-            onSetStart={setStart}
-            onSetEnd={setEnd}
+            onSetStart={setStartFromField}
+            onSetEnd={setEndFromField}
             initialStartLabel={startLabel}
             initialEndLabel={endLabel}
             onStartLabel={setStartLabel}
