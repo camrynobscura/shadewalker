@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
-import { mockGeocode, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
+import { mockGeocode, pauseClockAt, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
 
 // The time pill (PLAN `time-and-layers`): a small pill under the address
 // fields -- and on a phone's route screen, under the trip line -- that
@@ -87,9 +87,7 @@ test.describe('on desktop', () => {
     await mockGeocode(page)
     // Paused: only runFor() moves the pause's timer, so the test can stand
     // at 499ms and at 500ms exactly.
-    const t0 = new Date('2026-07-15T12:00:00')
-    await page.clock.install({ time: t0 })
-    await page.clock.pauseAt(t0)
+    await pauseClockAt(page, new Date('2026-07-15T12:00:00'))
     await page.goto(routeUrl(POINT_A, POINT_B))
     await expect(routeDrawn(page)).toBeVisible()
     await timePill(page, 'Leave now').click()
@@ -122,9 +120,7 @@ test.describe('on desktop', () => {
   test('closing the menu sends a time typed just before, without waiting for the pause', async ({ page }) => {
     await mockGeocode(page)
     // Paused: the pause's timer can't fire, so only the close can send it.
-    const t0 = new Date('2026-07-15T12:00:00')
-    await page.clock.install({ time: t0 })
-    await page.clock.pauseAt(t0)
+    await pauseClockAt(page, new Date('2026-07-15T12:00:00'))
     await page.goto(routeUrl(POINT_A, POINT_B))
     await expect(routeDrawn(page)).toBeVisible()
     await timePill(page, 'Leave now').click()
@@ -371,6 +367,11 @@ test.describe('on a phone', () => {
     await page.goto(routeUrl(POINT_A, POINT_B))
     await expect(routeDrawn(page)).toBeVisible()
     await page.getByRole('button', { name: /^Change trip:/ }).tap()
+    // The switch lands a moment later (history.back()), and both screens
+    // have a "Start time: Leave now" pill. Tapped too soon, the test grabbed
+    // the route screen's, which then hid; Playwright waited on it for 30s
+    // (CI's WebKit, 2026-09-29). FIND_ROUTE is on the plan screen only.
+    await expect(page.getByRole('button', { name: 'Find route' })).toBeVisible()
 
     const routes: string[] = []
     page.on('request', (r) => {
