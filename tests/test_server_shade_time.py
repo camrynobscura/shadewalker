@@ -31,7 +31,9 @@ What is pinned, and why:
   - night (PLAN `night-shade`): a dark slot counts as FULL shade, so dusk
     climbs to 1.0 instead of falling to the stored 0; is_night needs
     every blended slot dark; /route at night hands every weight the one
-    fastest route; no sun table, no night; the pinned test clock.
+    fastest route; no sun table, no night; the pinned test clock. In
+    every layer (PLAN `time-and-layers`): "Tree shade" fades into the
+    dark at dusk and is the fastest route at night too.
   - trees by the day (PLAN `tree-seasonal-blend`): CANOPY_BY_MONTH is
     each month's value on the 15th, blended between 15ths by the same
     day rule as the rows, so tree shade no longer jumps on the 1st;
@@ -424,8 +426,30 @@ def test_a_dark_slot_counts_as_full_shade(tmp_path, monkeypatch):
     store = _store(tmp_path, monkeypatch, dark=JULY_NIGHT)
     # the middle way has no row at all, so its shade at 02:00 is the night's
     assert _shade(store, "A", "M", month=7, hour=2) == 1.0
-    # ...and it is the sun's doing: the trees-alone view has no night
-    assert _shade(store, "A", "M", month=7, hour=2, layers="trees") == 0.0
+    # ...and the dark is the sun's, so every layer has it -- "Tree shade"
+    # included (PLAN `time-and-layers`; #112 had exempted the trees)
+    assert _shade(store, "A", "M", month=7, hour=2, layers="trees") == 1.0
+    assert _shade(store, "A", "M", month=7, hour=2, layers="buildings") == 1.0
+
+
+def test_tree_shade_fades_into_the_dark_like_every_layer(tmp_path, monkeypatch):
+    """User 2026-09-29 (H): at dusk "Tree shade" climbs toward full shade
+    the way the other layers do, instead of staying trees alone until
+    the minute it's night. Per slot the dark is 1 and a lit slot is the
+    trees, so the blend is the union of the trees with the dark share."""
+    half = 0.5 * RATE * DETOUR_M     # 0.5 tree cover on the north way
+    store = _store(tmp_path, monkeypatch, dark=JULY_NIGHT, deciduous=half)
+    assert _shade(store, "A", "N", month=7, hour=20, layers="trees") == pytest.approx(0.5)
+    assert _shade(store, "A", "N", month=7, hour=20, minute=30, layers="trees") == pytest.approx(0.75)
+    assert _shade(store, "A", "N", month=7, hour=21, layers="trees") == 1.0
+    by_minute = [_shade(store, "A", "N", month=7, hour=20, minute=m, layers="trees") for m in range(60)]
+    assert by_minute == sorted(by_minute)
+    # no trees at all: the dark alone
+    bare = _store(tmp_path, monkeypatch, dark=JULY_NIGHT)
+    assert _shade(bare, "A", "M", month=7, hour=20, minute=30, layers="trees") == pytest.approx(0.5)
+    # dawn, the other way
+    assert _shade(store, "A", "N", month=7, hour=5, minute=15, layers="trees") == pytest.approx(1 - 0.5 * 0.25)
+    assert _shade(store, "A", "N", month=7, hour=6, layers="trees") == pytest.approx(0.5)
 
 
 def test_dusk_climbs_toward_full_shade(tmp_path, monkeypatch):
@@ -466,6 +490,7 @@ def test_an_export_without_a_sun_table_has_no_night(tmp_path, monkeypatch):
     store = _store(tmp_path, monkeypatch, with_sun_table=False)
     assert store.is_night(7, 15, 2, 0) is False
     assert _shade(store, "A", "M", month=7, hour=2) == 0.0
+    assert _shade(store, "A", "M", month=7, hour=2, layers="trees") == 0.0
 
 
 def test_a_sun_table_of_the_wrong_shape_is_refused():
@@ -495,10 +520,18 @@ def test_route_at_night_is_the_fastest_route_for_every_weight(tmp_path, monkeypa
     assert props[0]["length_m"] == pytest.approx(200.0, abs=0.2)
     assert all(p["shade_fraction"] == 1.0 for p in props)
 
-    # the trees-alone view keeps the trees' own night: MAX still detours
+    # "Tree shade" too (PLAN `time-and-layers`, user 2026-09-26: night
+    # beats the layer -- #112 had let MAX keep its canopy detour here)
     trees = _get(client, month=7, hour=2, layers="trees").json()
-    assert trees["night"] is False
-    assert trees["routes"][3]["properties"]["length_m"] == pytest.approx(2 * DETOUR_M, abs=0.2)
+    assert trees["night"] is True
+    assert trees["layers"] == "trees"
+    assert all(route["geometry"] == trees["routes"][0]["geometry"] for route in trees["routes"])
+    assert trees["routes"][3]["properties"]["length_m"] == pytest.approx(200.0, abs=0.2)
+    assert all(route["properties"]["shade_fraction"] == 1.0 for route in trees["routes"])
+    # ...while by day MAX still takes the trees
+    by_day = _get(client, month=7, hour=12, layers="trees").json()
+    assert by_day["night"] is False
+    assert by_day["routes"][3]["properties"]["length_m"] == pytest.approx(2 * DETOUR_M, abs=0.2)
 
 
 # ── arrive by (PLAN `time-and-layers`) ───────────────────────────────────────
