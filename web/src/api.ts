@@ -6,6 +6,7 @@
  * a compile error instead of a runtime surprise.
  */
 
+import type { ShadeLayers } from './shadeLayers'
 import type { WalkTime } from './walkTime'
 
 export interface Point {
@@ -84,10 +85,9 @@ export interface RouteResponse {
   minute: number
   /** True when the time sent was an arrival (arrive by). */
   arrive: boolean
-  /** Which shade the routing cost saw: "trees" | "buildings" | "both".
-   * Always "both" from this frontend; the switch exists server-side for a
-   * possible layer selector. */
-  layers: 'trees' | 'buildings' | 'both'
+  /** Which shade the routing cost and every shade_fraction saw: the
+   * shade pill's pick, "both" unless it's set. */
+  layers: ShadeLayers
   /** True when the whole moment is dark (server/graph_store.py's
    * is_night): with no sun every street is shade, so every route here is
    * the same fastest route at 100%. The Shade_priority box says so in one
@@ -122,6 +122,7 @@ export async function fetchRoute(
   treeWeights: number[],
   signal: AbortSignal,
   time: WalkTime | null = null,
+  layers: ShadeLayers = 'both',
 ): Promise<RouteResponse> {
   const params = new URLSearchParams({
     from_lat: String(from.lat),
@@ -137,6 +138,8 @@ export async function fetchRoute(
     params.set('minute', String(time.minute))
     if (time.arrive) params.set('arrive', 'true')
   }
+  // All shade is the server's default too: only a set pick is sent.
+  if (layers !== 'both') params.set('layers', layers)
   const res = await fetch(`/route?${params}`, { signal })
   if (!res.ok) {
     const detail = await errorDetail(res)

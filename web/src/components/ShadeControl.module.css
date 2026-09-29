@@ -1,0 +1,7 @@
+.visuallyHidden {
+  composes: visuallyHidden from '../shared.module.css';
+}
+
+.menu {
+  --menu-width: min(200px, 100% - 2 * var(--space-lg));
+}
