@@ -79,5 +79,13 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    // Safari's engine, for what Chromium can't see: a tapped radio isn't
+    // focused there (focus goes to the panel), which once made the time
+    // pill's menu close on the tap meant to pick (2026-09-29).
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
+      testMatch: 'time-picker.spec.ts',
+    },
   ],
 })
