@@ -13,20 +13,22 @@ import { mockGeocode, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
  * truth, and a pane transform can survive some camera changes (Leaflet
  * resets its pixel origin on zoom). */
 
-async function markerBox(page: Page) {
-  const box = await page.locator('[class*="markerStart"]').boundingBox()
+type MarkerClass = 'markerStart' | 'markerEnd'
+
+async function markerBox(page: Page, marker: MarkerClass = 'markerStart') {
+  const box = await page.locator(`[class*="${marker}"]`).boundingBox()
   expect(box).not.toBeNull()
   return { x: Math.round(box!.x), y: Math.round(box!.y) }
 }
 
 /** Waits until the marker stops moving between consecutive reads, then
  * returns where it settled. */
-async function settledMarkerBox(page: Page) {
-  let prev = await markerBox(page)
+async function settledMarkerBox(page: Page, marker: MarkerClass = 'markerStart') {
+  let prev = await markerBox(page, marker)
   await expect
     .poll(
       async () => {
-        const now = await markerBox(page)
+        const now = await markerBox(page, marker)
         const stable = now.x === prev.x && now.y === prev.y
         prev = now
         return stable
@@ -87,6 +89,172 @@ test('a preset switch that pushes the route off screen still reframes', async ({
     expect(box!.x + box!.width).toBeLessThanOrEqual(mapBox!.x + mapBox!.width)
     expect(box!.y + box!.height).toBeLessThanOrEqual(mapBox!.y + mapBox!.height)
   }
+})
+
+/** How far a marker's centre sits from the map's centre, in px. */
+async function offCentre(page: Page, marker: MarkerClass) {
+  const map = (await page.locator('.leaflet-container').boundingBox())!
+  const box = (await page.locator(`[class*="${marker}"]`).boundingBox())!
+  return {
+    dx: Math.abs(box.x + box.width / 2 - (map.x + map.width / 2)),
+    dy: Math.abs(box.y + box.height / 2 - (map.y + map.height / 2)),
+  }
+}
+
+/** The zoom levels of the tiles on the map, from their URLs
+ * (.../{z}/{x}/{y}.png). Only numbers leave the page: a built tile URL
+ * can carry the CARTO key. */
+async function tileZooms(page: Page) {
+  await expect(page.locator('img.leaflet-tile').first()).toBeAttached()
+  return page.locator('img.leaflet-tile').evaluateAll((imgs) => {
+    const zooms = imgs.map((img) => {
+      const parts = new URL((img as HTMLImageElement).src).pathname.split('/')
+      return Number(parts[parts.length - 3])
+    })
+    return [...new Set(zooms)]
+  })
+}
+
+// A lone point -- A or B with the other still empty. RouteFraming ignores
+// one on purpose (a map tap lands where you're looking), but an address
+// typed or picked in a field is usually somewhere else: its marker landed
+// off-screen and the pick looked like it did nothing (user, 2026-09-29).
+// Now the map pans to it, keeping the zoom.
+test.describe('a lone address', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await mockGeocode(page)
+  })
+
+  test('typed for B with A empty: the map pans to it, same zoom', async ({ page }) => {
+    await page.goto('/')
+    const zooms = await tileZooms(page)
+    const end = page.getByRole('combobox', { name: 'End point' })
+    await end.fill('3rd St & 3rd Ave')
+    await end.press('Enter')
+    await expect(page.locator('[class*="markerEnd"]')).toBeAttached()
+    await settledMarkerBox(page, 'markerEnd')
+
+    const off = await offCentre(page, 'markerEnd')
+    expect(off.dx).toBeLessThan(3)
+    expect(off.dy).toBeLessThan(3)
+    expect(await tileZooms(page)).toEqual(zooms)
+  })
+
+  test('already in view: the map holds still', async ({ page }) => {
+    // ~60px north-east of POINT_A: inside the padded view once the map is
+    // centred there, so panning to it would only jostle the map.
+    await page.route('**/geocode?*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ results: [{ lat: 40.682, lon: -73.996, label: 'Near St, Brooklyn' }] }),
+      }),
+    )
+    await page.goto(`/?from=${POINT_A}`)
+    await settledMarkerBox(page)
+    const start = page.getByRole('combobox', { name: 'Start point' })
+    await start.fill('near')
+    await start.press('Enter')
+    await expect.poll(async () => (await offCentre(page, 'markerStart')).dy).toBeGreaterThan(20)
+    await page.waitForTimeout(400) // a (wrong) pan gets a real window to land
+
+    const off = await offCentre(page, 'markerStart')
+    expect(off.dx).toBeGreaterThan(20)
+    expect(off.dy).toBeGreaterThan(20)
+  })
+
+  test.describe('on a phone', () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
+
+    test('picked for A: the map pans to it, same zoom', async ({ page }) => {
+      await page.goto('/')
+      const zooms = await tileZooms(page)
+      const start = page.getByRole('combobox', { name: 'Start point' })
+      await start.tap()
+      await start.pressSequentially('250 court', { delay: 30 })
+      await page.getByRole('listbox', { name: 'Start point suggestions' }).getByRole('option').first().tap()
+      await expect(page.getByRole('button', { name: 'CANCEL' })).toBeHidden()
+      await settledMarkerBox(page)
+
+      const off = await offCentre(page, 'markerStart')
+      expect(off.dx).toBeLessThan(3)
+      expect(off.dy).toBeLessThan(3)
+      expect(await tileZooms(page)).toEqual(zooms)
+    })
+
+    test('a link with only A opens on it', async ({ page }) => {
+      await page.goto(`/?from=${POINT_A}`)
+      await settledMarkerBox(page)
+      const off = await offCentre(page, 'markerStart')
+      expect(off.dx).toBeLessThan(3)
+      expect(off.dy).toBeLessThan(3)
+    })
+
+    test('a map tap still leaves the map where it is', async ({ page }) => {
+      await page.goto('/')
+      const map = (await page.locator('.leaflet-container').boundingBox())!
+      // Inside the fit's 60px side padding: a pan would pull it to the middle.
+      const tap = { x: map.x + 30, y: map.y + map.height / 2 }
+      await page.touchscreen.tap(tap.x, tap.y)
+      await page.waitForTimeout(400)
+      const box = await settledMarkerBox(page)
+      const size = (await page.locator('[class*="markerStart"]').boundingBox())!
+      expect(Math.abs(box.x + size.width / 2 - tap.x)).toBeLessThan(3)
+      expect(Math.abs(box.y + size.height / 2 - tap.y)).toBeLessThan(3)
+    })
+  })
+})
+
+test.describe('on a short phone map', () => {
+  // An iPhone SE's Safari: a 375x220 map (40svh). The desktop padding's
+  // 60px top + 100px bottom left the pair 60px of it -- this trip framed at
+  // zoom 9, its markers 37px apart (user, 2026-09-29).
+  test.use({ viewport: { width: 375, height: 550 }, hasTouch: true })
+
+  test('a Brooklyn-Manhattan pair frames a zoom step closer than the desktop padding allows', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await mockGeocode(page)
+    // Outside the pilot fixture, so this stops before FIND_ROUTE: the pair
+    // frames the moment B lands.
+    const places: Record<string, { lat: number; lon: number }> = {
+      court: { lat: 40.68, lon: -73.998 },
+      times: { lat: 40.758, lon: -73.9855 },
+    }
+    await page.route('**/geocode?*', (route) => {
+      const q = new URL(route.request().url()).searchParams.get('q') ?? ''
+      const results = Object.entries(places)
+        .filter(([key]) => key.startsWith(q.toLowerCase()))
+        .map(([key, point]) => ({ ...point, label: key }))
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ results }),
+      })
+    })
+    await page.goto('/')
+    for (const [name, text] of [
+      ['Start point', 'court'],
+      ['End point', 'times'],
+    ]) {
+      const field = page.getByRole('combobox', { name })
+      await field.tap()
+      await field.pressSequentially(text, { delay: 30 })
+      await page
+        .getByRole('listbox', { name: `${name} suggestions` })
+        .getByRole('option')
+        .first()
+        .tap()
+    }
+    await expect(page.locator('[class*="markerEnd"]')).toBeAttached()
+    await settledMarkerBox(page, 'markerEnd')
+
+    const a = (await page.locator('[class*="markerStart"]').boundingBox())!
+    const b = (await page.locator('[class*="markerEnd"]').boundingBox())!
+    expect(a.y - b.y).toBeGreaterThan(60)
+  })
 })
 
 test.describe('on a phone', () => {
