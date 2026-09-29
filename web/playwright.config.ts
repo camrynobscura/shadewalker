@@ -72,7 +72,9 @@ export default defineConfig({
   ],
   use: {
     baseURL: `http://localhost:${WEB_PORT}`,
-    trace: 'on-first-retry',
+    // CI keeps the trace of every failed test (uploaded by ci.yml): no
+    // retries there, so 'on-first-retry' would never record one.
+    trace: process.env.CI ? 'retain-on-failure' : 'on-first-retry',
   },
   projects: [
     {
