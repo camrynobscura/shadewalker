@@ -2,228 +2,16 @@
   composes: visuallyHidden from '../shared.module.css';
 }
 
-/* ── The pill ───────────────────────────────────────────────────────── */
-
-/* Round on purpose, the one exception to the square corners: a pill
-   reads as an option, not a field. The ::before keeps a 44px tap area
-   around the 30px pill; the transparent border is what forced colors
-   draw. */
-.pill {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: var(--space-xs);
-  height: 30px;
-  padding: 0 var(--space-md);
-  background: var(--pill-fill);
-  color: var(--text);
-  border: 1px solid transparent;
-  border-radius: 999px;
-  font-size: var(--font-size-pill);
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.pill::before {
-  content: '';
-  position: absolute;
-  inset: calc((100% - var(--target-min)) / 2) 0;
-}
-
-.pill svg {
-  flex: none;
-  width: 12px;
-  height: 12px;
-}
-
-/* ── Phone: the whole screen ─────────────────────────────────────────── */
-
-/* The whole screen (dialog.showModal()), like address search. */
-.picker {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  max-width: none;
-  height: 100%;
-  max-height: none;
-  margin: 0;
-  padding: var(--space-lg);
-  background: var(--panel);
-  color: var(--text);
-  border: none;
-}
-
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
-}
-
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.title {
-  composes: sectionLabel from '../shared.module.css';
-  margin: 0;
-}
-
-.cancel {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--target-min);
-  padding: var(--space-sm);
-  background: none;
-  border: none;
-  font-size: var(--caps-size);
-  font-weight: var(--caps-weight);
-  letter-spacing: 0.1em;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.done {
-  min-height: var(--target-min);
-  padding: 0 var(--space-lg);
-  background: var(--green-dim);
-  color: var(--on-accent);
-  border: 1px solid var(--green-dim);
-  border-radius: 0;
-  font-size: var(--caps-size);
-  font-weight: var(--caps-weight);
-  letter-spacing: 0.1em;
-  cursor: pointer;
-}
-
-/* ── Desktop: the card ───────────────────────────────────────────────── */
-
-/* A line of its own in the pill row, after every pill. */
-.card {
-  order: 1;
-  flex-basis: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-}
-
-/* ── Both: the modes and the fields ────────────────────────────────────── */
-
-.modes {
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: none;
-}
-
-/* A white box like the address fields, each word over its own track
-   like the route rows' meters; the jade bar slides to the pick. */
-.tabs {
-  position: relative;
-  display: flex;
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
-}
-
-.tab {
-  flex: 1 1 0;
-  min-width: 0;
-  position: relative;
-  cursor: pointer;
-}
-
-/* Track and bar share one size: the word (--chars letters, each 1ch plus
-   its 0.1em tracking) and half a ch either side, in the words' own size
-   so ch and em match theirs. */
-.tab::after,
-.tabBar {
-  position: absolute;
-  bottom: var(--space-md);
-  height: 3px;
-  font-size: var(--caps-size);
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
-.tab::after {
-  content: '';
-  left: 50%;
-  width: calc(var(--chars) * (1ch + 0.1em) + 1ch);
-  background: var(--meter-track);
-}
-
-/* The real radio, invisible but stretched over the tab so clicks, focus
-   and arrow keys hit the native input. opacity, not display:none, which
-   would drop it from the tab order. */
-.tabInput {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  margin: 0;
-  cursor: pointer;
-}
-
-/* Bottom padding clears the track (12px up, 3px tall) plus a small gap. */
-.tabText {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: var(--target-min);
-  padding: var(--space-md) 0 calc(var(--space-md) + 3px + var(--space-xs));
-  font-size: var(--caps-size);
-  font-weight: var(--caps-weight);
-  letter-spacing: 0.1em;
-  white-space: nowrap;
-  color: var(--muted);
-}
-
-.tabInput:checked + .tabText {
-  color: var(--text);
-  font-weight: 700;
-}
-
-.tabInput:hover:not(:checked) + .tabText {
-  color: var(--text);
-}
-
-/* Re-drawn on the text because the real radio is invisible; same values
-   as the global :focus-visible ring in base.css. */
-.tabInput:focus-visible + .tabText {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
-}
-
-/* Centred on the picked tab (--pick of --count, set inline). The route
-   line's jade: 3.08:1 on white, over the 3:1 a state mark needs. */
-.tabBar {
-  left: calc((var(--pick) + 0.5) * 100% / var(--count));
-  width: calc(var(--pick-chars) * (1ch + 0.1em) + 1ch);
-  background: var(--green);
-  transition:
-    left 0.25s cubic-bezier(0.2, 0, 0, 1),
-    width 0.25s cubic-bezier(0.2, 0, 0, 1);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tabBar {
-    transition: none;
-  }
-}
-
-/* Forced colors strip the bar's fill; the system highlight keeps it. */
-@media (forced-colors: active) {
-  .tabBar {
-    background: Highlight;
-    forced-color-adjust: none;
-  }
+.menu {
+  --menu-width: min(340px, 100% - 2 * var(--space-lg));
 }
 
 .fields {
   display: flex;
   gap: var(--space-sm);
+  margin: var(--space-xs) var(--space-lg) 0;
+  padding: var(--space-md) 0;
+  border-top: 1px solid var(--line);
 }
 
 .field {
@@ -235,23 +23,26 @@
 }
 
 .fieldLabel {
-  composes: sectionLabel from '../shared.module.css';
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+  color: var(--muted);
 }
 
 .input {
   width: 100%;
   min-width: 0;
   min-height: var(--target-min);
-  padding: var(--space-sm) var(--control-pad-x);
+  padding: 0 var(--space-sm);
   background: var(--panel-raised);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: var(--menu-field-radius);
   font-size: var(--font-size-input);
+  font-weight: 400;
 }
 
 /* iOS draws date/time inputs as small centred grey pills; this makes
-   them boxes like the address fields. */
+   them boxes like the rest. */
 @media (max-width: 720px) {
   .input {
     appearance: none;

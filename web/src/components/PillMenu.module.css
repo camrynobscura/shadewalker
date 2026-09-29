@@ -1,0 +1,130 @@
+.visuallyHidden {
+  composes: visuallyHidden from '../shared.module.css';
+}
+
+/* ── The pill ───────────────────────────────────────────────────────── */
+
+/* Round on purpose, like the menu it opens: where the square corners give
+   way, a pill reads as an option, not a field. The ::before keeps a 44px
+   tap area around the 30px pill; the transparent border is what forced
+   colors draw. */
+.pill {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-xs);
+  height: 30px;
+  padding: 0 var(--space-md);
+  background: var(--pill-fill);
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: var(--font-size-pill);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pill::before {
+  content: '';
+  position: absolute;
+  inset: calc((100% - var(--target-min)) / 2) 0;
+}
+
+.pill svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+/* ── The menu ───────────────────────────────────────────────────────── */
+
+/* The popover is the whole screen and see-through (a tap on it closes the
+   menu instead of reaching the map); the card inside is the menu. Never
+   give it a display: that would override the hidden popover's. */
+.popover {
+  position: fixed;
+  inset: 0;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  color: var(--text);
+  border: none;
+}
+
+.cover {
+  position: absolute;
+  inset: 0;
+}
+
+/* --menu-width comes from the caller's class; --pill-left and --menu-top
+   from PillMenu's place(). */
+.card {
+  position: absolute;
+  top: var(--menu-top, 0);
+  left: clamp(var(--space-lg), var(--pill-left, 0px), 100% - var(--space-lg) - var(--menu-width));
+  width: var(--menu-width);
+  max-height: calc(100% - 2 * var(--space-lg));
+  overflow-y: auto;
+  padding: var(--space-xs) 0;
+  background: var(--panel-raised);
+  border: 1px solid transparent;
+  border-radius: var(--menu-radius);
+  box-shadow: var(--menu-shadow);
+  font-size: var(--font-size-pill);
+  font-weight: 500;
+}
+
+.choices {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.choice {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-height: var(--target-min);
+  padding: 0 var(--space-lg);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .choice:hover {
+    background: var(--pill-fill);
+  }
+}
+
+/* The real radio, invisible but over the whole line, so taps, focus and
+   arrow keys all hit the native input. */
+.choiceInput {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.choice svg {
+  flex: none;
+  color: var(--green-dim);
+  visibility: hidden;
+}
+
+.choiceInput:checked ~ svg {
+  visibility: visible;
+}
+
+.choice:has(.choiceInput:focus-visible) {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}

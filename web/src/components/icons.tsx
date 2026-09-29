@@ -170,6 +170,25 @@ export function ChevronDownIcon() {
   )
 }
 
+/** A tick: the picked line in a pill's menu. */
+export function CheckIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="2.5,7.5 5.5,10.5 11.5,3.5" />
+    </svg>
+  )
+}
+
 /** The trip summary's way back: a left chevron. */
 export function BackIcon() {
   return (

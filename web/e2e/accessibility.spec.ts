@@ -46,11 +46,11 @@ test('a route after dark has no violations', async ({ page }) => {
   expect(results.violations).toEqual([])
 })
 
-test('the open time card, and a set departure on the time pill, have no violations', async ({ page }) => {
-  // Both only exist after a click: the card (the radios, native
-  // date/time inputs, the pill's aria-expanded/-controls) and the pill's
-  // "Depart ..." text once a time is set. (The phone's full-screen picker
-  // has its own scan in time-picker.spec.)
+test('the open time menu, and a set departure on the time pill, have no violations', async ({ page }) => {
+  // Both only exist after a click: the menu (the radios, native
+  // date/time inputs, the pill's aria-expanded) and the pill's
+  // "Depart ..." text once a time is set. (The phone's menu has its own
+  // scan in time-picker.spec.)
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
   await expect(routeDrawn(page)).toBeVisible()
