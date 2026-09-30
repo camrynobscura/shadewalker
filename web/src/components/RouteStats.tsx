@@ -141,7 +141,12 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
   // once; the flag flips after the first arrival and the tip unmounts
   // (removals are never announced).
   const [priorityHinted, setPriorityHinted] = useState(false)
+  // An effect ON PURPOSE (the one oxlint `set-state-in-effect` exception):
+  // the flag must flip AFTER the tip has been on screen, so the live region
+  // has seen it arrive. Set while rendering, as the rule prefers, it would
+  // flip before the tip ever reached the screen, and nothing would be read.
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     if (route && !loading) setPriorityHinted(true)
   }, [route, loading])
   // This div must stay mounted unconditionally — aria-live only announces
