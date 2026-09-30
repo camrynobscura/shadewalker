@@ -47,6 +47,12 @@ body {
   color: var(--text);
 }
 
+/* The lead-in words on the Data and Gaps lists: the h2 weight, not the
+   browser's 700, which reads taller than the text beside it at 15px. */
+.page strong {
+  font-weight: 600;
+}
+
 .page p,
 .page li {
   margin: 0 0 var(--space-md);
