@@ -248,6 +248,26 @@ describe('useRouteQuery', () => {
     await waitFor(() => expect(result.current.route).toBeNull())
   })
 
+  it('emptying a field while a route loads stops loading: no trip, nothing to wait for', async () => {
+    // A browser's fetch rejects a cancel with a DOMException named
+    // AbortError, which the hook treats as "superseded, say nothing". This
+    // test environment's own abort reason isn't a DOMException the hook
+    // recognises (it would read as a network failure), so reject with one.
+    fetchRoute.mockImplementation(
+      (_from, _to, _weights, signal: AbortSignal) =>
+        new Promise((_, reject) =>
+          signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
+        ),
+    )
+    const { result } = renderHook(() => useRouteQuery(START, END, 15))
+    expect(result.current.loading).toBe(true)
+
+    await act(async () => result.current.setStart(null))
+    expect(result.current.loading).toBe(false)
+    expect(result.current.error).toBeNull()
+    expect(result.current.route).toBeNull()
+  })
+
   it('auto (desktop): routes as soon as both points are set, and again on every change', async () => {
     fetchRoute.mockResolvedValue(fakeResponse())
     const { result } = renderHook(() => useRouteQuery(null, null, 15, null, true))
