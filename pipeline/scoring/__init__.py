@@ -1,2 +1,2 @@
-# Marks pipeline/scoring as a subpackage. Tree scoring lives here; the
-# optional shadow engine (Stage 4) would join this package later.
+# Marks pipeline/scoring as a subpackage: tree scoring, the park-canopy
+# raster supplement, and the building-shade engine.

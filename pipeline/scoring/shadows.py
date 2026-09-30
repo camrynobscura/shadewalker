@@ -6,9 +6,9 @@ For every edge and every (month, hour) slot of pipeline/sun.py's table:
 the share of the edge's sample points that lie in a building's shadow,
 stored 0-255. Trees are the first layer (blocks.py / canopy.py); the
 server combines the two by union, 1 - (1 - t)(1 - b). Routing stays
-OSM-only -- this is a label on edges, like trees, so THE GOVERNING RULE
-in CLAUDE.md is untouched. Every kind of edge is scored, crossings
-included (trees skip crossings; buildings do shade roadways).
+OSM-only -- this is a label on edges, like trees. Every kind of edge is
+scored, crossings included (trees skip crossings; buildings do shade
+roadways).
 
 THE PHYSICS, FLAT GROUND
 ------------------------
@@ -16,19 +16,18 @@ A sample point p is shaded for sun (azimuth az, elevation el) iff, walking
 from p toward the sun, a building at distance d has height H >= d.tan(el).
 Any first blocker settles it, so what stands behind it never matters, and
 a building across the street counts exactly like one beside you. Ground
-is flat (design decision 10; the terrain option is BUILDING-SHADOWS.md
-section 8).
+is flat.
 
 SAMPLE POINTS
 -------------
 Each edge is sliced every config.SHADOW_SAMPLE_STEP_M and probed at slice
-CENTRES (blockface.py's rule -- never the edge's midpoint, the trap this
-project hit four times). At each slice three points across the line, at
-config.SHADOW_STRIP_OFFSETS_M along the local perpendicular, so the
-fraction is measured over the same 2 m walker strip the tree layer uses.
-Points that fall INSIDE a footprint (misalignment, arcades; measured
-<= 0.2% everywhere on 2026-09-08) are excluded from the fraction and
-tallied, never counted as shaded or as sunny.
+centres (blockface.py's rule -- never the edge's midpoint). At each slice
+three points across the line, at config.SHADOW_STRIP_OFFSETS_M along the
+local perpendicular, so the fraction is measured over the same 2 m walker
+strip the tree layer uses. Points that fall inside a footprint
+(misalignment, arcades; <= 0.2% of points, measured 2026-09-08) are
+excluded from the fraction and tallied, never counted as shaded or as
+sunny.
 
 TWO ENGINES, ONE ANSWER
 -----------------------
@@ -48,8 +47,8 @@ TWO ENGINES, ONE ANSWER
     via an STRtree over the tile's points. Exact, but per building per
     slot, so reserved for the few whose shadows outrun the march.
   Both stop at config.SHADOW_MAX_REACH_M. `raster_shaded` and
-  `sweep_shaded` are public so the feasibility instrument (Gate 1) can
-  run either on the same points and measure their disagreement.
+  `sweep_shaded` are public so the feasibility instrument can run either
+  on the same points and measure their disagreement.
 
 Everything is done in the pipeline's flat-metre space (naming._to_m --
 the convention every pipeline measurement uses; config.METRIC_CRS is
@@ -62,12 +61,12 @@ OUTPUT
 `edge["building_shade"]` = 288 bytes, month-major (index = (month-1)*24 +
 hour), value = round(255 x shaded / sampled); night slots and edges with
 no valid point are 0. Bytes, not a list of ints: 488k lists of 288 would
-be ~1 GB of pointers; the export decides the on-disk packing (Gate 2).
+be ~1 GB of pointers; the export decides the on-disk packing.
 
-MEASURED (the 2026-09-24 practice build, whole city, 0.5 m / 0.25 m, 5 m
-step): 11,681,343 points, 85 tiles of 4 km, 152 s/slot, 22,479 s -- while
-SWAPPING at 8.6 GB RSS on a 16 GB laptop, hence the per-tile point
-objects, the uint16 tally and the 2 km tiles below.
+A whole-city pass is ~11.7M points and several hours. The per-tile point
+objects, the uint16 tally and the 2 km tiles keep it inside a 16 GB
+laptop's memory; a first cut with citywide point objects and 4 km tiles
+swapped at 8.6 GB.
 """
 
 import logging
@@ -273,11 +272,11 @@ def score_building_shade(edges: list[dict], footprints, sun_table, *, step_m=Non
     (~1.5 GB) are not alive during the pass. The keyword overrides exist
     for the feasibility instrument; the pipeline passes none of them.
 
-    MEMORY (the 2026-09-24 practice build swapped at 8.6 GB): shapely point
-    objects exist for ONE tile at a time, never citywide -- 11.7M of them
-    were the largest single cost; the shaded-count table is uint16; edge
-    owners are int32. Progress is logged per tile with a running estimate,
-    because a whole-city pass is hours and the step is otherwise silent.
+    Memory: shapely point objects exist for one tile at a time, never
+    citywide (11.7M of them is the largest single cost); the shaded-count
+    table is uint16; edge owners are int32. Progress is logged per tile
+    with a running estimate, because a whole-city pass is hours and the
+    step is otherwise silent.
     """
     step_m = config.SHADOW_SAMPLE_STEP_M if step_m is None else step_m
     cell_m = config.SHADOW_CELL_M if cell_m is None else cell_m

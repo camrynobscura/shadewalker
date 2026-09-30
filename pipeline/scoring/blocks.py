@@ -31,13 +31,13 @@ WHY SAMPLED, NOT ONE ANSWER PER EDGE
 ------------------------------------
 `match_line` gives one face per whole edge from a median probe distance,
 and that fails for edges longer than a block: the median exceeds
-BLOCK_FACE_MAX_M and the edge matches NOTHING, so the face keeps its trees
-and loses its pavement. Face 1922610905 ("14 ST") held 13 trees over 221m
-of kerb and was assigned 1.6m of sidewalk, reading 280x the citywide median
-density. 28.3% of the city's sidewalk length is in pieces over 200m.
-Full account in pipeline/graph/blockface.py:match_line_profile.
+BLOCK_FACE_MAX_M and the edge matches nothing, so the face keeps its trees
+and loses its pavement (one 14th Street face held 13 trees over 221m of
+kerb and was assigned 1.6m of sidewalk, 280x the citywide median density).
+28.3% of the city's sidewalk length is in pieces over 200m. Full account
+in pipeline/graph/blockface.py:match_line_profile.
 
-NOTHING IS CUT. No edge is divided, no node is added, the routing graph is
+Nothing is cut. No edge is divided, no node is added, the routing graph is
 untouched -- and splitting would buy nothing anyway, because
 pipeline/graph/pedestrian.py already cuts every way at every junction. An
 edge long enough to span blocks is therefore one that nothing connects to
@@ -46,14 +46,13 @@ routing decision a finer split could enable.
 
 WHAT SCORES ZERO, AND WHY
 -------------------------
-  crossings   A crossing runs ACROSS a roadway, so trees rarely shade it.
-              User decision, 2026-08-24. This is not a special case: a
-              crossing with no trees and a BARE SIDEWALK with no trees are
-              the same thing -- unshaded pavement -- and get identical
-              treatment. Crossings stay fully routable; they just carry no
-              shade. They are also kept OUT of a face's length denominator,
-              or a crossing's metres would dilute the density of pavement
-              it is not part of.
+  crossings   A crossing runs across a roadway, so trees rarely shade it.
+              This is not a special case: a crossing with no trees and a
+              bare sidewalk with no trees are the same thing -- unshaded
+              pavement -- and get identical treatment. Crossings stay
+              fully routable; they just carry no shade. They are also kept
+              out of a face's length denominator, or a crossing's metres
+              would dilute the density of pavement it is not part of.
   park paths  No kerb, no block face. Scored from the land-cover raster
               by pipeline/scoring/canopy.py, which runs after this.
   the rest    Anything with no block face within config.BLOCK_FACE_MAX_M.
@@ -64,9 +63,8 @@ WHAT SCORES ZERO, AND WHY
 The two ways a SIDEWALK edge can end up at zero here are recorded on the
 edge as `face_outcome` ("no_face" / "treeless_face"), because they mean
 different things and only downstream code can act on the difference:
-no-face means Forestry structurally COULD NOT answer, and a treeless face
-inside a park means Forestry was never there to ask (2026-08-27
-measurements in config.SIDEWALK_FALLBACK_PARK_FRACTION's comment).
+no-face means Forestry structurally could not answer, and a treeless face
+inside a park means Forestry was never there to ask.
 canopy.score_sidewalk_fallback consumes the marker and gives exactly those
 edges the raster's answer instead; an ordinary treeless street keeps its
 honest zero. The marker is pipeline-internal -- export.py whitelists its
@@ -83,8 +81,8 @@ logger = logging.getLogger(__name__)
 # OSM `kind` values that receive shade and count toward a block's pavement
 # length. Deliberately a narrow allow-list rather than "everything except
 # crossings": a plaza, a park path or a set of steps has no block face
-# either, and guessing on their behalf is how the centerline model grew
-# rules nobody could later justify.
+# either, and guessing on their behalf breeds rules nobody can later
+# justify.
 SHADED_KINDS = frozenset({"footway/sidewalk"})
 
 
@@ -97,10 +95,9 @@ def score_edges(edges: list[dict], tree_rows: list[dict], index) -> dict:
     absent key and a zero mean different things and only one of them is
     true here.
 
-    Also fills `side` -- the COMPASS side of the parent street this
-    pavement is on ("N"/"S"/"E"/"W", or "" when no plain word is honest),
-    which is what pedestrian.py's placeholder was reserved for. See
-    BlockFaceIndex.compass_side for why it is geometric rather than
+    Also fills `side` -- the compass side of the parent street this
+    pavement is on ("N"/"S"/"E"/"W", or "" when no plain word is honest).
+    See BlockFaceIndex.compass_side for why it is geometric rather than
     CSCL's L/R.
     """
     # --- trees onto faces ---------------------------------------------
@@ -134,7 +131,7 @@ def score_edges(edges: list[dict], tree_rows: list[dict], index) -> dict:
     # known until every edge on it has been counted, and an edge cannot be
     # scored before its own face's density exists.
     #
-    # The profile is METRES PER FACE, not one face per edge, so a face's
+    # The profile is metres per face, not one face per edge, so a face's
     # length is the pavement genuinely beside it -- including the middle of
     # a 500m way whose ends belong to other blocks entirely.
     profile_of: dict[int, dict] = {}
@@ -164,20 +161,19 @@ def score_edges(edges: list[dict], tree_rows: list[dict], index) -> dict:
         profile = profile_of.get(position)
         if profile is None:
             # Recorded on the edge, not just tallied: canopy.py's
-            # score_sidewalk_fallback needs to know WHICH zeros are
+            # score_sidewalk_fallback needs to know which zeros are
             # "Forestry could not answer" rather than "answered zero".
             edge["face_outcome"] = "no_face"
             tally["no_face"] += 1
             continue
 
         # The face this edge has the most pavement on. An edge spanning
-        # blocks still has to report ONE side, and the dominant face is the
+        # blocks still has to report one side, and the dominant face is the
         # only defensible answer -- it is also what the whole edge is named
-        # after downstream. The side is COMPASS ("N"/"S"/"E"/"W", "" when
+        # after downstream. The side is compass ("N"/"S"/"E"/"W", "" when
         # no plain word is honest), computed from this edge's own geometry
-        # against that face's kerb -- NOT the face's CSCL L/R, which flips
-        # arbitrarily between blocks (measured 53.3% at side-street
-        # boundaries, 2026-08-28; see BlockFaceIndex.compass_side).
+        # against that face's kerb -- not the face's CSCL L/R, which flips
+        # at 53% of side-street boundaries (see BlockFaceIndex.compass_side).
         dominant = max(profile.items(), key=lambda item: item[1])[0]
         edge["side"] = index.compass_side(edge["coords"], dominant)
 
@@ -204,13 +200,12 @@ def score_edges(edges: list[dict], tree_rows: list[dict], index) -> dict:
             tally["face_without_trees"] += 1
             continue
 
-        # NOT rounded. Rounding here breaks the property this whole design
-        # exists to provide -- that every edge on a face reports the SAME
+        # Not rounded. Rounding here breaks the property this whole design
+        # exists to provide -- that every edge on a face reports the same
         # density -- because a fixed number of decimal places is a large
-        # relative error on a short edge's small share. A 2.6m edge and a
-        # 51.9m edge on one face disagreed in the 7th significant figure at
-        # 6dp. Rounding is the export's decision, and export.py already
-        # writes these two fields unrounded.
+        # relative error on a short edge's small share. Rounding is the
+        # export's decision, and export.py writes these two fields
+        # unrounded.
         edge["tree_deciduous"] = deciduous
         edge["tree_evergreen"] = evergreen
         # tree_count is the walker-facing "N trees along your route", so it

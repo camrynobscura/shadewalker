@@ -11,24 +11,22 @@ to be useful.
 
 IS THIS AN OVERRIDE?
 --------------------
-No, and the distinction is the governing rule's own. Deriving a LABEL
+No, and the distinction is the governing rule's own. Deriving a label
 adds no way, removes none, and connects nothing; its worst failure is a
 confusing direction, never a wrong route. Same category as tree data.
 The routing graph is untouched by this module.
 
 THE RULE
 --------
-1. A way's OWN name wins. OSM said so; we don't second-guess it, and that
+1. A way's own name wins. OSM said so; we don't second-guess it, and that
    includes its typos -- `Brookyln Bridge Promenade` stays misspelled.
-2. Otherwise, the nearest named street the edge runs ALONGSIDE (within
+2. Otherwise, the nearest named street the edge runs alongside (within
    PARENT_MAX_M and roughly parallel -- PARALLEL_MAX_DIFF_DEG), but only
-   if it is decisively nearer than the nearest DIFFERENTLY-named such
-   street. The parallelism half was added 2026-08-28 after the holdout
-   harness showed the dominant error was corner scraps taking the
-   PERPENDICULAR cross street's name; requiring "alongside" improved
-   right, wrong AND coverage at once (measurements at
-   PARALLEL_MAX_DIFF_DEG below).
-3. Ambiguous or nothing in range emits NO name -- but carries
+   if it is decisively nearer than the nearest differently-named such
+   street. Parallelism matters because the dominant error otherwise is
+   corner scraps taking the perpendicular cross street's name
+   (measurements at PARALLEL_MAX_DIFF_DEG below).
+3. Ambiguous or nothing in range emits no name -- but carries
    `fold_names` (the plausible parents) so direction rendering can fold
    nameless scraps into the street run they belong to on evidence
    instead of a length threshold. A wrong street name is worse than
@@ -36,18 +34,15 @@ THE RULE
 
 MEASURED, NOT ASSUMED
 ---------------------
-`tools/audit/measure_sidewalk_parent_street.py` over 8,000 sidewalks:
-94.0% unambiguous, 2.2% ambiguous, 3.8% with no named street in range.
-Full record in `history/sidewalk-model-decision.md`, including the first
-version of that instrument reporting 16.1% because it used the MINIMUM
-distance from the whole sidewalk line rather than the median sampled
-along it -- a block-length sidewalk touches a different cross street at
+Over 8,000 sidewalks: 94.0% unambiguous, 2.2% ambiguous, 3.8% with no
+named street in range. Distance is the median sampled along the line, not
+the minimum: a block-length sidewalk touches a different cross street at
 each end, so minimum distance calls almost everything ambiguous.
 
-That measurement sampled WAYS. This module names EDGES, which are the
-chains between junctions and so run shorter (median 16m). The metric is
-the same; the rates are re-measured after a real run rather than assumed
-to carry over.
+That measurement sampled ways. This module names edges, which are the
+chains between junctions and so run shorter (median 16m); the rates are
+re-measured after a real run by tools/audit/measure_naming_precision.py
+rather than assumed to carry over.
 """
 
 import logging
@@ -61,11 +56,11 @@ from pipeline import config
 logger = logging.getLogger(__name__)
 
 # How far from a sidewalk to look for its parent street. A NYC sidewalk
-# sits roughly 5-20m from its own centerline; past 30m the nearest street
+# sits roughly 5-20m from its street's middle; past 30m the nearest street
 # is more likely a different one than a far-set parent.
 PARENT_MAX_M = 30.0
 
-# The nearest name must be this much closer than the nearest DIFFERENTLY
+# The nearest name must be this much closer than the nearest differently
 # named street to count as unambiguous. Shared deliberately with
 # tools/audit/test_tree_side_assignment.py: both ask "is the nearest
 # candidate decisively nearer than the runner-up?"
@@ -78,32 +73,28 @@ AMBIGUOUS_RATIO = 0.6
 # since a 2m nub has no measurable direction of its own.)
 MIN_NAMEABLE_LEN_M = 5.0
 
-# A street may only lend its name to a sidewalk that runs ALONGSIDE it:
-# median local bearing difference over the probes at most this. Derived
+# A street may only lend its name to a sidewalk that runs alongside it:
+# median local bearing difference over the probes at most this. Measured
 # 2026-08-28 by tools/audit/measure_naming_precision.py (holdout over the
-# 12,159 own-named edges): adding this filter to the nearest-street rule
-# moved the street-achievable subset, by length walked, from
-# RIGHT 69.8 / none 24.8 / WRONG 5.4 to RIGHT 75.9 / none 20.6 / WRONG 3.5
-# -- better on every axis at once -- and named 27.5% MORE edges citywide
-# (249,931 vs 196,055), because a perpendicular cross street no longer
-# competes at corners (the dominant error class: corner scraps taking the
-# cross street's name). 30 degrees sits far from a cross street's 90 while
-# tolerating curved streets.
+# 12,159 own-named edges): the filter moved the street-achievable subset,
+# by length walked, from right 69.8 / none 24.8 / wrong 5.4 to right 75.9
+# / none 20.6 / wrong 3.5 -- better on every axis at once -- and named
+# 27.5% more edges citywide, because a perpendicular cross street no
+# longer competes at corners. 30 degrees sits far from a cross street's
+# 90 while tolerating curved streets.
 PARALLEL_MAX_DIFF_DEG = 30.0
 
-# How many plausible parent names an UNNAMED edge carries out of this
+# How many plausible parent names an unnamed edge carries out of this
 # module (edge["fold_names"]), nearest first. Direction rendering uses
 # them as folding evidence -- "does this nameless scrap belong to the
-# street run it interrupts?" -- which is what replaced a bare length
-# threshold. Named edges carry none; their name is their evidence.
+# street run it interrupts?" -- instead of a bare length threshold. Named
+# edges carry none; their name is their evidence.
 MAX_FOLD_NAMES = 3
 
-# Degrees -> metres, flat, at NYC's latitude. Deliberately the SAME
-# approximation tools/audit/measure_sidewalk_parent_street.py used, so the
-# shipped derivation matches the 94.0% that was measured -- a "better"
-# projection here would silently invalidate that number. The error across
-# the city's latitude span (40.47-40.92) is ~0.7%, i.e. ~0.2m on the 30m
-# threshold, which cannot move a decision this rule makes.
+# Degrees -> metres, flat, at NYC's latitude. The error across the city's
+# latitude span (40.47-40.92) is ~0.7%, i.e. ~0.2m on the 30m threshold,
+# which cannot move a decision this rule makes. Every pipeline measurement
+# uses this same approximation so their distances stay comparable.
 _K = 111320.0 * math.cos(math.radians(40.7))
 _LAT_M = 110540.0
 
@@ -113,13 +104,11 @@ def _to_m(lon: float, lat: float) -> tuple[float, float]:
 
 
 def _probe_points(line: LineString) -> list:
-    """Points sampled ALONG a line, for median-distance measurement.
+    """Points sampled along a line, for median-distance measurement.
 
     One probe per ~10m, at least 3. The median over these is what
     separates a parent street (alongside for the whole length) from a
-    cross street (close at one end, far everywhere else). Using the
-    minimum distance instead is the error that made the first version of
-    the audit instrument report 16.1% instead of 94.0%.
+    cross street (close at one end, far everywhere else).
     """
     count = max(3, int(line.length // 10))
     return [line.interpolate(line.length * i / (count - 1))
@@ -152,7 +141,7 @@ def _street_index(streets) -> tuple[STRtree, list, list]:
 def _candidate_names(line, probes, probe_bearings, index, geometries,
                      names) -> list:
     """Nearby streets that could plausibly own this edge, as
-    [(name, median_m)] nearest first. Distance is PER STREET NAME: two
+    [(name, median_m)] nearest first. Distance is per street name: two
     ways both called "Court Street" are one candidate, not two.
 
     probe_bearings=None skips the parallelism filter -- used for
@@ -194,10 +183,10 @@ def assign_parent_names(edges: list[dict], streets) -> dict:
     Connector kinds (crossings, traffic islands) are skipped outright:
     the server never renders a name or reads fold_names for them, so
     deriving either is build time spent on output nobody can see. An OSM
-    name of the connector's OWN is kept — the skip avoids work, it does
+    name of the connector's own is kept — the skip avoids work, it does
     not delete data.
 
-    Edges that end up WITHOUT a name get `fold_names` instead (up to
+    Edges that end up without a name get `fold_names` instead (up to
     MAX_FOLD_NAMES plausible parents, nearest first) so direction
     rendering can decide "does this nameless piece belong to the street
     run around it?" from evidence rather than a length threshold.
@@ -218,11 +207,11 @@ def assign_parent_names(edges: list[dict], streets) -> dict:
             continue
 
         if _is_connector_kind(edge["kind"]):
-            # Pure cost before this skip: ~105k crossing/traffic-island
-            # edges went through probes and the street index for names
-            # the server folds away unseen (graph_store._foldable_into
-            # short-circuits on kind; _display_name blanks it; fold_names
-            # is never consulted for connector legs).
+            # ~105k crossing/traffic-island edges would otherwise go
+            # through probes and the street index for names the server
+            # folds away unseen (graph_store._foldable_into short-circuits
+            # on kind; _display_name blanks it; fold_names is never
+            # consulted for connector legs).
             tally["connector"] += 1
             continue
 

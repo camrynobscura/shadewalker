@@ -1,9 +1,8 @@
 """Fetch NYC's real park-property polygons: the Parks Properties dataset
 (Socrata id in config.PARKS_DATASET_ID), one polygon per NYC Parks
-property with a `typecategory` field. Used to build the park canopy mask
-(see PLAN.md's Park-canopy section) -- attributing a park's interior
-canopy to nearby park-edge streets requires knowing where parks actually
-are, not just guessing from street names.
+property with a `typecategory` field. Used to build the park canopy mask:
+deciding whether a treeless sidewalk sits inside a park requires knowing
+where parks actually are, not just guessing from street names.
 
 ~2,059 rows -- small enough for one direct GeoJSON export request, cached
 whole rather than through socrata.py's paginated fetch_all_rows (same
@@ -36,9 +35,8 @@ def fetch_park_properties(refresh: bool = False) -> dict:
         return geojson
 
     url = f"{config.SOCRATA_BASE_URL}/{config.PARKS_DATASET_ID}.geojson?$limit={PAGE_LIMIT}"
-    # socrata.get_with_retry, not a bare requests.get (FIXES item 10):
-    # a single transient 5xx/connection blip here used to kill a whole
-    # pipeline run while every other fetcher retried through it.
+    # socrata.get_with_retry, not a bare requests.get: a single transient
+    # 5xx or connection blip must not kill a whole pipeline run.
     response = socrata.get_with_retry(url, headers=socrata.auth_headers())
     geojson = response.json()
 

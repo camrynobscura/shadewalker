@@ -2,9 +2,8 @@
 
     uv run python -m pipeline.build
 
-No arguments, and deliberately so: there is exactly one thing to build.
-The centerline model's runner took a tile id or a borough name because it
-produced 276 files; this produces one, for all five boroughs, every time.
+No arguments, and deliberately so: there is exactly one thing to build,
+one file for all five boroughs.
 
 WHERE IT WRITES
 ---------------
@@ -13,29 +12,21 @@ otherwise. A practice run must set that variable:
 
     SHADEWALKER_EXPORT_DIR=/tmp/scratch uv run python -m pipeline.build
 
-Without it this overwrites the file a running server is serving from.
-That is not hypothetical -- smoke-test runs of the old runner wrote into
-the production directory more than once. The export itself is atomic
-(pipeline/export.py), so a reader never sees a half-written file, but
-atomic still means the new file replaces the old one.
+Without it this overwrites the file a running server is serving from. The
+export itself is atomic (pipeline/export.py), so a reader never sees a
+half-written file, but atomic still means the new file replaces the old
+one.
 
 SHADE, IN TWO INSTRUMENTS
 -------------------------
 Sidewalks are scored from the Forestry tree data via block faces
 (pipeline/scoring/blocks.py); everything kerb-less -- park paths, plazas,
 steps, alleys -- is scored from the land-cover raster
-(pipeline/scoring/canopy.py, wired 2026-08-26), which fills
-`tree_park_canopy` for the first time. One instrument per pavement kind,
-so the two can never double-count. Crossings score zero shade by design
-(they run ACROSS a roadway) while staying fully routable. A build without
-the 1.7GB raster on disk skips the canopy step cleanly.
-
-The export carries real tree scores, and as of 2026-08-24 the server acts
-on them: the shade saturation point was re-derived for this model (0.02,
-now DENSITY_AT_FULL_COVERAGE = 0.031 since the 2026-08-26 unification) and
-the per-edge length floor was deleted outright, so the fail-closed guards
-are gone and the four Shade_priority presets produce genuinely different
-routes for the first time.
+(pipeline/scoring/canopy.py), which fills `tree_park_canopy`. One
+instrument per pavement kind, so the two can never double-count. Crossings
+score zero shade by design (they run across a roadway) while staying fully
+routable. A build without the 1.7GB raster on disk skips the canopy step
+cleanly.
 """
 
 import logging
@@ -101,12 +92,12 @@ def main() -> int:
     naming.assign_parent_names(edges, street_ways)
 
     # Shade. Fills tree_deciduous / tree_evergreen / tree_count on every
-    # edge, and `side` from the block face -- which is what pedestrian.py's
-    # "C" placeholder was reserved for. Like naming above, this is labels
-    # and grouping: it adds no way, removes none, and connects nothing.
+    # edge, and `side` from the block face. Like naming above, this is
+    # labels and grouping: it adds no way, removes none, and connects
+    # nothing.
     _score_shade(edges)
 
-    # The second shade LAYER: building shadows by month and hour, combined
+    # The second shade layer: building shadows by month and hour, combined
     # with trees by the server. Labels again -- no way added, none removed.
     sun_table = _score_building_shade(edges)
 
@@ -128,11 +119,11 @@ def _score_shade(edges: list[dict]) -> None:
     ~3 min cold) and the live Forestry tree points (~8 min cold, 898,643
     living trees citywide).
 
-    Trees attach to a block face by NEAREST KERB, and sidewalk is sampled
+    Trees attach to a block face by nearest kerb, and sidewalk is sampled
     along its own geometry every config.BLOCK_FACE_SAMPLE_STEP_M so that a
     single OSM way running past many blocks credits each block the pavement
-    actually beside it. Both rules and their measurements live in
-    pipeline/graph/blockface.py; this function only sequences them.
+    actually beside it. Both rules live in pipeline/graph/blockface.py;
+    this function only sequences them.
 
     Mutates `edges` in place, the same way naming.assign_parent_names does.
     """
@@ -153,12 +144,11 @@ def _score_shade(edges: list[dict]) -> None:
     logger.info("[build] park canopy")
     canopy.score_park_paths(edges)
 
-    # And the sidewalks Forestry could NOT answer -- no block face found,
+    # And the sidewalks Forestry could not answer -- no block face found,
     # or a treeless face inside a city park (Central Park's paths beside
     # its drives) -- fall back to the raster too. Ordinary treeless
     # streets keep their honest zero; crossings are untouched. The
-    # populations and their 2026-08-27 measurements are in canopy.py's
-    # module docstring.
+    # populations are in canopy.py's module docstring.
     logger.info("[build] sidewalk fallback")
     canopy.score_sidewalk_fallback(edges)
 
@@ -169,8 +159,8 @@ def _score_building_shade(edges: list[dict]):
     Every edge kind, crossings included -- buildings shade roadways, which
     is why this is not gated on the tree hierarchy's kinds. The Building
     Footprints fetch caches itself (pipeline/fetch/buildings.py); the
-    rules for which rows cast shade are on the config constants. Engine,
-    sample rule and the Gate 1 measurements: pipeline/scoring/shadows.py.
+    rules for which rows cast shade are on the config constants. Engine
+    and sample rule: pipeline/scoring/shadows.py.
     """
     logger.info("[build] building shade")
     table = sun.sun_table()

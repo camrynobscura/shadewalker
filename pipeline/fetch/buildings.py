@@ -7,7 +7,7 @@ Two jobs, kept apart:
     paged on `$order=:id` (the only sort Socrata guarantees stable for a
     dataset with no unique numeric key), `$select`ed down to the eight
     columns the shade step reads (the full row is ~3x wider), gzipped on
-    disk under data/raw/socrata/, written atomically. The cache is the RAW
+    disk under data/raw/socrata/, written atomically. The cache is the raw
     download, so a rule change below never needs a re-fetch.
   - `usable()`: the rows that cast shade -- the height cap, the excluded
     statuses and codes, and non-positive heights applied, with one tally
@@ -16,8 +16,7 @@ Two jobs, kept apart:
     parses them with `float()` and `shapely.geometry.shape`, the pattern
     blockface.py uses for the kerb lines.
 
-The 2026-09-24 counts behind every rule are on the constants in
-pipeline/config.py.
+The counts behind every rule are on the constants in pipeline/config.py.
 """
 
 import gzip
@@ -85,7 +84,7 @@ def load(refresh: bool = False) -> list[dict]:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = fetch_all()
-    # Atomic: temp name in the SAME directory, then os.replace(), so a
+    # Atomic: temp name in the same directory, then os.replace(), so a
     # reader never sees a half-written cache (planimetrics.py's reasoning).
     tmp = path.with_suffix(path.suffix + ".tmp")
     try:
@@ -114,7 +113,7 @@ def height_ft(row: dict) -> float | None:
 def usable(rows: list[dict]) -> list[dict]:
     """The rows that cast shade, with the drop tally logged.
 
-    Each row is counted under the FIRST rule it fails, in this order:
+    Each row is counted under the first rule it fails, in this order:
     missing or non-positive height, over the cap, excluded status,
     excluded feature code.
     """

@@ -1,7 +1,7 @@
 """Where the sun is, for the building-shade layer.
 
 One table for the whole city: 12 months x 24 hours of (azimuth,
-elevation), each computed at the ANCHOR for that slot -- the 15th of the
+elevation), each computed at the anchor for that slot -- the 15th of the
 month, on the hour, New York clock time, in config.SUN_ANCHOR_YEAR. Night
 slots (sun at or below the horizon) are None. The table ships in the
 export's meta so the file is self-describing; the server blends between
@@ -15,7 +15,7 @@ from the azimuth and is `height / tan(elevation)` long.
 
 Why one observer point serves the whole city, with the measured spread,
 is on config.SUN_OBSERVER_LAT. The library is astral (pure Python, NOAA's
-algorithm); its one trap is that a NAIVE datetime is silently treated as
+algorithm); its one trap is that a naive datetime is silently treated as
 UTC, so sun_position refuses anything without a tzinfo.
 """
 
@@ -53,7 +53,7 @@ def anchor_datetime(month: int, hour: int) -> datetime:
 def sun_position(when: datetime) -> tuple[float, float]:
     """(azimuth, elevation) in degrees at the city observer point.
 
-    `when` MUST be timezone-aware: astral reads a naive datetime as UTC,
+    `when` must be timezone-aware: astral reads a naive datetime as UTC,
     which would shift every slot by four or five hours without any error.
     """
     if when.tzinfo is None or when.utcoffset() is None:

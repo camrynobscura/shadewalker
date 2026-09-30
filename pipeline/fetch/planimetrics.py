@@ -22,12 +22,10 @@ width (measured: kerb gap slope +0.0036 m/ft vs the centerline's +0.0618).
                              l_blockfaceid / r_blockfaceid,
                              full_street_name, streetwidth, physicalid.
 
-CSCL IS ATTRIBUTES ONLY. Use it for which side and what name. Do NOT use
-its geometry as a ruler -- a centerline segment can be far shorter than the
-run of kerb conflated to it, and measuring block length that way produced a
-false "13% of the city is mis-assigned" result on 2026-08-23. The
-centerline is the wrong instrument for relating a sidewalk to a block, and
-that is as true when it is a ruler as when it was a threshold.
+CSCL IS ATTRIBUTES ONLY. Use it for which side and what name. Do not use
+its geometry as a ruler: a centerline segment can be far shorter than the
+run of kerb conflated to it, so measuring block length that way reports
+mis-assignment that isn't there.
 
 WHY NOT socrata.fetch_all_rows()
 --------------------------------
@@ -45,7 +43,7 @@ TRAPS
   - Page with `$order=:id`. Pavement Edge has no `objectid` column, so
     ordering on that returns 400. `:id` is Socrata's own stable row key and
     exists on every dataset.
-  - Roadbed (xgwd-7vhd) and Sidewalk (vfx9-tbb6) polygons carry NO street
+  - Roadbed (xgwd-7vhd) and Sidewalk (vfx9-tbb6) polygons carry no street
     identifier. `blockf_id` on Pavement Edge is the only path to a street,
     which is why the linear kerb data wins over the polygons.
 
@@ -117,7 +115,7 @@ def load(label: str, refresh: bool = False) -> list[dict]:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = fetch_all(DATASETS[label], label)
-    # Atomic: temp name in the SAME directory, then os.replace(). A reader
+    # Atomic: temp name in the same directory, then os.replace(). A reader
     # must never see a half-written cache, and same-directory matters
     # because replace() is only atomic within one filesystem.
     tmp = path.with_suffix(path.suffix + ".tmp")
