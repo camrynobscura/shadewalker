@@ -1,20 +1,19 @@
 """Order-of-magnitude latency canary for /route's core work.
 
-This is a TRIPWIRE, not a benchmark (decided 2026-08-30, `latency-guard`).
-The threshold is deliberately ~5x the measured typical cost so that noise
--- a busy laptop, a cold cache -- can never fail it: silence must mean
-"no disaster", so that red means fire. What it exists to catch is the
-class this repo has actually hit: a one-line change turning seconds into
-minutes while every correctness test stays green (`np.load` laziness once
-made a 15s audit take 29 minutes; the same class landing in routing would
-otherwise surface only at a deploy).
+This is a tripwire, not a benchmark. The threshold is deliberately ~5x
+the measured typical cost so that noise -- a busy laptop, a cold cache --
+can never fail it: silence must mean "no disaster", so that red means
+fire. What it exists to catch is a one-line change turning seconds into
+minutes while every correctness test stays green (`np.load` on an .npz is
+lazy, and re-inflating a column per subscript turns a 15s audit into 29
+minutes; the same class landing in routing would otherwise surface only
+at a deploy).
 
 Division of labor, so nobody grows this test into what it isn't:
-- 20-30% creep: NOT this test's job -- re-run the measurement recipe in
-  history/quick-fixes.md §4 when it matters (pre-deploy, perf work).
-- the LIVE site getting slow: UptimeRobot monitor on a fixed short
-  /route URL with response-time alerting (PLAN.md `hosting` to-do) --
-  no local test can see production.
+- 20-30% creep: not this test's job -- re-measure with
+  tools/audit/route_timing.py when it matters (pre-deploy, perf work).
+- the live site getting slow: an uptime monitor with response-time
+  alerting -- no local test can see production.
 
 Subjects are the four anchor-band pairs (known routable, spread over
 real chokepoints); each is timed as the production request shape -- one

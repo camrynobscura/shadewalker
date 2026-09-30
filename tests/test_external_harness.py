@@ -2,7 +2,7 @@
 (external_engines.primary_comparison / arbitrate).
 
 The whole point of the BRouter fallback is to behave correctly when OSRM or
-Valhalla is DOWN -- which can't be exercised with live engines. So the two
+Valhalla is down -- which can't be exercised with live engines. So the two
 functions take their engine callables as arguments, and these tests drive
 them with fakes (no network, default tier). pause_fn is a no-op here so the
 suite never sleeps.
@@ -84,7 +84,7 @@ def test_primary_falls_back_to_brouter_when_osrm_is_down():
 
 def test_primary_does_not_fall_back_on_a_snap_move():
     # A per-pair snap is a real skip, not an outage -- BRouter can't be
-    # snap-guarded, so it must NOT paper over it.
+    # snap-guarded, so it must not paper over it.
     length, engine, err = primary_comparison(
         A, B, 1000,
         osrm_fn=_fixed(None, "osrm snap moved 91m"),
@@ -144,7 +144,7 @@ def test_arbiter_disagreement_leaves_it_a_lead():
     assert agrees is False  # 1.4x is well outside ARBITER_AGREE_RATIO
 
 
-# ── valhalla retry (5a) ──────────────────────────────────────────────────────
+# ── valhalla retry ───────────────────────────────────────────────────────────
 
 _VALHALLA_OK = {"trip": {"summary": {"length": 1.5}}}  # 1.5 km -> 1500 m
 
@@ -181,7 +181,7 @@ def test_valhalla_does_not_retry_a_clean_no_route():
     assert post.calls["n"] == 1  # no retry
 
 
-# ── ferry auto-explain (5c) ──────────────────────────────────────────────────
+# ── ferry auto-explain ───────────────────────────────────────────────────────
 
 def _osrm_steps_resp(*modes):
     steps = [{"mode": m} for m in modes]
@@ -207,7 +207,7 @@ def test_osrm_route_uses_ferry_reports_a_bad_code():
     assert "NoRoute" in err
 
 
-# ── codified oracle rules (5d) ───────────────────────────────────────────────
+# ── oracle rules ─────────────────────────────────────────────────────────────
 
 def test_gap_probe_snap_ok_rejects_a_snap_that_reaches_half_the_gap():
     # 12m gap: a 5m snap is fine, a 6m snap (>= 0.5x) is ABSENT_OR_PRUNED.

@@ -1,4 +1,4 @@
-"""Turning shade OFF must ignore tree data completely.
+"""Turning shade off must ignore tree data completely.
 
 THE INVARIANT
 -------------
@@ -14,22 +14,18 @@ That is arithmetic rather than a hope -- which is precisely why it deserves
 a test. The property is easy to break by accident: any future term that
 touches cost outside the `tree_weight *` product (a floor, a bonus, a
 penalty, a saturation applied in the wrong place) would silently make plain
-walking directions depend on tree data. DENSITY_LENGTH_FLOOR_M was exactly
-such a term until it was deleted on 2026-08-24; it divided by
-max(length, floor) rather than length, and a floor applied to the COST
-instead of the density would have broken this.
+walking directions depend on tree data.
 
 WHY NOT COMPARE AGAINST AN EXTERNAL ENGINE
 ------------------------------------------
-That was the original plan for this step and it answers a different
-question. OSRM and Valhalla tell us whether our routing is *reasonable*, not
-whether tree data perturbed it -- and their comparison carries real noise
-from ferries, coverage gaps and snapping. This is a closed question with an
-exact answer, so it gets an exact test: same graph, same request, tree data
-zeroed, byte-identical result.
+That answers a different question. OSRM and Valhalla tell us whether our
+routing is *reasonable*, not whether tree data perturbed it -- and their
+comparison carries real noise from ferries, coverage gaps and snapping.
+This is a closed question with an exact answer, so it gets an exact test:
+same graph, same request, tree data zeroed, byte-identical result.
 
-The external harness still exists and still earns its keep
-(tests/test_external_validation.py, opt-in); it just cannot pin this.
+The external harness (tests/test_external_validation.py, opt-in) earns
+its keep elsewhere; it just cannot pin this.
 """
 
 import gzip
@@ -40,8 +36,8 @@ import pytest
 from pipeline import config
 from server.graph_store import GraphStore
 
-# A diamond with two ways from n1 to n3: a SHORT bare pair of edges, and a
-# LONGER pair carrying heavy tree cover. Shade-off must take the short one;
+# A diamond with two ways from n1 to n3: a short bare pair of edges, and a
+# longer pair carrying heavy tree cover. Shade-off must take the short one;
 # shade-on must take the leafy one. Without that second fact the first would
 # pass on a graph that offers no choice at all, which would make this test
 # look green while proving nothing.
@@ -80,7 +76,7 @@ def _edge_record(u, v, name, length_m, deciduous, evergreen, count):
 
 @pytest.fixture()
 def store(tmp_path, monkeypatch) -> GraphStore:
-    """A fresh store per test -- these tests MUTATE the tree arrays, so a
+    """A fresh store per test -- these tests mutate the tree arrays, so a
     shared instance would leak zeroed data into whichever test ran next."""
     monkeypatch.setattr(config, "EXPORT_DIR", tmp_path)
     with gzip.open(tmp_path / "tile.json.gz", "wt") as fh:
@@ -125,7 +121,7 @@ def test_the_fixture_actually_offers_a_shadier_alternative(store):
 # --- the invariant ----------------------------------------------------
 
 def test_shade_off_route_is_identical_with_and_without_tree_data(store):
-    """THE POINT OF THIS FILE. Same graph, same request, trees deleted."""
+    """The point of this file. Same graph, same request, trees deleted."""
     before = _route(store, 0.0)
     _strip_trees(store)
     after = _route(store, 0.0)
@@ -139,7 +135,7 @@ def test_shade_off_route_is_identical_with_and_without_tree_data(store):
 
 def test_shade_off_costs_are_exactly_the_edge_lengths(store):
     """The mechanism behind the invariant, asserted directly: at weight 0
-    the cost array IS the length array, so no tree value can enter it."""
+    the cost array is the length array, so no tree value can enter it."""
     import numpy as np
 
     costs = store.edge_costs(tree_weight=0.0, month=7)

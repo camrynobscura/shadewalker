@@ -2,12 +2,9 @@
 get_with_retry()'s transient-failure handling.
 
 fetch_all_rows() itself (pagination, caching, the real live request) stays
-out of pytest's scope on purpose (see PLAN.md) -- no network calls here.
-get_with_retry() earned (public since FIXES item 10:
-parks.py and boundaries.py now share it) mock-based coverage the same way streets.py's own
-retry logic did during Brooklyn: a real transient failure (a 503 from
-Socrata, mid-Queens-fetch, after 144/154 tiles had already fetched clean)
-found this code with no retry logic at all.
+out of pytest's scope on purpose -- no network calls here. get_with_retry()
+is public (parks.py and boundaries.py share it) and gets mock-based
+coverage: a single transient 503 from Socrata must not kill a run.
 """
 
 import requests
@@ -44,9 +41,8 @@ def test_get_with_retry_succeeds_without_retrying_on_a_clean_response(monkeypatc
 
 
 def test_get_with_retry_recovers_from_a_transient_503(monkeypatch):
-    # The real case: Socrata's own hiccup mid-Queens-fetch -- the second
-    # attempt succeeding is what should let a borough run survive a
-    # one-off blip instead of dying outright.
+    # The second attempt succeeding is what lets a run survive a one-off
+    # blip instead of dying outright.
     responses = iter([_FakeResponse(503), _FakeResponse(200)])
     monkeypatch.setattr(socrata.requests, "get", lambda *args, **kwargs: next(responses))
     monkeypatch.setattr(socrata.time, "sleep", lambda seconds: None)

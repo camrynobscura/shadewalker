@@ -1,15 +1,14 @@
 """Tests for server/graph_store.py's build_steps -- raw route legs into
 turn-by-turn steps.
 
-The failure modes pinned here were all measured on real routes before the
-design existed (2026-08-23/27): crossings shredding a 3km walk into 72
-lines; a geometric turn filter collapsing the Brooklyn Bridge walk to ONE
-step; corner scraps injecting "turn left onto Court Street" mid-Court; and
-the folding rule being a bare length threshold that a 25m scrap defeated
-on the very first user route it met. Folding is evidence-based now --
+The failure modes pinned here are the ones real routes produce without
+these rules: crossings shredding a 3km walk into 72 lines; a geometric
+turn filter collapsing the Brooklyn Bridge walk to one step; corner
+scraps injecting "turn left onto Court Street" mid-Court; a bare length
+threshold that a 25m scrap defeats. Folding is evidence-based --
 crossings fold by OSM's own label, unnamed scraps fold only where
 naming.py's fold_names claims them, side switches need a physical crossing
--- and every rule has a test that fails if a threshold sneaks back in.
+-- and every rule has a test that fails if a threshold sneaks in.
 
 Geometry: legs are built due east/north at real NYC latitude so bearings
 are exact. Lengths are real metres via the same flat scale naming.py uses.
@@ -56,7 +55,7 @@ def chain(*specs):
 
 
 def test_a_crossing_between_two_runs_of_one_street_folds_away():
-    """THE case: [Court] [8m crossing] [Court] is one Court Street step.
+    """The case: [Court] [8m crossing] [Court] is one Court Street step.
     By OSM's own crossing label -- no length involved, so a 30m avenue
     crossing folds identically."""
     legs = chain(("Court Street", "east", 60.0, {}),
@@ -99,7 +98,7 @@ def test_turn_words_match_the_geometry():
 
 
 def test_an_unnamed_scrap_folds_only_where_fold_names_claims_it():
-    """The rule that replaced the length threshold. Same 25m scrap, same
+    """The rule instead of a length threshold. Same 25m scrap, same
     geometry: with Court among its plausible parents it vanishes into
     Court; without, it stands as an honest unnamed path -- whatever its
     length."""
@@ -118,7 +117,7 @@ def test_an_unnamed_scrap_folds_only_where_fold_names_claims_it():
 
 def test_a_long_claimed_connector_still_folds_and_a_short_unclaimed_one_never_does():
     """No length threshold anywhere: 69m folds when claimed, 3m stands
-    when nothing claims it (a nameless nub between two DIFFERENT streets
+    when nothing claims it (a nameless nub between two different streets
     with no candidates)."""
     long_claimed = chain(("Court Street", "east", 60.0, {}),
                          ("", "east", 69.0, {"fold_names": ("Court Street",)}),
@@ -134,9 +133,9 @@ def test_a_long_claimed_connector_still_folds_and_a_short_unclaimed_one_never_do
 
 
 def test_distinct_named_streets_never_collapse():
-    """The Brooklyn Bridge regression: a chain of genuinely different
-    named ways must keep every boundary (the old geometric filter
-    collapsed a 3.8km walk to one step)."""
+    """The Brooklyn Bridge case: a chain of genuinely different named
+    ways must keep every boundary (a geometric filter tight enough to
+    drop kerb jogs collapses this 3.8km walk to one step)."""
     legs = chain(("City Hall Park Greenway", "east", 100.0, {}),
                  ("Centre Street", "east", 16.0, {}),
                  ("Brooklyn Bridge Promenade", "east", 1800.0, {}))
@@ -181,7 +180,7 @@ def test_a_crossing_over_a_side_street_does_not_read_as_a_side_switch():
 
 def test_a_crossings_own_name_never_forms_a_run():
     """Under parallel naming a crossing over Court gets called after the
-    SIDE street it is parallel to -- a labeling artifact. Its kind says
+    side street it is parallel to -- a labeling artifact. Its kind says
     what it is, and its name must not break the run it sits in."""
     legs = chain(("Court Street", "east", 60.0, {"side": "N"}),
                  ("Sackett Street", "south", 9.0,
@@ -220,9 +219,9 @@ def test_no_legs_no_steps():
 
 
 def test_a_parallel_corner_crossing_cannot_arm_a_side_switch():
-    """Measured on the 2026-08-28 export: 6.78% of block boundaries shift
-    the compass word (bends, near-diagonal tilts), and every corner has a
-    crossing. Only a crossing ACROSS the path -- your own street's -- may
+    """6.78% of block boundaries shift the compass word (bends,
+    near-diagonal tilts; measured 2026-08-28), and every corner has a
+    crossing. Only a crossing across the path -- your own street's -- may
     arm the switch, or those boundaries each fire a phantom step."""
     legs = chain(("Court Street", "east", 60.0, {"side": "N"}),
                  ("", "east", 8.0, {"kind": "footway/crossing"}),

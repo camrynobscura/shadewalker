@@ -3,8 +3,8 @@ build's file is trusted.
 
 The export's atomicity guarantees a whole file, not the right one; the
 readback re-opens what was written and compares it with what was built.
-Since PLAN `building-shadows` it also insists the building-shade table
-rode along: a build whose shade step silently produced nothing must fail
+It also insists the building-shade table rode along: a build whose shade
+step silently produced nothing must fail
 here, not as a shadeless month on the live site.
 """
 

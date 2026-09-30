@@ -1,9 +1,8 @@
 """pipeline/scoring/canopy.py against a synthetic raster.
 
 The raster is built in the real CANOPY_RASTER_CRS (EPSG:2263) around a
-real Manhattan coordinate, mirroring test_pipeline_canopy.py's synthetic-
-raster approach from the centerline era: no network, no 1.7GB file, and
-the geometry still exercises the real 4326 -> 2263 reprojection.
+real Manhattan coordinate: no network, no 1.7GB file, and the geometry
+still exercises the real 4326 -> 2263 reprojection.
 
 Layout, in raster columns (2ft pixels, 400x400):
     left half     class 1 -- tree canopy
@@ -104,12 +103,10 @@ def test_half_covered_path_scores_half(synthetic_raster):
 
 
 def test_score_park_paths_never_touches_sidewalks_or_crossings(synthetic_raster):
-    """Deliberately REWRITTEN 2026-08-27, not deleted: the old name
-    promised sidewalks were never raster-scored AT ALL, and that premise
-    changed -- score_sidewalk_fallback now covers the sidewalks Forestry
-    could not answer, under its own tests below. What still holds, and is
-    pinned here, is that score_park_paths itself never crosses the kind
-    line, and that crossings get raster credit from NEITHER function."""
+    """score_park_paths itself never crosses the kind line --
+    score_sidewalk_fallback covers the sidewalks Forestry could not
+    answer, under its own tests below -- and crossings get raster credit
+    from neither function."""
     sidewalk = edge_at("footway/sidewalk", -200.0, synthetic_raster)
     sidewalk["tree_deciduous"] = 7.7      # pretend blocks.py scored it
     crossing = edge_at("footway/crossing", -200.0, synthetic_raster)
@@ -121,7 +118,7 @@ def test_score_park_paths_never_touches_sidewalks_or_crossings(synthetic_raster)
     assert "tree_park_canopy" not in crossing
 
 
-# --- the sidewalk fallback (2026-08-27) -------------------------------
+# --- the sidewalk fallback --------------------------------------------
 #
 # blocks.score_edges marks the sidewalk edges Forestry could not answer
 # (`face_outcome`), and score_sidewalk_fallback gives exactly those the
@@ -159,8 +156,8 @@ def test_in_park_treeless_sidewalk_falls_back(synthetic_raster):
 
 def test_street_treeless_sidewalk_keeps_its_honest_zero(synthetic_raster):
     """The load-bearing negative: a bare street's zero is Forestry's
-    ANSWER, and the leafy exceptions are private-garden canopy the user
-    declined to credit (2026-08-26). Outside a park, treeless stays 0."""
+    answer, and the leafy exceptions are private-garden canopy, which is
+    not credited. Outside a park, treeless stays 0."""
     edge = edge_at("footway/sidewalk", -200.0, synthetic_raster)
     edge["face_outcome"] = "treeless_face"
     far_away = box(BASE_LON + 0.5, BASE_LAT + 0.5,
@@ -175,7 +172,7 @@ def test_street_treeless_sidewalk_keeps_its_honest_zero(synthetic_raster):
 def test_a_fence_straddling_edge_is_majority_ruled_to_the_street(synthetic_raster):
     """~30% of the edge's probes inside the park is below the 0.5
     majority (config.SIDEWALK_FALLBACK_PARK_FRACTION): mostly-street
-    pavement keeps Forestry's zero. Probes sample the WHOLE line, so
+    pavement keeps Forestry's zero. Probes sample the whole line, so
     this is decided by length share, not by any single point."""
     edge = edge_at("footway/sidewalk", -200.0, synthetic_raster)
     edge["face_outcome"] = "treeless_face"

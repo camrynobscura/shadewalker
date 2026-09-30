@@ -1,7 +1,7 @@
 """Tests for pipeline/graph/pedestrian.py -- OSM's ways -> our graph.
 
-These do NOT test whether OSM's data is right; that is OSM's business and
-the governing rule says we follow it. They test the TRANSFORMATION, which
+These do not test whether OSM's data is right; that is OSM's business and
+the governing rule says we follow it. They test the transformation, which
 is entirely our own code: which ways count as walkable, where a way gets
 cut into edges, how long each edge is, and what survives the NYC clip.
 
@@ -111,18 +111,17 @@ def test_a_node_a_single_way_visits_twice_is_a_junction():
     this rule the chain would run through that point twice and the edge
     would be a self-intersecting line.
 
-    The revisited node is deliberately in the MIDDLE of the way, not its
-    first-and-last node. A closed loop like [10, 20, 30, 40, 10] does NOT
+    The revisited node is deliberately in the middle of the way, not its
+    first-and-last node. A closed loop like [10, 20, 30, 40, 10] does not
     test this rule -- node 10 is also the way's endpoint, so the endpoint
-    rule makes it a junction anyway and the test passes with the revisit
-    rule deleted. That was this test's original form, and a mutation run
-    (2026-08-23) caught it: deleting the rule left the whole suite green.
+    rule makes it a junction anyway and the test would pass with the
+    revisit rule deleted.
     """
     assert 20 in find_junctions([_way(1, [10, 20, 30, 20, 40])])
 
 
 def test_one_way_visiting_a_node_twice_is_not_two_ways_using_it():
-    """The use count is taken over each way's DISTINCT nodes.
+    """The use count is taken over each way's distinct nodes.
 
     Counting raw occurrences instead would make any node a way passes
     twice look like a node shared between two ways. It happens to reach
@@ -145,9 +144,9 @@ def test_a_way_with_no_interior_junction_stays_one_edge():
 
 
 def test_consecutive_chains_share_their_junction_node():
-    """THE load-bearing test.
+    """The load-bearing test.
 
-    Each piece must END on the point the next piece STARTS on. If the
+    Each piece must end on the point the next piece starts on. If the
     split handed out disjoint pieces instead, the graph would come apart
     at every junction in the city -- while still reporting an entirely
     plausible node and edge count.
@@ -210,7 +209,7 @@ def test_batched_lengths_match_measuring_each_chain_alone():
 
 def test_a_known_distance_comes_out_right():
     """One degree of latitude is ~111 km everywhere. A length computed in
-    DEGREES instead of metres -- this project's #1 bug class -- would come
+    degrees instead of metres -- this project's #1 bug class -- would come
     out around 0.01 rather than 111,000."""
     chains = [([1, 2], [-74.0, -74.0], [40.0, 41.0])]
     assert _chain_lengths_m(chains)[0] == pytest.approx(111_000, rel=0.01)
@@ -259,7 +258,7 @@ def test_a_way_entirely_outside_is_dropped():
 
 
 def test_a_way_straddling_the_boundary_is_kept():
-    """Bridges. Keeping the way WHOLE is the reason the test is
+    """Bridges. Keeping the way whole is the reason the test is
     'does any point fall inside' rather than 'do all points'."""
     assert _touches([-73.95, -74.20], [40.75, 40.75])
 

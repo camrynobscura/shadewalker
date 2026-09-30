@@ -1,11 +1,11 @@
 """Tests for pipeline/graph/blockface.py -- which block face is this on?
 
-Focused on `match_line_profile`, the rule scoring depends on. It replaced
-`match_line` for scoring on 2026-08-24 because one answer per whole edge
-cannot describe an edge that runs past several blocks -- and OSM draws a lot
-of those. 28.3% of the city's sidewalk length is in pieces over 200m, and
-the median-distance rule returned None for them, so the blocks they pass
-kept their trees and lost their pavement.
+Focused on `match_line_profile`, the rule scoring depends on. One answer
+per whole edge (`match_line`) cannot describe an edge that runs past
+several blocks -- and OSM draws a lot of those. 28.3% of the city's
+sidewalk length is in pieces over 200m, and the median-distance rule
+returns None for them, so the blocks they pass would keep their trees and
+lose their pavement.
 
 Geometry here is synthetic but built at real NYC scale, in metres converted
 through naming.py's own flat approximation -- the same one the index uses,
@@ -77,8 +77,8 @@ def test_a_degenerate_line_matches_nothing():
 # --- the long-edge case, which is why this function exists -------------
 
 def test_a_line_spanning_two_faces_is_split_between_them():
-    """THE BUG THIS FIXES. match_line returns None for this line; the
-    profile gives each block the pavement actually beside it."""
+    """The case this exists for. match_line returns None for this line;
+    the profile gives each block the pavement actually beside it."""
     index = index_of([kerb("F1", 0, 100), kerb("F2", 100, 200)],
                      [cscl("F1"), cscl("F2", segment="901")])
 
@@ -90,14 +90,15 @@ def test_a_line_spanning_two_faces_is_split_between_them():
 
 
 def test_the_old_median_rule_really_does_fail_on_that_same_line():
-    """Pins the reason for the change rather than asserting it in prose.
-    A 500m way beside a 100m block sits >5m from that kerb for most of its
-    length, so the median exceeds BLOCK_FACE_MAX_M and nothing matches."""
+    """Pins the reason the profile exists rather than asserting it in
+    prose. A 500m way beside a 100m block sits >5m from that kerb for most
+    of its length, so the median exceeds BLOCK_FACE_MAX_M and nothing
+    matches."""
     index = index_of([kerb("F1", 0, 100)], [cscl("F1")])
     long_line = sidewalk(0, 500)
 
-    assert index.match_line(long_line) is None          # the old rule
-    assert index.match_line_profile(long_line)          # the new one works
+    assert index.match_line(long_line) is None          # one answer per edge
+    assert index.match_line_profile(long_line)          # the profile works
 
 
 def test_an_unevenly_spanning_line_is_credited_in_proportion():
@@ -129,8 +130,8 @@ def test_a_line_only_partly_beside_a_kerb_credits_only_that_part():
 # --- what is excluded from the index -----------------------------------
 
 def test_alleys_are_not_block_faces():
-    """feat_code 2270. Alleys have no sidewalk, and leaving them in made
-    ALLEY top the list of streets with no sidewalk -- never a real finding."""
+    """feat_code 2270. Alleys have no sidewalk beside them, so they cannot
+    be a sidewalk's block face."""
     index = index_of([kerb("F1", 0, 100, feat_code="2270")], [cscl("F1")])
     assert index.match_line_profile(sidewalk(0, 100)) == {}
 
@@ -185,16 +186,16 @@ def test_an_edge_shorter_than_one_step_is_still_sampled_once():
     assert profile["F1"] == pytest.approx(1.2, rel=0.05)
 
 
-# --- the two caps, pinned apart (2026-08-27) ---------------------------
+# --- the two caps, pinned apart ----------------------------------------
 
 def test_the_tree_cap_is_wider_than_the_line_cap():
     """A tree 6.5m from the kerb attaches under TREE_ATTACH_MAX_M (8m)
-    and NOT under the default line cap (BLOCK_FACE_MAX_M, 5m); 9m out
-    attaches under neither. The 5->8m widening lives entirely in which
-    cap a caller passes, so a refactor that collapses the two constants
-    -- or stops passing the tree cap -- must fail here, not in a
-    citywide number months later. Evidence for the split: the raster
-    residual tests of 2026-08-27, see TREE_ATTACH_MAX_M's comment."""
+    and not under the default line cap (BLOCK_FACE_MAX_M, 5m); 9m out
+    attaches under neither. The difference lives entirely in which cap a
+    caller passes, so a refactor that collapses the two constants -- or
+    stops passing the tree cap -- must fail here, not in a citywide
+    number months later. Evidence for the split: TREE_ATTACH_MAX_M's
+    comment."""
     index = index_of([kerb("F1", 0, 100)], [cscl("F1")])
 
     lon, lat = at(50.0, 6.5)

@@ -1,10 +1,10 @@
 """Tests for building shade on the server: the loader, the minute/day
 blend, the union with trees, the layers switch, and /route's time
-parameters (PLAN `building-shadows`, PR 2).
+parameters (#109).
 
 A synthetic export with three parallel ways between the same two nodes
 -- a "north" way, a "middle" way and a "south" way, each two edges long
--- and NO trees, so every shade number here is building shade alone.
+-- and no trees, so every shade number here is building shade alone.
 Rows are hand-written bytes, so each expected value is arithmetic on the
 numbers in this file, not a re-run of the engine:
 
@@ -14,7 +14,7 @@ numbers in this file, not a re-run of the engine:
   plus the blend fixtures on the north way's first edge (see _ROWS).
 
 What is pinned, and why:
-  - minute 0 / day 15 reproduce a row EXACTLY; minute 30 is the plain
+  - minute 0 / day 15 reproduce a row exactly; minute 30 is the plain
     average of two hours; day 30 of a 31-day month leans on the next
     month by 15/31; values move monotonically between anchors; 23:59
     blends into hour 0; Dec 31 blends into January. These are the
@@ -28,23 +28,23 @@ What is pinned, and why:
     all-zero; `layers` selects.
   - /route: NYC-time defaults, "month given -> day 15", validation of day
     against the month, hour, minute and layers, and the echo.
-  - night (PLAN `night-shade`): a dark slot counts as FULL shade, so dusk
-    climbs to 1.0 instead of falling to the stored 0; is_night needs
-    every blended slot dark; /route at night hands every weight the one
-    fastest route; no sun table, no night; the pinned test clock. In
-    every layer (PLAN `time-and-layers`): "Tree shade" fades into the
-    dark at dusk and is the fastest route at night too.
-  - trees by the day (PLAN `tree-seasonal-blend`): CANOPY_BY_MONTH is
-    each month's value on the 15th, blended between 15ths by the same
-    day rule as the rows, so tree shade no longer jumps on the 1st;
-    December blends into January; the day reaches route()'s shade. On a
-    synthetic curve, so the real numbers stay a data choice in config.
-  - arrive by (PLAN `time-and-layers`): the time given is the arrival;
-    the whole batch is scored for the fastest route's leave time, its
-    minutes rounded the way the frontend rounds them, back across
-    midnight, a month's end and New Year's; an arrival needs its time.
+  - night (#112): a dark slot counts as full shade, so dusk climbs to
+    1.0 instead of falling to the stored 0; is_night needs every blended
+    slot dark; /route at night hands every weight the one fastest route;
+    no sun table, no night; the pinned test clock. In every layer
+    (#121): "Tree shade" fades into the dark at dusk and is the fastest
+    route at night too.
+  - trees by the day (#113): CANOPY_BY_MONTH is each month's value on
+    the 15th, blended between 15ths by the same day rule as the rows, so
+    tree shade never jumps on the 1st; December blends into January; the
+    day reaches route()'s shade. On a synthetic curve, so the real
+    numbers stay a data choice in config.
+  - arrive by (#119): the time given is the arrival; the whole batch is
+    scored for the fastest route's leave time, its minutes rounded the
+    way the frontend rounds them, back across midnight, a month's end
+    and New Year's; an arrival needs its time.
 
-The synthetic sun table is daylight in EVERY slot unless a test darkens
+The synthetic sun table is daylight in every slot unless a test darkens
 some (`dark=`), so the blend tests above read the stored rows untouched.
 """
 
@@ -259,7 +259,7 @@ def test_adding_building_shade_never_lowers_any_edge(tmp_path, monkeypatch):
                 assert np.all(both >= only_buildings - 1e-6)
 
 
-# ── trees by the day (PLAN `tree-seasonal-blend`) ────────────────────────────
+# ── trees by the day (#113) ──────────────────────────────────────────────────
 
 # A synthetic curve, so these pin the blend, not config's real numbers.
 # April -> May is the big step on purpose.
@@ -287,8 +287,8 @@ def test_trees_between_two_15ths_are_a_straight_line_mix(tmp_path, monkeypatch):
 
 
 def test_trees_no_longer_jump_on_the_1st(tmp_path, monkeypatch):
-    """The step's point. A per-month lookup moved this edge 0.3 overnight
-    on May 1 (0.5 x (1.0 - 0.4)); blended, no day-to-day change can exceed
+    """A per-month lookup would move this edge 0.3 overnight on May 1
+    (0.5 x (1.0 - 0.4)); blended, no day-to-day change can exceed
     the biggest month-to-month step spread over the shortest month --
     including Dec 31 -> Jan 1."""
     store = _tree_store(tmp_path, monkeypatch)
@@ -398,8 +398,7 @@ def test_route_rejects_bad_time_parameters(client, params):
 
 def test_route_takes_feb_29_in_a_common_year(client, monkeypatch):
     """The shade table has no year, so Feb 29 -- picked for a leap year, or
-    in a link opened a year later -- is a real day. It used to be checked
-    against the current year and refused three years in four."""
+    in a link opened a year later -- is a real day, whatever year it is."""
     monkeypatch.setattr(server_app, "PINNED_NOW", datetime(2026, 7, 15, 12, tzinfo=server_app.NYC_TZ))
     response = _get(client, month=2, day=29, hour=12)
     assert response.status_code == 200
@@ -413,7 +412,7 @@ def test_route_uses_the_hour_it_is_given(client):
     assert noon["shade_fraction"] == 0.0
 
 
-# ── night (PLAN `night-shade`) ───────────────────────────────────────────────
+# ── night (#112) ─────────────────────────────────────────────────────────────
 
 # July's real dark slots (pipeline/sun.py, on the 15th: 21:00-05:00), plus
 # August's 20:00-23:00 (synthetic) so a late-July evening blends a lit
@@ -427,16 +426,16 @@ def test_a_dark_slot_counts_as_full_shade(tmp_path, monkeypatch):
     # the middle way has no row at all, so its shade at 02:00 is the night's
     assert _shade(store, "A", "M", month=7, hour=2) == 1.0
     # ...and the dark is the sun's, so every layer has it -- "Tree shade"
-    # included (PLAN `time-and-layers`; #112 had exempted the trees)
+    # included (#121)
     assert _shade(store, "A", "M", month=7, hour=2, layers="trees") == 1.0
     assert _shade(store, "A", "M", month=7, hour=2, layers="buildings") == 1.0
 
 
 def test_tree_shade_fades_into_the_dark_like_every_layer(tmp_path, monkeypatch):
-    """User 2026-09-29 (H): at dusk "Tree shade" climbs toward full shade
-    the way the other layers do, instead of staying trees alone until
-    the minute it's night. Per slot the dark is 1 and a lit slot is the
-    trees, so the blend is the union of the trees with the dark share."""
+    """At dusk "Tree shade" climbs toward full shade the way the other
+    layers do (#121), instead of staying trees alone until the minute
+    it's night. Per slot the dark is 1 and a lit slot is the trees, so
+    the blend is the union of the trees with the dark share."""
     half = 0.5 * RATE * DETOUR_M     # 0.5 tree cover on the north way
     store = _store(tmp_path, monkeypatch, dark=JULY_NIGHT, deciduous=half)
     assert _shade(store, "A", "N", month=7, hour=20, layers="trees") == pytest.approx(0.5)
@@ -453,8 +452,8 @@ def test_tree_shade_fades_into_the_dark_like_every_layer(tmp_path, monkeypatch):
 
 
 def test_dusk_climbs_toward_full_shade(tmp_path, monkeypatch):
-    """The bug this step found: the stored 0 of a dark slot pulled the
-    last hour before dark toward NO shade (20:30 read 100, not 227.5)."""
+    """Read literally, the stored 0 of a dark slot would pull the last
+    hour before dark toward no shade (20:30 would read 100, not 227.5)."""
     store = _store(tmp_path, monkeypatch, dark=JULY_NIGHT)
     assert _shade(store, "A", "N", month=7, hour=20) == pytest.approx(200 / 255)
     assert _shade(store, "A", "N", month=7, hour=20, minute=30) == pytest.approx((200 + 255) / 2 / 255)
@@ -501,9 +500,9 @@ def test_a_sun_table_of_the_wrong_shape_is_refused():
 
 
 def test_route_at_night_is_the_fastest_route_for_every_weight(tmp_path, monkeypatch):
-    """The live bug (2026-09-25, Fifth Ave at 02:00): MED/MAX still took a
-    canopy detour in the dark. Trees fully shade the north way here, so by
-    day MED and MAX take it; at 02:00 every weight gets the straight way."""
+    """In the dark no weight may take a canopy detour. Trees fully shade
+    the north way here, so by day MED and MAX take it; at 02:00 every
+    weight gets the straight way."""
     store = _store(tmp_path, monkeypatch, dark=JULY_NIGHT, north_deciduous=RATE * DETOUR_M)
     monkeypatch.setattr(server_app, "store", store)
     client = TestClient(server_app.app)
@@ -520,8 +519,7 @@ def test_route_at_night_is_the_fastest_route_for_every_weight(tmp_path, monkeypa
     assert props[0]["length_m"] == pytest.approx(200.0, abs=0.2)
     assert all(p["shade_fraction"] == 1.0 for p in props)
 
-    # "Tree shade" too (PLAN `time-and-layers`, user 2026-09-26: night
-    # beats the layer -- #112 had let MAX keep its canopy detour here)
+    # "Tree shade" too (#121: night beats the layer)
     trees = _get(client, month=7, hour=2, layers="trees").json()
     assert trees["night"] is True
     assert trees["layers"] == "trees"
@@ -534,7 +532,7 @@ def test_route_at_night_is_the_fastest_route_for_every_weight(tmp_path, monkeypa
     assert by_day["routes"][3]["properties"]["length_m"] == pytest.approx(2 * DETOUR_M, abs=0.2)
 
 
-# ── arrive by (PLAN `time-and-layers`) ───────────────────────────────────────
+# ── arrive by (#119) ─────────────────────────────────────────────────────────
 
 # The fastest way here is the straight 200 m: 200 / 1.4 / 60 = 2.38, the
 # route's 2.4 minutes, so every arrival below leaves 2 minutes earlier.
@@ -542,7 +540,7 @@ def test_route_at_night_is_the_fastest_route_for_every_weight(tmp_path, monkeypa
 def test_arrive_by_scores_the_walk_for_when_it_leaves(tmp_path, monkeypatch):
     """21:01 in July is dark and 20:59 is not (1/60 of lit 20:00 still
     counts). Arriving at 21:01 means leaving at 20:59: the batch is exactly
-    a walk that LEAVES at 20:59, not the night's one that leaves at 21:01."""
+    a walk that leaves at 20:59, not the night's one that leaves at 21:01."""
     store = _store(tmp_path, monkeypatch, dark=JULY_NIGHT)
     monkeypatch.setattr(server_app, "store", store)
     client = TestClient(server_app.app)

@@ -1,9 +1,9 @@
-"""Tests for the serving shape (decided 2026-08-30): one process serves
-the API and, when a frontend build exists, the static frontend too --
-plus the two security headers the app owns no matter where it runs.
+"""Tests for the serving shape: one process serves the API and, when a
+frontend build exists, the static frontend too -- plus the two security
+headers the app owns no matter where it runs.
 
 The mount is conditional on web/dist existing, and this suite must pass
-BOTH with and without a real build in the repo (CI has none; a dev
+both with and without a real build in the repo (CI has none; a dev
 machine that ran Playwright does). So the mount tests never touch the
 real `app` or the real web/dist -- they build a fresh FastAPI against a
 tmp_path via the same _mount_frontend the real module calls, and only
@@ -53,7 +53,7 @@ def test_serves_index_and_assets_when_build_exists(tmp_path, monkeypatch):
 
 
 def test_api_routes_win_over_the_mount(tmp_path, monkeypatch):
-    # The mount at "/" catches everything NOT matched by a route declared
+    # The mount at "/" catches everything not matched by a route declared
     # before it -- /health must keep answering as the API, not 404 into
     # the static directory.
     (tmp_path / "index.html").write_text("x")
@@ -68,12 +68,12 @@ def test_missing_build_serves_api_only(tmp_path, monkeypatch):
 
 
 def test_security_headers_on_every_response():
-    # On the REAL app: the middleware wraps API routes and the mount
+    # On the real app: the middleware wraps API routes and the mount
     # alike. /health is dist-independent, so this asserts safely on any
     # machine. Referrer-Policy strict-origin-when-cross-origin: route URLs
     # carry coordinates in the query string, so only the bare origin ever
-    # rides an outbound Referer -- never the path+query (decided 2026-08-31,
-    # so the CARTO key can be domain-locked, which needs some referer).
+    # rides an outbound Referer -- never the path+query (which still lets
+    # the CARTO key be domain-locked, since that needs some referer).
     client = TestClient(server_app.app)
     resp = client.get("/health")
     assert resp.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
@@ -84,11 +84,11 @@ def test_security_headers_on_every_response():
 
 
 def test_head_mirrors_get_on_every_api_route():
-    # FastAPI's @app.get registers ONLY GET -- plain Starlette auto-adds
-    # HEAD to GET routes, APIRoute drops that -- so before
-    # _mirror_head_on_get a HEAD to any API endpoint missed the router,
-    # fell through to the static mount, and 404'd. Found live by
-    # UptimeRobot's HEAD probes (2026-09-01).
+    # FastAPI's @app.get registers only GET -- plain Starlette auto-adds
+    # HEAD to GET routes, APIRoute drops that -- so without
+    # _mirror_head_on_get a HEAD to any API endpoint misses the router,
+    # falls through to the static mount, and 404s, which is what an
+    # uptime monitor's probe sends.
     for route in server_app.app.router.routes:
         if isinstance(route, APIRoute) and "GET" in route.methods:
             assert "HEAD" in route.methods, f"{route.path} answers GET but not HEAD"
@@ -109,7 +109,7 @@ def test_head_mirrors_get_on_every_api_route():
 def test_api_docs_are_disabled():
     # No audience: the API's one client is our own frontend, and public
     # docs would advertise /geocode -- a relay to a fair-use upstream --
-    # as a try-it-out endpoint. Decided 2026-08-30.
+    # as a try-it-out endpoint.
     client = TestClient(server_app.app)
     assert client.get("/docs").status_code == 404
     assert client.get("/openapi.json").status_code == 404

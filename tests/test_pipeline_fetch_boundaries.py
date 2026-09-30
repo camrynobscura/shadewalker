@@ -1,9 +1,8 @@
 """Tests for pipeline/fetch/boundaries.py's cache behavior. No real network
-call -- mirrors the mocking style in test_pipeline_fetch_streets.py. The
-real dataset's own shape (Governors Island genuinely sitting inside
-Manhattan's polygon, Jersey City genuinely excluded from the NYC union)
-was checked manually against the live fetch, per PLAN.md's convention of
-keeping network-dependent checks out of the automated suite."""
+call. The real dataset's own shape (Governors Island genuinely sitting
+inside Manhattan's polygon, Jersey City genuinely excluded from the NYC
+union) was checked manually against the live fetch, since
+network-dependent checks stay out of the automated suite."""
 
 import json
 

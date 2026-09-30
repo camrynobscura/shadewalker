@@ -1,9 +1,5 @@
 """Tests for pipeline/scoring/trees.py -- the per-tree value formula.
 
-Re-creates the coverage of the six tests in the deleted
-tests/test_pipeline_scoring.py that described a TREE rather than a street,
-and so survive the centerline rebuild:
-
     dead trees are excluded
     dbh is capped at DBH_CAP_IN
     garbage dbh values are rejected
@@ -11,12 +7,10 @@ and so survive the centerline rebuild:
     unknown condition falls back to the midpoint
     multiple trees on one edge sum
 
-Plus the cases real citywide data turned out to contain, which the deleted
-version did NOT handle:
+Plus the cases the real citywide data contains:
 
     dbh arrives as JSON null -> float(None) raises TypeError, not
-    ValueError. The old code caught only ValueError, so it would have
-    crashed the first time it ran on the whole city. 77 of 898,643 rows.
+    ValueError. 77 of 898,643 rows.
     dbh of 2427 inches -- 61 metres of trunk -- is really in the feed, so
     the cap is load-bearing rather than defensive.
     genusspecies missing entirely (21 rows) must fall through to deciduous.
@@ -27,7 +21,7 @@ from pipeline.scoring import trees
 
 
 def tree(dbh="10", condition="Good", species="Acer rubrum - red maple"):
-    """A Forestry row, shaped like the real feed: dbh is a STRING."""
+    """A Forestry row, shaped like the real feed: dbh is a string."""
     return {"dbh": dbh, "tpcondition": condition, "genusspecies": species}
 
 

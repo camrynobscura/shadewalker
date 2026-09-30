@@ -1,22 +1,22 @@
-"""App-level rate limiting (slowapi), decided 2026-08-31 (`hosting`).
+"""App-level rate limiting (slowapi).
 
 Chosen over Caddy-edge limiting because the edge plugin needs a custom
 Caddy binary with no clean update path, while this rejects an over-limit
-request BEFORE the view body runs (no Dijkstra, no upstream hop) and is
+request before the view body runs (no Dijkstra, no upstream hop) and is
 testable in-process -- which is what this file does.
 
 Pinned here:
 - the client-IP key prefers X-Real-IP (set by Caddy via header_up, so it
   can't be spoofed) and falls back to the socket peer in dev;
-- /geocode and /geocode/reverse share ONE budget (`scope="geocode"`), so a
+- /geocode and /geocode/reverse share one budget (`scope="geocode"`), so a
   single client can't hammer the fair-use Photon upstream through either
   door; over budget returns 429;
-- limits are PER client IP -- one abuser can't throttle everyone;
+- limits are per client IP -- one abuser can't throttle everyone;
 - /health is never limited (monitoring must not be throttled).
 
 The limiter is disabled for the rest of the suite (tests/conftest.py's
 autouse fixture), since its counters are per-process; `rate_limiter_on`
-re-enables it here, and every test uses a UNIQUE X-Real-IP so its bucket
+re-enables it here, and every test uses a unique X-Real-IP so its bucket
 is independent of the others.
 """
 
@@ -119,7 +119,7 @@ def test_geocode_over_its_limit_returns_429(monkeypatch, rate_limiter_on):
 
 
 def test_geocode_forward_and_reverse_share_one_budget(monkeypatch, rate_limiter_on):
-    # The budget protects the Photon upstream, so it must be POOLED: half
+    # The budget protects the Photon upstream, so it must be pooled: half
     # the calls on each endpoint together exhaust the single scope.
     _mock_photon(monkeypatch)
     ip = {"X-Real-IP": "203.0.113.21"}
@@ -130,7 +130,7 @@ def test_geocode_forward_and_reverse_share_one_budget(monkeypatch, rate_limiter_
         r = client.get("/geocode/reverse",
                        params={"lat": 40.70, "lon": -73.90 - i * 0.001}, headers=ip)
         assert r.status_code == 200
-    # One more on EITHER endpoint is over the shared budget.
+    # One more on either endpoint is over the shared budget.
     assert client.get("/geocode/reverse",
                       params={"lat": 40.70, "lon": -74.50}, headers=ip).status_code == 429
 

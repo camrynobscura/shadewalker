@@ -1,19 +1,14 @@
 """The loader's two duplicate rules, pinned on a tiny synthetic export.
 
-server/graph_store.py's load() collapses duplicates two ways, and neither
-was covered by a test until `server-memory` (2026-09-26) rewrote the loader
-around flat arrays:
+server/graph_store.py's load() collapses duplicates two ways:
 
-1. The SAME edge twice (same unordered node pair, key and side) -- the
-   tiled era's border copies. The better-scored copy wins and takes the
+1. The same edge twice (same unordered node pair, key and side), as when
+   two export files overlap. The better-scored copy wins and takes the
    first copy's position; every per-edge attribute (length, trees, name,
    kind, fold names, geometry, building shade) must come from the winner.
 2. An OSM way mapped twice: same node pair and side, different multigraph
    key, identical geometry (either direction). The later copy is dropped.
    A genuinely different parallel way between the same nodes survives.
-
-The tests were written against the pre-rewrite loader first, so they
-describe its behaviour, not the new code's.
 """
 import base64
 import gzip
@@ -72,7 +67,7 @@ def test_a_better_scored_duplicate_replaces_every_attribute_in_place(tmp_path, m
     first = [_edge("a", "b", trees=1.0, name="First", coords=[A, MID_1, B], shade=10,
                    folds=("F1",), length=210.0),
              _edge("b", "c", trees=2.0, name="Other")]
-    # Same edge, reversed endpoints (b, a): the dedupe key is the UNORDERED
+    # Same edge, reversed endpoints (b, a): the dedupe key is the unordered
     # pair, so this is a duplicate. More trees -> it wins.
     second = [_edge("b", "a", trees=5.0, name="Second", coords=[B, MID_2, A], shade=200,
                     kind="footway/crossing", folds=("S1", "S2"), length=190.0)]

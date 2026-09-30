@@ -1,43 +1,30 @@
 """Every loaded component is visible, and reachability is what protects a
 click -- not a size heuristic.
 
-This file used to pin the opposite. The hide rule (2026-08-17) excluded any
-disconnected component under 5km from click-snapping and the drawn coverage,
-on the theory that such components were orphaned scraps that could only trap
-a click. Measured against the sidewalk model on 2026-08-23, that theory did
-not hold: the rule suppressed 674.3km across 5,128 components, including 124
-networks of 1-5km made of named residential streets -- 217th Street in
-Queens, Baychester Avenue in the Bronx, Arthur Kill Road on Staten Island.
-Clicking your own block there returned "outside our current coverage area",
-which was false: we had the street and declined to serve it. It also sat
-badly with the governing rule, overriding OSM's own answer with a size bar.
+A size rule -- hide any disconnected component under some length, on the
+theory that such components are orphaned scraps that could only trap a
+click -- suppresses real places. Measured on the sidewalk model, a 5km
+bar hides 674.3km across 5,128 components, including 124 networks of
+1-5km made of named residential streets: 217th Street in Queens,
+Baychester Avenue in the Bronx, Arthur Kill Road on Staten Island.
+Clicking your own block there would return "outside our current coverage
+area", which is false. It also overrides OSM's own answer with a size
+bar, which the governing rule forbids.
 
-So the protection has to come from somewhere else, and it already did:
-snap_pair() requires a component reachable from BOTH endpoints. That is a
-reachability test rather than a size test, so it cannot be wrong about which
+The protection comes from reachability instead: snap_pair() requires a
+component reachable from both endpoints. That cannot be wrong about which
 places are real -- it only ever answers "can these two points reach each
 other", which is the actual question.
 
 What is pinned here:
 
-  - a small isolated fragment IS snappable and accepted (the inversion);
-  - a big isolated place stays snappable and accepted (unchanged);
-  - the only component stays clickable however small (unchanged).
+  - a small isolated fragment is snappable and accepted;
+  - a big isolated place stays snappable and accepted;
+  - the only component stays clickable however small.
 
-The drawn-coverage half of these guarantees -- and the ring cache +
-fingerprint machinery that existed to serve it -- went with the coverage
-outline (deleted 2026-09-03): the rings were computed only to be drawn,
-never for routing, so in_coverage/snap_pair are the whole surviving
-contract.
-
-There is deliberately NO test here asserting "prefer the larger component
-when both are in range". That was written and then deleted on 2026-08-23:
-it is a size rule, which is the thing this change removed, and it would
-have reintroduced it through the test suite. It was also chasing a defect
-that turned out to be elsewhere -- the one bad route found while measuring
-this (a 149m request answered with 12m) reproduces identically on the main
-citywide component, so it is a snap-distance issue, not a component-choice
-one, and it predates this change.
+There is deliberately no test here asserting "prefer the larger component
+when both are in range": that is a size rule, and it would reintroduce
+one through the test suite.
 
 Synthetic fixtures, same pattern as test_graph_store_pruning.py.
 """
@@ -99,9 +86,9 @@ def _store(tmp_path, monkeypatch, fragment_edges=FRAGMENT_EDGES) -> GraphStore:
 # ── Small components are real places, not scraps to suppress ─────────────
 
 def test_small_isolated_fragment_is_snappable(tmp_path, monkeypatch):
-    """The inversion. 165m of disconnected pavement is somewhere a person
-    can genuinely walk, so two clicks on it get the route it can honestly
-    serve rather than a coverage rejection.
+    """165m of disconnected pavement is somewhere a person can genuinely
+    walk, so two clicks on it get the route it can honestly serve rather
+    than a coverage rejection.
     """
     store = _store(tmp_path, monkeypatch)
     f1_lat, f1_lon = FRAGMENT_NODES["f1"][1], FRAGMENT_NODES["f1"][0]

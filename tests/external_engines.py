@@ -1,33 +1,31 @@
 """Clients and flag rules for the external-engine validation harness.
 
 Independent walking-route engines built on the same OSM data are the
-project's proven bug-finder (325 ad-hoc comparisons to date; every
-disagreement was a real bug, a filed lead, or a verified legitimate win).
-This module makes the hard-won operational lessons permanent instead of
-re-learned per ad-hoc script:
+project's bug-finder: every disagreement has been a real bug, a lead, or
+a verified legitimate win. This module holds the operational rules:
 
 - OSRM foot must be routing.openstreetmap.de/routed-foot -- the popular
-  router.project-osrm.org demo silently serves DRIVING routes for foot.
-- Engines are ADVISORY, never verdicts, in both directions: OSRM misses
+  router.project-osrm.org demo silently serves driving routes for foot.
+- Engines are advisory, never verdicts, in both directions: OSRM misses
   real park entrances (Clark St) and passes phantom welds whose endpoints
   snap to one street. A flag is a lead for a human, not a failure.
 - OSRM foot rides ferries; we deliberately don't. Valhalla with
-  use_ferry=0 is the arbiter for flagged pairs (learned 2026-08-15: 4 of
-  5 flags in a 100-route batch were OSRM taking the E 34th St ferry;
-  Valhalla-no-ferry read all four at ratio 1.01-1.03). This OSRM instance
-  rejects exclude=ferry, so the arbitration has to live in Valhalla.
-- BRouter is a THIRD independent engine, wired in as a hot-swap fallback
-  (2026-08-19): it stands in as the primary comparison when OSRM is down,
-  and as the arbiter when Valhalla is down (which has happened twice
-  mid-batch). It is called only when needed, to stay polite. It exposes no
-  snapped-waypoint location, so it can't carry OSRM's snap guard -- fine,
-  because pairs are sampled from OUR OWN network nodes (BRouter snaps them
-  trivially) and a bad snap surfaces as a human-triaged flag, not silent
-  corruption; a crow-flight floor catches gross errors. It runs the
-  `shortest` profile (a DISTANCE oracle, not a pedestrian router -- see
-  BROUTER_PROFILE for why hiking-mountain was dropped), so unlike OSRM/
-  Valhalla it does NOT model pedestrian access finely; its value is
-  resilience and tie-breaking on route LENGTH, not new pedestrian signal.
+  use_ferry=0 is the arbiter for flagged pairs (in one 100-route batch, 4
+  of 5 flags were OSRM taking the E 34th St ferry; Valhalla-no-ferry read
+  all four at ratio 1.01-1.03). This OSRM instance rejects exclude=ferry,
+  so the arbitration has to live in Valhalla.
+- BRouter is a third independent engine, wired in as a hot-swap fallback:
+  it stands in as the primary comparison when OSRM is down, and as the
+  arbiter when Valhalla is down (which happens mid-batch). It is called
+  only when needed, to stay polite. It exposes no snapped-waypoint
+  location, so it can't carry OSRM's snap guard -- fine, because pairs
+  are sampled from our own network nodes (BRouter snaps them trivially)
+  and a bad snap surfaces as a human-triaged flag, not silent corruption;
+  a crow-flight floor catches gross errors. It runs the `shortest`
+  profile (a distance oracle, not a pedestrian router -- see
+  BROUTER_PROFILE), so unlike OSRM/Valhalla it does not model pedestrian
+  access finely; its value is resilience and tie-breaking on route
+  length, not new pedestrian signal.
 - Both engines snap endpoints too; if any snap moved an endpoint more
   than SNAP_MAX_M, the comparison is no longer about the requested pair
   and must be discarded, not compared.
@@ -43,18 +41,16 @@ import requests
 OSRM_FOOT_URL = "https://routing.openstreetmap.de/routed-foot/route/v1/foot"
 VALHALLA_URL = "https://valhalla1.openstreetmap.de/route"
 BROUTER_URL = "https://brouter.de/brouter"
-# A DISTANCE profile, deliberately -- BRouter's role here is a shortest-path
+# A distance profile, deliberately -- BRouter's role here is a shortest-path
 # length oracle, not a route planner. The pedestrian profile hiking-mountain
-# optimizes ASCENT/energy, so in NYC's genuinely hilly areas it detours around
-# grade and OVER-reports distance: an 18-pair measurement (Todt Hill, Sunset
-# Park, Washington Heights, Riverdale + flat controls, 2026-08-19) put
-# hiking-mountain at 1.021x OSRM foot in hilly boxes with a +16.6% tail on one
-# steep Todt Hill pair -- enough to trip the 1.10 arbiter-agreement bar and
+# optimizes ascent/energy, so in NYC's genuinely hilly areas it detours around
+# grade and over-reports distance: measured 2026-08-19 over 18 pairs (Todt
+# Hill, Sunset Park, Washington Heights, Riverdale + flat controls),
+# hiking-mountain ran 1.021x OSRM foot in hilly boxes with a +16.6% tail on
+# one steep pair -- enough to trip the 1.10 arbiter-agreement bar and
 # manufacture false "ours too short" leads. `shortest` tracked OSRM foot at
-# 0.993x hilly / 0.994x flat with no over-report tail (grade-insensitive,
-# which is exactly what a distance oracle wants). NYC is NOT flat -- an earlier
-# note here claimed it was, off a single flat DUMBO->LES spot-check; that was
-# an n=1 error. Swap this constant only against a fresh cross-terrain batch.
+# 0.993x hilly / 0.994x flat with no over-report tail. Swap this constant
+# only against a fresh cross-terrain batch.
 BROUTER_PROFILE = "shortest"
 USER_AGENT = "shadewalker-validation-harness (personal project; tests/external_engines.py)"
 
@@ -111,7 +107,7 @@ def osrm_route_uses_ferry(a, b, get_fn=None):
     OSRM foot rides ferries and we deliberately don't, so a ferry is the
     single most common reason an OSRM route is shorter than ours (11 of the
     1,000-route campaign's 13 flags). Rather than spend a Valhalla arbiter
-    call to discover that, ask OSRM's OWN response: with steps=true every leg
+    call to discover that, ask OSRM's own response: with steps=true every leg
     carries per-step `mode`, and a ferry leg is mode="ferry". Called only on
     an already-flagged OSRM pair (rare), so the extra round-trip is cheap and
     stays on the same engine -- no second engine needed for the ferry class.
@@ -141,12 +137,12 @@ def valhalla_no_ferry_length_m(a, b, post_fn=None, pause_fn=polite_pause,
     wildly different Valhalla snap would surface as a length disagreement
     anyway.
 
-    valhalla1.openstreetmap.de has gone down mid-batch and left flags
-    unarbitrated (2026-08-15..19). A transient failure -- a network error or
-    a 5xx -- is retried `retries` times (one extra attempt by default) with a
-    polite pause between, before we give up and let arbitrate() fall back to
+    valhalla1.openstreetmap.de goes down mid-batch and leaves flags
+    unarbitrated. A transient failure -- a network error or a 5xx -- is
+    retried `retries` times (one extra attempt by default) with a polite
+    pause between, before we give up and let arbitrate() fall back to
     BRouter. A clean 200 that simply carries no trip (a genuine "no route")
-    is NOT retried -- it isn't transient. post_fn/pause_fn are injectable so
+    is not retried -- it isn't transient. post_fn/pause_fn are injectable so
     the retry path is unit-testable without network or sleeps."""
     post = post_fn if post_fn is not None else requests.post
     body = {
@@ -229,7 +225,7 @@ def our_none_priority_length_m(store, a, b):
 
 def primary_comparison(a, b, ours_m, osrm_fn=osrm_foot_length_m,
                        brouter_fn=brouter_foot_length_m, pause_fn=polite_pause):
-    """The length to compare OURS against: OSRM, or BRouter if OSRM is DOWN.
+    """The length to compare ours against: OSRM, or BRouter if OSRM is down.
 
     Returns (length, engine, err). A per-pair "osrm snap moved" is a real
     skip (BRouter can't be snap-guarded, so we don't paper over it); only a
@@ -251,7 +247,7 @@ def primary_comparison(a, b, ours_m, osrm_fn=osrm_foot_length_m,
 def arbitrate(a, b, ours_m, primary_engine, valhalla_fn=valhalla_no_ferry_length_m,
               brouter_fn=brouter_foot_length_m, pause_fn=polite_pause):
     """Second opinion on a flagged pair: Valhalla-no-ferry, or BRouter if
-    Valhalla is down (recorded twice mid-batch). BRouter never self-arbitrates
+    Valhalla is down. BRouter never self-arbitrates
     -- if it was already the primary there is no independent second engine, so
     the pair stays an honest unarbitrated lead. Returns
     (arbiter_m, engine, err, agrees)."""
@@ -277,25 +273,25 @@ def classify_flag(ours_m, theirs_m):
     return None
 
 
-# ── Gap-probe oracle rules (codified 2026-08-19) ─────────────────────────────
-# Three lessons the throwaway gap-probe scripts under data/audits/ learned the
-# hard way (proven 2026-08-16, scraps investigation). Codified here as small,
-# unit-tested helpers so a future gap probe imports them instead of re-deriving
-# -- and re-repeating -- the mistakes. See FIXES item 5.
+# ── Gap-probe oracle rules ───────────────────────────────────────────────────
+# Three rules a gap probe (asking an external engine whether two nearby
+# points connect) needs, kept as small unit-tested helpers so a probe imports
+# them instead of re-deriving them.
 
-# Generous NYC envelope (all five boroughs + the harbor islands). Used to
-# reject OSRM annotation/way ids that snapped to somewhere impossible.
+# Generous NYC envelope (all five boroughs + the harbor islands), for
+# rejecting OSRM annotation/way ids that snapped to somewhere impossible.
 NYC_LAT_MIN, NYC_LAT_MAX = 40.45, 40.95
 NYC_LON_MIN, NYC_LON_MAX = -74.30, -73.68
 
 # Rule (a): a gap probe asks OSRM to route between two points that are far
-# apart in OUR graph but near in reality. OSRM prunes small components and
-# silently snaps a probe endpoint ACROSS the very gap under test, then reports
-# a short "connected" walk that is really about two OTHER points. The old
-# guard (reject only when snap > 2x the gap) let 542 such false "connected"
-# verdicts through. Correct rule: the snap must stay well INSIDE the gap -- if
-# a snap displacement reaches half the gap, the probe has likely left the
-# scrap and the verdict must read ABSENT_OR_PRUNED, never "connected".
+# apart in our graph but near in reality. OSRM prunes small components and
+# silently snaps a probe endpoint across the very gap under test, then
+# reports a short "connected" walk that is really about two other points.
+# Rejecting only when the snap exceeds twice the gap lets hundreds of such
+# false "connected" verdicts through. The snap must stay well inside the
+# gap: if a snap displacement reaches half the gap, the probe has likely
+# left the scrap and the verdict must read ABSENT_OR_PRUNED, never
+# "connected".
 GAP_PROBE_SNAP_FRACTION = 0.5
 
 
@@ -310,7 +306,7 @@ def gap_probe_snap_ok(snap_m, gap_m, max_fraction=GAP_PROBE_SNAP_FRACTION):
 
 def in_nyc_bbox(lat, lon):
     """Rule (b): `annotations=nodes` emits garbage ids near snapped endpoints
-    (a Brooklyn route once yielded a Swiss node id). Any way/node looked up
+    (a Swiss node id on a Brooklyn route). Any way/node looked up
     from an OSRM annotation id must be geometry-filtered to NYC before it is
     trusted or embedded in an Overpass query."""
     return (NYC_LAT_MIN <= lat <= NYC_LAT_MAX and

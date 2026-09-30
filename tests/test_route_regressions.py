@@ -1,18 +1,10 @@
 """Pinned routes on the real citywide export: four anchor bands at known
 chokepoints, and a seeded golden batch spread over all five boroughs.
 
-Resurrected 2026-08-28 (PLAN's `citywide-guards`). The original lived here
-until the centerline model was deleted (recovered from git:
-`git show 9cc9a50^:tests/test_route_regressions.py`); the anchor SITES and
-each band's failure-mode reasoning carry over, but every number was
-re-measured on the sidewalk export before pinning -- centerline lengths do
-not transfer (per-sidewalk paths add real approach/crossing distance; the
-DUMBO walk is +11.3% with the bridge path verified present).
-
-Anchors are length BANDS, not just ceilings: at several sites the
-historical bug made the route SHORTER (a phantom weld shortcutting between
-elevation levels, an over-connection across water), so a suspiciously
-short route is as much a regression as a detour.
+Anchors are length bands, not just ceilings: at several sites a bug
+makes the route shorter (a phantom weld shortcutting between elevation
+levels, an over-connection across water), so a suspiciously short route
+is as much a regression as a detour.
 
 Goldens are 25 seeded pairs drawn with tools/audit/routing_harness.py's
 exact recipe (seed 20260825, uniform over CITY_BBOX, 500-5000m
@@ -23,12 +15,12 @@ balloons), or load-time merge bug moves lengths by tens of percent.
 Tolerance is max(2.5%, 30m): snapping can legitimately land a request on
 a slightly different node after a rebuild, which moves a route by tens of
 meters, while the failure classes this guards against move it by far
-more. On the SAME export the values are deterministic and exact.
+more. On the same export the values are deterministic and exact.
 
 After a deliberate graph change (new OSM pin, pipeline change), re-derive
-with the scratch recipe recorded in history/citywide-guards.md and bump
-the numbers in ONE documented commit -- never nudge them to green a red
-run without knowing why it went red.
+with tools/audit/routing_harness.py and bump the numbers in one
+documented commit -- never nudge them to green a red run without knowing
+why it went red.
 """
 import pytest
 
@@ -50,35 +42,34 @@ ANCHOR_PINS = [
         (40.704456, -73.986651), (40.717267, -73.977333), 4100.0, 5000.0,
         "4,566.6m measured 2026-08-28, verified over the Manhattan Bridge "
         "Pedestrian Path (the route's longest step, 1,971.6m, names the "
-        "walkway). Centerline era read 4,102m; the +11.3% is per-sidewalk "
-        "approach loops at both ends, checked step-by-step before pinning. "
-        "Floor 4,100 catches a phantom shortcut across the river (the "
-        "blocklisted DUMBO weld once read 3,372m); ceiling 5,000 catches "
-        "the walkway severing, which forces the Brooklyn Bridge and "
-        "balloons the walk well past 5.5km",
+        "walkway); the per-sidewalk approach loops at both ends were "
+        "checked step-by-step before pinning. Floor 4,100 catches a "
+        "phantom shortcut across the river (a weld at DUMBO reads "
+        "~3,372m); ceiling 5,000 catches the walkway severing, which "
+        "forces the Brooklyn Bridge and balloons the walk well past 5.5km",
         id="dumbo-to-les-over-manhattan-bridge",
     ),
     pytest.param(
         (40.704169, -73.989582), (40.704637, -73.986443), None, 335.0,
-        "301.4m measured 2026-08-28 (centerline era 314.1m, OSRM 305m), "
-        "direct along John St under the bridge anchorage. The historical "
-        "symptom was a ~+40m plaza detour (dead splits at the anchorage), "
-        "so the ceiling sits deliberately below measured+40",
+        "301.4m measured 2026-08-28 (OSRM 305m), direct along John St "
+        "under the bridge anchorage. The failure mode is a ~+40m plaza "
+        "detour (dead splits at the anchorage), so the ceiling sits "
+        "deliberately below measured+40",
         id="john-st-walk-across-the-anchorage",
     ),
     pytest.param(
         (40.697559, -73.99646), (40.699825, -73.996337), None, 1050.0,
-        "924.9m measured 2026-08-28 (centerline era 920.8m, OSRM 918m) via "
-        "the field-checked Squibb Park / Promenade access. If this "
+        "924.9m measured 2026-08-28 (OSRM 918m) via the field-checked "
+        "Squibb Park / Promenade access. If this "
         "entrance severs, the route balloons toward the next park access",
         id="clark-st-promenade-entrance",
     ),
     pytest.param(
         (40.744796, -73.978573), (40.75992, -73.936627), 5500.0, 6800.0,
-        "5,977.1m measured 2026-08-28 (centerline era 6,115m after the "
-        "Queensboro Outer Roadway landed; Valhalla-no-ferry agreed within "
-        "~3%). Disconnected, this pair once read 11,713m via the RFK "
-        "Bridge; the floor guards a phantom shortcut across the river",
+        "5,977.1m measured 2026-08-28 (Valhalla-no-ferry agreed within "
+        "~3%). With the Queensboro Outer Roadway severed this pair reads "
+        "11,713m via the RFK Bridge; the floor guards a phantom shortcut "
+        "across the river",
         id="queensboro-outer-roadway-midtown-to-lic",
     ),
 ]
@@ -104,8 +95,8 @@ def test_anchor_site_stays_in_its_verified_band(citywide_store, frm, to, min_m, 
 
 # --- Golden batch ------------------------------------------------------------
 # (from_lat, from_lon, to_lat, to_lon, verified_length_m), measured
-# 2026-08-28 at tree_weight=0, month=7. Derivation recipe:
-# history/citywide-guards.md.
+# 2026-08-28 at tree_weight=0, month=7 with tools/audit/routing_harness.py
+# (seed 20260825).
 
 GOLDEN_ROUTES = [
     (40.773340, -73.905417, 40.756771, -73.855859, 5048.9),

@@ -8,12 +8,11 @@ and they believe it.
 
 Every failure in here is disguised as something else:
 
-  - measuring MINIMUM distance instead of the MEDIAN along the line makes
+  - measuring minimum distance instead of the median along the line makes
     every cross street a candidate, because a block-length sidewalk touches
-    a different one at each end. That exact error made the audit instrument
-    report 16.1% where the truth was 94.0% -- and it reads as "OSM's data is
-    too sparse to name anything", not as a bug in our metric.
-  - failing to group candidates by NAME turns one street mapped as two OSM
+    a different one at each end -- and it reads as "OSM's data is too
+    sparse to name anything", not as a bug in our metric.
+  - failing to group candidates by name turns one street mapped as two OSM
     ways into two rival candidates, so the clearest cases -- a sidewalk
     running dead alongside one street -- come out "ambiguous" and unnamed.
   - conflating "too short to name" with "no parent found" corrupts the rate
@@ -21,7 +20,7 @@ Every failure in here is disguised as something else:
     looks correctly handled.
 
 All of it runs on hand-built geometry -- no .pbf, no fixture. The fixtures
-are laid out so distances are EXACT: `_to_m` is a flat scale, so an offset
+are laid out so distances are exact: `_to_m` is a flat scale, so an offset
 built as `metres / _LAT_M` and read back through it round-trips to the same
 double. Verified, not assumed -- which is what lets the ratio boundary below
 be tested as an exact tie rather than a bracket.
@@ -135,9 +134,9 @@ def test_own_name_wins_over_a_nearer_differently_named_street():
 
 
 def test_an_osm_typo_survives_verbatim():
-    """`Brookyln Bridge Promenade` is misspelled IN OSM. Deriving a name is
+    """`Brookyln Bridge Promenade` is misspelled in OSM. Deriving a name is
     not a licence to correct it -- that would be an override of OSM, which
-    the governing rule forbids, and it is the user's own confirmed reading.
+    the governing rule forbids.
     """
     edge = _sidewalk(name="Brookyln Bridge Promenade")
     correct = _parallel_street("Brooklyn Bridge Promenade", offset_m=1.0)
@@ -217,11 +216,11 @@ def test_a_street_way_with_one_point_is_skipped_not_crashed():
     assert tally["derived"] == 1
 
 
-# ── The metric: median ALONG the line, not minimum ───────────────────────
+# ── The metric: median along the line, not minimum ───────────────────────
 
 def test_a_cross_street_touching_one_end_is_not_the_parent():
-    """THE regression. A 60m sidewalk touches its cross street at one end,
-    so the MINIMUM distance to it is 0 -- nearer than the true parent
+    """The core case. A 60m sidewalk touches its cross street at one end,
+    so the minimum distance to it is 0 -- nearer than the true parent
     running alongside at 8m. The median is 36m, past the 30m radius, so it
     is not a candidate at all. Swap the median for a minimum and this edge
     gets named after the street it merely crosses.
@@ -236,7 +235,7 @@ def test_a_cross_street_touching_one_end_is_not_the_parent():
 
 
 def test_a_street_only_crossed_at_one_end_is_no_parent_at_all():
-    """The 30m radius applies to the MEDIAN, not just to the search buffer.
+    """The 30m radius applies to the median, not just to the search buffer.
     The cross street's closest point is 0m, so the buffer hands it over; only
     the median check (36m) rejects it. Drop that check and a sidewalk gets
     named after a street it merely crosses.
@@ -250,7 +249,7 @@ def test_a_street_only_crossed_at_one_end_is_no_parent_at_all():
 
 def test_the_touching_cross_street_really_is_nearer_by_minimum_distance():
     """Pins the trap the test above is guarding, so it cannot quietly stop
-    being a trap: by minimum distance the cross street WINS (0m vs 8m), and
+    being a trap: by minimum distance the cross street wins (0m vs 8m), and
     only the median demotes it (36m, outside the 30m radius).
     """
     line = _line(_sidewalk(length_m=60.0))
@@ -270,7 +269,7 @@ def test_the_touching_cross_street_really_is_nearer_by_minimum_distance():
 def test_a_parent_street_that_ends_partway_along_still_counts():
     """Streets are split at junctions, so a sidewalk routinely outruns the
     way beside it. Past that end the probe distances fan out, and only a
-    MEDIAN stays inside the radius -- take the maximum instead and a real
+    median stays inside the radius -- take the maximum instead and a real
     parent running dead alongside gets thrown away as too far.
     """
     edge = _sidewalk(length_m=60.0)
@@ -287,7 +286,7 @@ def test_a_parent_street_that_ends_partway_along_still_counts():
     assert tally["derived"] == 1
 
 
-# ── Candidates are grouped by NAME, not by way ───────────────────────────
+# ── Candidates are grouped by name, not by way ───────────────────────────
 
 def test_one_street_mapped_as_two_ways_is_one_candidate():
     """Court Street split at a junction is still Court Street. Counting the
@@ -485,13 +484,13 @@ def test_the_degrees_to_metres_scale_matches_the_audit_instrument():
     assert _to_m(1.0, 1.0) == (_K, _LAT_M)
 
 
-# ── The parallelism filter (2026-08-28) and fold_names ───────────────────
+# ── The parallelism filter and fold_names ────────────────────────────────
 
 def test_a_perpendicular_street_cannot_lend_its_name():
-    """THE class the filter was added for: a short corner scrap running
+    """The class the filter exists for: a short corner scrap running
     along Court but sitting nearer to the cross street. By distance alone
     Union wins decisively (median 5m vs 9m, ratio 0.556 <= 0.6) -- the
-    measured dominant error, a corner scrap taking the PERPENDICULAR
+    measured dominant error, a corner scrap taking the perpendicular
     street's name. Union runs north, the scrap runs east: 90 degrees
     apart, so the filter removes Union and Court wins alone.
     """
@@ -504,10 +503,10 @@ def test_a_perpendicular_street_cannot_lend_its_name():
 
 
 def test_a_perpendicular_street_no_longer_causes_ambiguity():
-    """The coverage half of the measured win (+27.5% named edges): a cross
-    street inside the radius used to make the real parent look contested
+    """The coverage half (+27.5% named edges citywide): a cross street
+    inside the radius would otherwise make the real parent look contested
     (median 10m vs 9m, ratio 0.9 -> ambiguous, no name). Perpendicular
-    candidates no longer compete, so the parent is decisive.
+    candidates don't compete, so the parent is decisive.
     """
     edge = _sidewalk(length_m=12.0)
     streets = [_parallel_street("Court Street", offset_m=9.0, osm_id=1),
@@ -568,7 +567,7 @@ def test_fold_names_are_capped():
 
 def test_the_parallelism_constant_matches_its_derivation():
     """PARALLEL_MAX_DIFF_DEG = 30 is what measure_naming_precision.py
-    measured the P5 win with (RIGHT 75.9 / WRONG 3.5 by length on the
+    measured with (right 75.9 / wrong 3.5 by length on the
     street-achievable subset, 2026-08-28). Changing it invalidates those
     numbers -- deliberate act, re-measurement required."""
     assert PARALLEL_MAX_DIFF_DEG == 30.0
@@ -576,12 +575,11 @@ def test_the_parallelism_constant_matches_its_derivation():
 
 
 def test_a_connector_is_never_named_even_with_a_parent_right_beside_it():
-    """The skip is by KIND, not by geometry: identical coords get named as
+    """The skip is by kind, not by geometry: identical coords get named as
     a sidewalk and skipped as a crossing/traffic island. Names on
     connector kinds never render -- the server folds them into the street
     runs around them and never reads their fold_names either -- so
-    deriving them was pure build cost (~105k edges citywide, removed
-    2026-08-28)."""
+    deriving them would be pure build cost (~105k edges citywide)."""
     origin = _origin(90)
     street = _parallel_street("Court Street", offset_m=8.0, origin=origin)
     lon, lat = origin
@@ -602,8 +600,8 @@ def test_a_connector_is_never_named_even_with_a_parent_right_beside_it():
 
 
 def test_a_connector_keeps_its_own_osm_name():
-    """OSM's own name on a crossing is DATA and survives -- only the
-    DERIVATION is skipped. The own-name branch runs before the kind
+    """OSM's own name on a crossing is data and survives -- only the
+    derivation is skipped. The own-name branch runs before the kind
     check, so a named crossing tallies as `own`, not `connector`."""
     origin = _origin(91)
     lon, lat = origin

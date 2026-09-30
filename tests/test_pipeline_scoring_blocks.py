@@ -1,9 +1,9 @@
 """Tests for pipeline/scoring/blocks.py -- shade spread across a block face.
 
-The property under test is the one the whole design rests on: EVERY EDGE ON
-A BLOCK FACE MUST REPORT THE SAME DENSITY, whatever length OSM chopped it
-to. That is what fixes the original bug, where the same tree read
-1-per-2.6m on one piece and 1-per-51.9m on the next.
+The property under test is the one the whole design rests on: every edge
+on a block face must report the same density, whatever length OSM chopped
+it to. Otherwise the same tree reads 1-per-2.6m on one piece and
+1-per-51.9m on the next.
 
 The index is faked here. A real BlockFaceIndex needs 170,985 road-edge kerb
 lines and the whole CSCL layer; what this module actually depends on is the
@@ -12,10 +12,10 @@ this line", so the tests supply that directly and stay fast. Coverage of the
 real index lives in the audit tools (measure_kerb_vs_centerline.py,
 test_tree_block_assignment.py).
 
-The fake speaks PROFILES -- {face_id: metres} -- because that is what
-scoring now consumes. `match_line`'s one-face-per-edge answer was retired
-for scoring on 2026-08-24: it matched nothing at all on edges longer than a
-block, which is 28.3% of the city's sidewalk length.
+The fake speaks profiles -- {face_id: metres} -- because that is what
+scoring consumes: `match_line`'s one-face-per-edge answer matches nothing
+at all on edges longer than a block, which is 28.3% of the city's sidewalk
+length.
 """
 
 import pytest
@@ -65,8 +65,8 @@ def fake_index(points=None, spans=None, sides=None):
     """Build a FakeIndex from {first coord: [(Face, metres), ...]}.
 
     Spelled out per edge rather than derived from edge length, because the
-    two are deliberately NOT the same number any more: an edge contributes
-    only the metres that actually lie beside a face.
+    two are deliberately not the same number: an edge contributes only the
+    metres that actually lie beside a face.
     """
     lines, faces = {}, {}
     for first, allocation in (spans or {}).items():
@@ -135,8 +135,8 @@ def test_the_shares_sum_back_to_the_faces_own_total():
 
 
 def test_a_short_edge_keeps_a_fractional_count():
-    """The bug that made export truncate: a small share must survive as a
-    fraction rather than collapsing to zero."""
+    """A small share must survive as a fraction rather than collapsing to
+    zero."""
     f = face()
     edges = [edge("a", "b", 5.0, first=(0.0, 0.0)),
              edge("b", "c", 95.0, first=(0.1, 0.1))]
@@ -151,9 +151,9 @@ def test_a_short_edge_keeps_a_fractional_count():
 
 # --- the long-edge fix: an edge spanning block faces ------------------
 #
-# This is what match_line could not do at all. Before 2026-08-24 an edge
-# running past several blocks exceeded BLOCK_FACE_MAX_M on the median and
-# matched NOTHING -- scoring zero itself and starving every face it passed.
+# This is what match_line cannot do at all: an edge running past several
+# blocks exceeds BLOCK_FACE_MAX_M on the median and matches nothing --
+# scoring zero itself and starving every face it passes.
 
 def test_an_edge_spanning_two_faces_gets_a_length_weighted_average():
     """The 500m-way case. 100m beside a leafy block and 100m beside a bare
@@ -227,8 +227,8 @@ def test_unmatched_metres_are_not_credited_to_a_neighbouring_block():
 # --- what scores zero -------------------------------------------------
 
 def test_crossings_score_zero_and_do_not_dilute_the_block():
-    """User decision 2026-08-24. The crossing's 12m must not enter the
-    denominator, or it would water down the sidewalk's density."""
+    """The crossing's 12m must not enter the denominator, or it would water
+    down the sidewalk's density."""
     f = face()
     sidewalk = edge("a", "b", 88.0, first=(0.0, 0.0))
     crossing = edge("b", "c", 12.0, kind="footway/crossing", first=(0.1, 0.1))
@@ -314,7 +314,7 @@ def test_dead_trees_never_reach_a_block():
 
 def test_side_is_the_compass_side_of_the_dominant_face():
     """pedestrian.py leaves side as the "" placeholder; scoring fills the
-    COMPASS side from the edge's geometry against its face's kerb -- not
+    compass side from the edge's geometry against its face's kerb -- not
     the face's CSCL L/R, which flips arbitrarily between blocks."""
     edges = [edge("a", "b", 40.0, first=(0.0, 0.0))]
     assert edges[0]["side"] == ""
@@ -388,9 +388,9 @@ def test_the_tally_counts_spanning_edges():
 
 
 def test_trees_are_matched_at_the_tree_cap_not_the_line_default():
-    """score_edges must pass TREE_ATTACH_MAX_M to match_point -- the
-    2026-08-27 5->8m widening lives entirely in that argument, so a
-    refactor that drops it silently reverts the model while every other
+    """score_edges must pass TREE_ATTACH_MAX_M to match_point -- the wider
+    tree cap lives entirely in that argument, so a refactor that drops it
+    silently reverts the model while every other
     test stays green. The distance semantics themselves are pinned in
     test_pipeline_graph_blockface.py; this pins the call site."""
     f = face()
