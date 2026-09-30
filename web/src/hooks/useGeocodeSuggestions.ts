@@ -18,13 +18,20 @@ export const SUGGEST_MIN_CHARS = 3
  * reverse-geocode fill (don't re-suggest text we generated ourselves). */
 export function useGeocodeSuggestions(query: string, enabled: boolean): GeocodeResult[] {
   const [suggestions, setSuggestions] = useState<GeocodeResult[]>([])
+  const trimmed = query.trim()
+  const active = enabled && trimmed.length >= SUGGEST_MIN_CHARS
+
+  // Switching off empties the list while rendering (React's "adjusting
+  // state when a prop changes"), not in an effect a beat later, so the old
+  // list can't show for a render — or come back when suggesting resumes.
+  const [wasActive, setWasActive] = useState(active)
+  if (active !== wasActive) {
+    setWasActive(active)
+    if (!active) setSuggestions([])
+  }
 
   useEffect(() => {
-    const trimmed = query.trim()
-    if (!enabled || trimmed.length < SUGGEST_MIN_CHARS) {
-      setSuggestions([])
-      return
-    }
+    if (!active) return
     const controller = new AbortController()
     const timer = setTimeout(() => {
       suggest(trimmed, controller.signal)
@@ -38,7 +45,7 @@ export function useGeocodeSuggestions(query: string, enabled: boolean): GeocodeR
       clearTimeout(timer)
       controller.abort()
     }
-  }, [query, enabled])
+  }, [active, trimmed])
 
   return suggestions
 }

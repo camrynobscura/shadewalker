@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useGeolocation, type GeoPosition } from './useGeolocation'
 
 /* One ⌖ tap = one gated fill (user calls, 2026-09-02). The first fix
@@ -39,61 +39,64 @@ export interface LocationFill {
 
 export function useLocationFill(onFill: (p: GeoPosition) => void): LocationFill {
   const [enabled, setEnabled] = useState(false)
+  // Whether a fill is pending, for rendering (the status, the settle
+  // timer). The pending fill's bookkeeping is a ref: the handlers below
+  // read and write it as each fix lands, and it's never rendered.
   const [armed, setArmed] = useState(false)
-  const { position, error } = useGeolocation(enabled)
+  const pendingRef = useRef<{ armedAt: number; best: GeoPosition | null } | null>(null)
 
-  // Refs, not state: consumed inside effects, never rendered.
-  const armedAtRef = useRef(0)
-  const bestFixRef = useRef<GeoPosition | null>(null)
-  const onFillRef = useRef(onFill)
-  onFillRef.current = onFill
-
-  function request() {
-    setEnabled(true)
-    armedAtRef.current = Date.now()
-    bestFixRef.current = null
-    setArmed(true)
+  function fill(fix: GeoPosition) {
+    pendingRef.current = null
+    setArmed(false)
+    onFill(fix)
   }
 
-  // The gate: every fix while armed is a candidate. Runs synchronously on
-  // arming too (request() re-renders with `armed` true and the current
-  // position already in hand), which is what makes a re-tap with a warm,
-  // accurate fix fill instantly.
-  useEffect(() => {
-    if (!armed || !position) return
-    const best = bestFixRef.current
-    if (!best || position.accuracy < best.accuracy) bestFixRef.current = position
-    if (position.accuracy <= ACCURACY_GATE_M) {
+  // The gate: every fix while armed is a candidate, handled as it arrives.
+  function consider(fix: GeoPosition) {
+    const pending = pendingRef.current
+    if (!pending) return
+    const best = pending.best && pending.best.accuracy <= fix.accuracy ? pending.best : fix
+    pending.best = best
+    if (fix.accuracy <= ACCURACY_GATE_M) {
       // A passing fix fills with ITSELF, not best-so-far: both clear the
       // bar, and the fresh one describes where the phone is now.
-      setArmed(false)
-      onFillRef.current(position)
-    } else if (Date.now() - armedAtRef.current >= SETTLE_TIMEOUT_MS) {
-      setArmed(false)
-      onFillRef.current(bestFixRef.current ?? position) // ?? for the types; best was just set above
+      fill(fix)
+    } else if (Date.now() - pending.armedAt >= SETTLE_TIMEOUT_MS) {
+      fill(best)
     }
-  }, [armed, position])
-
-  // The settle timeout: fires even if no NEW fix arrives after arming
-  // (the gate effect above only runs when one does). No fix at all by the
-  // deadline → stay armed, and the gate's own deadline branch fills from
-  // whatever arrives first.
-  useEffect(() => {
-    if (!armed) return
-    const timer = setTimeout(() => {
-      if (bestFixRef.current) {
-        setArmed(false)
-        onFillRef.current(bestFixRef.current)
-      }
-    }, SETTLE_TIMEOUT_MS)
-    return () => clearTimeout(timer)
-  }, [armed])
+  }
 
   // A failure while a fill is pending ends the wait — the error status is
   // the answer the tap gets, not an eternal "acquiring".
+  function abandon() {
+    pendingRef.current = null
+    setArmed(false)
+  }
+
+  const { position, error } = useGeolocation(enabled, { onFix: consider, onError: abandon })
+
+  function request() {
+    setEnabled(true)
+    pendingRef.current = { armedAt: Date.now(), best: null }
+    setArmed(true)
+    // The fix already in hand is the first candidate: a re-tap with a
+    // warm, accurate fix fills at once.
+    if (position) consider(position)
+  }
+
+  // The settle timeout: fires even if no NEW fix arrives after arming
+  // (the gate only runs when one does). No fix at all by the deadline →
+  // stay armed, and the gate's own deadline branch fills from whatever
+  // arrives first.
+  const settle = useEffectEvent(() => {
+    const best = pendingRef.current?.best
+    if (best) fill(best)
+  })
   useEffect(() => {
-    if (error) setArmed(false)
-  }, [error])
+    if (!armed) return
+    const timer = setTimeout(() => settle(), SETTLE_TIMEOUT_MS)
+    return () => clearTimeout(timer)
+  }, [armed])
 
   const status: LocationFillStatus = !enabled
     ? 'idle'

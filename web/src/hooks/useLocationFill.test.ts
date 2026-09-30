@@ -78,8 +78,8 @@ describe('useLocationFill', () => {
     expect(result.current.status).toBe('ready')
 
     act(() => result.current.request())
-    // No new fix needed — the gate effect re-runs against the position in
-    // hand, still inside this act.
+    // No new fix needed — the tap itself runs the gate on the position in
+    // hand.
     expect(onFill).toHaveBeenCalledTimes(2)
     expect(result.current.status).toBe('ready')
   })

@@ -121,8 +121,13 @@ export function useRouteQuery(
 
   const [route, setRoute] = useState<RouteResponse | null>(null)
   const [routeWalkTime, setRouteWalkTime] = useState<WalkTime | null>(null)
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The request whose fetch last finished, answered or failed (a
+  // superseded one never finishes). Loading is worked out from it rather
+  // than stored, so a trip replaced or emptied mid-fetch can't leave it on
+  // -- emptying a field once left the vine running with no trip at all.
+  const [settled, setSettled] = useState<RouteRequest | null>(null)
+  const loading = request !== null && settled !== request
 
   // Desktop: the complete trip in the fields IS the request. Adjusted
   // while rendering (React's pattern for state that follows other state)
@@ -131,7 +136,10 @@ export function useRouteQuery(
   // as before FIND_ROUTE existed.
   if (auto && start && end) {
     const fields = { start, end, walkTime, layers }
-    if (!sameRequest(request, fields)) setRequest(fields)
+    if (!sameRequest(request, fields)) {
+      setRequest(fields)
+      setError(null)
+    }
   }
 
   const [snappedStart, setSnappedStart] = useState<Point | null>(null)
@@ -145,12 +153,20 @@ export function useRouteQuery(
   function setStart(p: Point | null) {
     setSnappedStart(null)
     setStartRaw(p)
-    if (!p) setRequest(null)
+    if (!p) clearTrip()
   }
   function setEnd(p: Point | null) {
     setSnappedEnd(null)
     setEndRaw(p)
-    if (!p) setRequest(null)
+    if (!p) clearTrip()
+  }
+  // An emptied field leaves no trip: drop the request and what was drawn
+  // for it. A failed trip's error stays until the next request.
+  function clearTrip() {
+    setRequest(null)
+    setRoute(null)
+    setSnappedStart(null)
+    setSnappedEnd(null)
   }
   function setWalkTime(t: WalkTime | null) {
     setWalkTimeRaw((current) => (sameWalkTime(current, t) ? current : t))
@@ -159,8 +175,11 @@ export function useRouteQuery(
   function findRoute() {
     if (!start || !end) return
     const next = { start, end, walkTime, layers }
-    // A failed request gets a fresh object, so the same trip retries.
-    setRequest((current) => (sameRequest(current, next) && !error ? current : next))
+    // The same trip again keeps the route drawn -- unless it failed: a
+    // fresh object retries it.
+    if (sameRequest(request, next) && !error) return
+    setRequest(next)
+    setError(null)
   }
 
   // Fetch whenever a new trip is requested -- deliberately NOT on
@@ -170,12 +189,7 @@ export function useRouteQuery(
   // previous fetch resolves) — otherwise slow responses could arrive out
   // of order and paint a stale route over a fresh one.
   useEffect(() => {
-    if (!request) {
-      setRoute(null)
-      setSnappedStart(null)
-      setSnappedEnd(null)
-      return
-    }
+    if (!request) return
     const controller = new AbortController()
     // The same controller serves both ends: cleanup aborts with the
     // default AbortError (superseded, say nothing), the deadline aborts
@@ -185,15 +199,13 @@ export function useRouteQuery(
       () => controller.abort(new DOMException('route request timed out', 'TimeoutError')),
       ROUTE_TIMEOUT_MS,
     )
-    setLoading(true)
-    setError(null)
     fetchRoute(request.start, request.end, TREE_WEIGHTS, controller.signal, request.walkTime, request.layers)
       .then((data) => {
         setRoute(data)
         setRouteWalkTime(request.walkTime)
         setSnappedStart(data.snapped.start)
         setSnappedEnd(data.snapped.end)
-        setLoading(false)
+        setSettled(request)
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return // superseded, not an error
@@ -216,7 +228,7 @@ export function useRouteQuery(
         }
         setSnappedStart(null)
         setSnappedEnd(null)
-        setLoading(false)
+        setSettled(request)
       })
       .finally(() => clearTimeout(deadline))
     return () => {
