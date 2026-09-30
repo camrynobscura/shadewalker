@@ -273,56 +273,6 @@ def classify_flag(ours_m, theirs_m):
     return None
 
 
-# ── Gap-probe oracle rules ───────────────────────────────────────────────────
-# Three rules a gap probe (asking an external engine whether two nearby
-# points connect) needs, kept as small unit-tested helpers so a probe imports
-# them instead of re-deriving them.
-
-# Generous NYC envelope (all five boroughs + the harbor islands), for
-# rejecting OSRM annotation/way ids that snapped to somewhere impossible.
-NYC_LAT_MIN, NYC_LAT_MAX = 40.45, 40.95
-NYC_LON_MIN, NYC_LON_MAX = -74.30, -73.68
-
-# Rule (a): a gap probe asks OSRM to route between two points that are far
-# apart in our graph but near in reality. OSRM prunes small components and
-# silently snaps a probe endpoint across the very gap under test, then
-# reports a short "connected" walk that is really about two other points.
-# Rejecting only when the snap exceeds twice the gap lets hundreds of such
-# false "connected" verdicts through. The snap must stay well inside the
-# gap: if a snap displacement reaches half the gap, the probe has likely
-# left the scrap and the verdict must read ABSENT_OR_PRUNED, never
-# "connected".
-GAP_PROBE_SNAP_FRACTION = 0.5
-
-
-def gap_probe_snap_ok(snap_m, gap_m, max_fraction=GAP_PROBE_SNAP_FRACTION):
-    """True if an OSRM probe's snap displacement is small enough (relative to
-    the gap under test) to trust the verdict. When it returns False the probe
-    result is ABSENT_OR_PRUNED, not a real "connected" -- see rule (a)."""
-    if gap_m <= 0:
-        return False
-    return snap_m < max_fraction * gap_m
-
-
-def in_nyc_bbox(lat, lon):
-    """Rule (b): `annotations=nodes` emits garbage ids near snapped endpoints
-    (a Swiss node id on a Brooklyn route). Any way/node looked up
-    from an OSRM annotation id must be geometry-filtered to NYC before it is
-    trusted or embedded in an Overpass query."""
-    return (NYC_LAT_MIN <= lat <= NYC_LAT_MAX and
-            NYC_LON_MIN <= lon <= NYC_LON_MAX)
-
-
-def coerce_osrm_node_id(value):
-    """Rule (c): OSRM emits some node ids as floats (1.234e9). `int()`-coerce
-    before embedding in an Overpass query, or a whole chunk fails silently.
-    Raises ValueError on a non-integral value rather than truncating one."""
-    as_float = float(value)
-    if as_float != int(as_float):
-        raise ValueError(f"non-integral OSRM node id: {value!r}")
-    return int(as_float)
-
-
 def google_walking_directions_url(a, b):
     """The field-check link format the manual spot-check workflow uses:
     the whole route, not a single point."""
