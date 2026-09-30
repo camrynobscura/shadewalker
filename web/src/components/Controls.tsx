@@ -47,7 +47,7 @@ interface ControlsProps {
    * shown right above the address fields since that's what it's actually
    * about, and it's where a user's attention already is right after
    * pressing Enter on an address or tapping the map (the map sits directly
-   * above this panel, not down near RouteStats where this used to live). */
+   * above this panel). */
   error: string | null
   /** The walk's departure or arrival time, or null for "leave now". */
   walkTime: WalkTime | null
@@ -75,8 +75,8 @@ interface ControlsProps {
   onBack: () => void
 }
 
-/* The rows run shadiest first (MAX on top, user default 2026-09-27):
-   shade is the point of the app. */
+/* The rows run shadiest first (MAX on top): shade is the point of the
+   app. */
 const PRESETS_SHADIEST_FIRST = [...TREE_PRESETS].reverse()
 
 /** "15 min" / "1 hr 5 min", flat -- the row's compact eta. */
@@ -122,18 +122,16 @@ export function Controls({
   // Nothing about the chosen route while a new one is on its way: the
   // numbers would be the previous trip's.
   const shown = loading ? null : selected
-  // The low-shade warning lives HERE, not with the route stats, since
-  // 2026-08-31 (user call): Shade_priority is where the remedy is -- turn
-  // the dial up and watch whether the warning goes away.
-  // Only for all shade (user, 2026-09-29): with one kind off, "expect
-  // mostly direct sun" could be false on a street the other kind shades.
+  // The low-shade warning lives here, with Shade_priority, because that is
+  // where the remedy is: turn the dial up and watch whether the warning
+  // goes away. Only for all shade: with one kind off, "expect mostly
+  // direct sun" could be false on a street the other kind shades.
   // The box's last row shows when it has something to say.
   const hasHint = night || shown !== null
   const lowShade =
     shown !== null && routeLayers === 'both' && shown.properties.shade_fraction < LOW_SHADE_FRACTION
-  // The tree count, flavour the user wanted kept (2026-09-27): a line
-  // under the rows (it didn't fit IN them on a phone), hidden by the same
-  // park-canopy rule the old stat had.
+  // The tree count: a line under the rows (it doesn't fit in them on a
+  // phone), hidden by the park-canopy rule.
   const treeCount =
     shown && shown.properties.park_canopy_share < CANOPY_SHARE_HIDES_TREE_COUNT
       ? shown.properties.tree_count
@@ -174,11 +172,11 @@ export function Controls({
     else findRef.current?.focus()
   }, [view, isMobile])
 
-  /* Recents are recorded HERE, on route arrival — not at resolve time.
+  /* Recents are recorded here, on route arrival — not at resolve time.
      Only the endpoints of a route that actually drew count as recent
-     addresses (user call 2026-09-03): a lone entry used to surface in
-     the OTHER field's recents before any route existed, and abandoned
-     one-field entries polluted the list. Each field's commit is
+     addresses: otherwise a lone entry surfaces in the other field's
+     recents before any route exists, and abandoned one-field entries
+     pollute the list. Each field's commit is
      one-shot, so preset switches swapping `selected` re-record nothing.
      commitRecent's identity changes per render and reads refs — deps on
      it would just refire the effect uselessly. */
@@ -189,15 +187,13 @@ export function Controls({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected])
 
-  /* The start field's empty-state accessory is the location control
-     (2026-09-02, replacing the USE_LOCATION button row): "use my location"
-     is a start-point affordance, so it lives in the start field — same
-     slot AddressField's own ✕ takes over once there's text to clear. One
-     tap does the
-     whole job since the same day's use-location-ux pass: enable, wait for
-     a fix that clears the accuracy gate, fill start, recenter the map —
-     the old enable-then-tap-again dance is gone (App's useLocationFill
-     owns all of that; this button just reports the tap). Disabled only
+  /* The start field's empty-state accessory is the location control:
+     "use my location" is a start-point affordance, so it lives in the
+     start field — same slot AddressField's own ✕ takes over once there's
+     text to clear. One tap does the whole job: enable, wait for a fix
+     that clears the accuracy gate, fill start, recenter the map (App's
+     useLocationFill owns all of that; this button just reports the tap).
+     Disabled only
      while a fill is actually pending; an error state stays tappable —
      that's the retry — with the explanation in the field's status line
      below. Same ⌖ glyph as the map's own locate button. */
@@ -218,19 +214,16 @@ export function Controls({
       </button>
     )
 
-  /* The failure half of the location story (useGeolocation swallowed
-     every error into a stuck "acquiring" until 2026-09-02). Rendered in
-     the start field's status line — the same live region NOT_FOUND uses,
-     right under the ⌖ the answer is about. Lives and dies WITH the ⌖:
-     once the field has text, the ✕ has taken the slot and location advice
-     is stale noise (user call 2026-09-02 — "once you input an address,
-     that error should go away"); clearing the field brings both back. */
+  /* The failure half of the location story. Rendered in the start
+     field's status line — the same live region NOT_FOUND uses, right
+     under the ⌖ the answer is about. Lives and dies with the ⌖: once the
+     field has text, the ✕ has taken the slot and location advice is
+     stale noise; clearing the field brings both back. */
   const locationNotice =
     start.query !== '' ? null : locationStatus === 'acquiring' ? (
       /* The accuracy gate can wait up to 10s for a location worth
          trusting, and the only other signal is the ⌖ greying out — this
-         line makes the silence read as progress, not a hang (the "nothing
-         seemed to happen" report, 2026-09-02). */
+         line makes the silence read as progress, not a hang. */
       <>
         <span aria-hidden="true">{'// ACQUIRING:'}</span>
         <span className={styles.visuallyHidden}>Acquiring:</span> pinpointing your location…
@@ -245,8 +238,8 @@ export function Controls({
       <>
         <span aria-hidden="true">{'// NO_LOCATION:'}</span>
         {/* No ⌖ glyph in copy — it's tofu in iOS's mono fallback (the
-            whole reason icons.tsx exists). "Location", never "fix" — GPS
-            jargon (user call 2026-09-02). */}
+            whole reason icons.tsx exists). "Location", never "fix", which
+            is GPS jargon. */}
         <span className={styles.visuallyHidden}>No location:</span> couldn&#39;t find your location — tap the
         location button to retry
       </>
@@ -258,22 +251,21 @@ export function Controls({
           it (nothing to divide from but the panel's own top edge), unlike
           the two below. */}
       <div className={styles.addressGroup}>
-        {/* The alert REGION stays mounted; only its text is conditional.
+        {/* The alert region stays mounted; only its text is conditional.
             role="alert" (assertive) only announces content appearing in a
             live region that already existed -- mounting the whole <p> on
-            error, as this used to, meant VoiceOver never caught it,
-            worst on a URL-loaded out-of-coverage route (the region was
-            inserted already-populated, so there was no observed change
-            to announce). Same fix + reasoning as RouteStats' wrapper.
-            The empty <p> collapses to zero height, so no dead space. */}
+            error would mean VoiceOver never catches it, worst on a
+            URL-loaded out-of-coverage route (the region would be inserted
+            already-populated, so there is no observed change to announce).
+            Same reasoning as RouteStats' wrapper. The empty <p> collapses
+            to zero height, so no dead space. */}
         <p className={error ? styles.error : styles.errorEmpty} role="alert">
           {error && (
             <>
               {/* Same "// TITLE:" prefix as the low-shade note (aria-hidden
                   glyph + sr-only clean words), so this alert reads in the
-                  app's own voice (user call 2026-09-01). Covers every message
-                  in this slot: out-of-coverage, same start/end, no route,
-                  server down. */}
+                  app's own voice. Covers every message in this slot:
+                  out-of-coverage, same start/end, no route, server down. */}
               <strong>
                 <span aria-hidden="true">// ERROR:</span>
                 <span className={styles.visuallyHidden}>Error:</span>
@@ -284,19 +276,16 @@ export function Controls({
         </p>
         {/* Typed text resolves on Enter (handled in AddressField's
             keydown) and on blur. On a phone the route then waits for
-            FIND_ROUTE below (back since 2026-09-27 -- it went in the
-            2026-09-02 mobile pass to save room, and the phone's two
-            screens gave the room back; it's the checkpoint where a wrong
-            address gets caught, and the step to the route screen). Desktop
-            has no second screen, so no button (CSS): it routes the moment
-            both points exist, as before. A plain div, not a <form>:
-            FIND_ROUTE has to wait for the fields' lookups, which a submit
-            event can't. */}
+            FIND_ROUTE below: it's the checkpoint where a wrong address
+            gets caught, and the step to the route screen. Desktop has no
+            second screen, so no button (CSS): it routes the moment both
+            points exist. A plain div, not a <form>: FIND_ROUTE has to wait
+            for the fields' lookups, which a submit event can't. */}
         <div className={styles.addressFields}>
-          {/* Both examples verified against /geocode (2026-09-01): each
-              resolves to the right spot in the Village, inside the landing
-              view. Tempting alternatives fail silently -- "45 Charles St"
-              lands in Alden Manor, "99 Perry St" on Staten Island. */}
+          {/* Both examples verified against /geocode: each resolves to
+              the right spot in the Village, inside the landing view.
+              Tempting alternatives fail silently -- "45 Charles St" lands
+              in Alden Manor, "99 Perry St" on Staten Island. */}
           <AddressField
             label="Start_point"
             marker="A"
@@ -316,9 +305,9 @@ export function Controls({
           />
           {/* The trip's options, right under where (Google Maps' order),
               as small pills: most walks are right now and by all shade,
-              so they shouldn't weigh what the addresses do (user,
-              2026-09-28). Here a change waits for FIND_ROUTE, like the
-              addresses; on desktop it routes by itself. */}
+              so they shouldn't weigh what the addresses do. Here a change
+              waits for FIND_ROUTE, like the addresses; on desktop it
+              routes by itself. */}
           <div className={styles.tripOptions}>
             <TimeControl walkTime={walkTime} onChange={onWalkTimeChange} />
             <ShadeControl layers={layers} onChange={onLayersChange} />
@@ -356,8 +345,8 @@ export function Controls({
         {/* Phone only (CSS): the same pills under the trip line, so the
             time shows beside the route it's for -- a route for 9 am can't
             pass for "now" -- and a change here re-routes at once, the way
-            Shade_priority is instant (user, 2026-09-28). Desktop has the
-            one row under the addresses. */}
+            Shade_priority is instant. Desktop has the one row under the
+            addresses. */}
         <div className={styles.routeTripOptions}>
           <TimeControl
             walkTime={walkTime}
@@ -390,13 +379,12 @@ export function Controls({
               <span aria-hidden="true">Shade_priority</span>
               <span className={styles.visuallyHidden}>Shade priority</span>
             </legend>
-            {/* The four routes as rows (PLAN `phone-space`, user
-              2026-09-27): each row IS its route's numbers -- minutes,
-              distance, shade -- so every option's cost shows at once
-              instead of one comparison at a time. (The tree count was
-              tried in the rows too and wrapped them to two lines on a
-              phone; it's a line under them instead.) Still one native radio group -- a tap or arrow key
-              picks a row and the map shows it, as the old bar did. */}
+            {/* The four routes as rows (#118): each row is its route's
+              numbers -- minutes, distance, shade -- so every option's cost
+              shows at once instead of one comparison at a time. (The tree
+              count wraps the rows to two lines on a phone, so it's a line
+              under them instead.) Still one native radio group -- a tap or
+              arrow key picks a row and the map shows it. */}
             <div className={styles.routeRows}>
               {PRESETS_SHADIEST_FIRST.map((preset) => {
                 const feature = loading
@@ -405,8 +393,8 @@ export function Controls({
                 const numbers = feature?.properties ?? null
                 const shadePct = numbers ? Math.round(displayShade(numbers.shade_fraction) * 100) : 0
                 // Arrive by: each route's own leave time, first in its row
-                // (user, 2026-09-28 -- bare: the time box and the phone's
-                // trip line already say Arrive).
+                // (bare: the time box and the phone's trip line already
+                // say Arrive).
                 const leave =
                   numbers && routeWalkTime?.arrive
                     ? describeClock(leaveTime(routeWalkTime, numbers.minutes))
@@ -423,8 +411,8 @@ export function Controls({
                       className={styles.routeInput}
                     />
                     {/* Visible row aria-hidden, one spoken sentence as the
-                      name (twin spans, as before): VoiceOver spelled L-O-W
-                      and would read "min" and "mi" as words. */}
+                      name (twin spans): VoiceOver spells L-O-W and reads
+                      "min" and "mi" as words. */}
                     <span className={styles.routeFace} aria-hidden="true">
                       <span className={styles.routeName}>{preset.label}</span>
                       {numbers ? (
@@ -459,13 +447,11 @@ export function Controls({
               })}
               {/* The box's last row, once a route exists: what the chosen
                 preset does, and the tree count -- a footnote in the muted
-                green (user, 2026-09-29: two loose lines under the box looked
-                tacked on). (A "+31% shade | +3 min" line compared it with NONE
-                until the rows showed every route's numbers side by side --
-                user, 2026-09-28.) aria-live: they change with Shade_priority
-                and when a route arrives; aria-atomic re-reads the row as one
-                unit. Always mounted, so it can announce; empty, it takes no
-                room and draws no line. */}
+                green, inside the box (loose lines under it look tacked on).
+                aria-live: they change with Shade_priority and when a route
+                arrives; aria-atomic re-reads the row as one unit. Always
+                mounted, so it can announce; empty, it takes no room and
+                draws no line. */}
               <div
                 className={hasHint ? styles.routeHint : styles.routeHintEmpty}
                 aria-live="polite"
@@ -473,15 +459,14 @@ export function Controls({
               >
                 {/* Spoken-only prefix: aria-atomic re-reads this whole box on
                   every route arrival and preset change, and without a name
-                  the stream arrived as context-free "mode medium..."
-                  (VoiceOver pass, 2026-08-31). Every announcement now opens
-                  with which section is talking. */}
+                  the stream arrives as context-free "mode medium...", so
+                  every announcement opens with which section is talking. */}
                 <span className={styles.visuallyHidden}>Shade priority: </span>
                 {night ? (
-                  /* After dark (PLAN `night-shade`) every preset is the same
-                   fastest route at 100%: the mode hint would promise detours
-                   that don't happen, so one line replaces it (copy: user,
-                   2026-09-26). The buttons stay live -- they just agree. */
+                  /* After dark (#112) every preset is the same fastest route
+                   at 100%: the mode hint would promise detours that don't
+                   happen, so one line replaces it. The buttons stay live --
+                   they just agree. */
                   <p className={styles.modeLine}>
                     <span aria-hidden="true">
                       <span className={styles.promptSymbol}>&gt;</span>

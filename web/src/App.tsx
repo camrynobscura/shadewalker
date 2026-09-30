@@ -41,11 +41,11 @@ function initialTreeWeight(params: URLSearchParams): number {
 const initialParams = new URLSearchParams(window.location.search)
 
 /* A label param (`fromq`/`toq`) is display text for the matching point —
-   only meaningful when that point parsed. Without it, reload used to
+   only meaningful when that point parsed. Without it, a reload would
    reverse-geocode the bare coordinate, and the nearest-thing name that
-   came back could differ from what was typed ("Court Street" reloading as
-   a Montague Street address — user report 2026-09-02) or, when the lookup
-   failed, stay raw coordinates. */
+   comes back can differ from what was typed ("Court Street" reloading as
+   a Montague Street address) or, when the lookup fails, stay raw
+   coordinates. */
 function initialLabel(params: URLSearchParams, labelKey: string, pointKey: string): string | null {
   return parsePoint(params.get(pointKey)) ? params.get(labelKey) : null
 }
@@ -107,16 +107,14 @@ export default function App() {
 
   /* Where the map should pan, imperatively: set to the location fix when
      it fills the start field, so the map visibly answers the tap even
-     though RouteFraming deliberately ignores single points (a user in
-     Brooklyn watched nothing move while the app stayed on the Village —
-     2026-09-02). A fresh object per fill, so re-tapping ⌖ pans again even
-     to the same spot. */
+     though RouteFraming deliberately ignores single points. A fresh
+     object per fill, so re-tapping ⌖ pans again even to the same spot. */
   const [panTarget, setPanTarget] = useState<Point | null>(null)
 
   /* The latest address typed or picked in a field, for the map to bring
-     into view while it's the only point (MapView's RevealLonePoint): its
-     marker used to land off-screen (user, 2026-09-29). Only the fields
-     set it -- a map tap lands where the user is already looking. */
+     into view while it's the only point (MapView's RevealLonePoint):
+     otherwise its marker lands off-screen. Only the fields set it -- a
+     map tap lands where the user is already looking. */
   const [revealPoint, setRevealPoint] = useState<Point | null>(null)
   function setStartFromField(p: Point | null) {
     setStart(p)
@@ -132,10 +130,10 @@ export default function App() {
     setPanTarget({ lat: fix.lat, lon: fix.lon })
   })
 
-  /* Mobile full-screen map (user, 2026-09-02: the 45vh mobile map "feels
-     really cramped", worst right when a route exists and the panel matters
-     least). The toggle hides the panel AND the header (user call
-     2026-09-02) — iPhone Safari has no element fullscreen API, so this is
+  /* Mobile full-screen map: the 45vh mobile map feels cramped, worst
+     right when a route exists and the panel matters least. The toggle
+     hides the panel and the header — iPhone Safari has no element
+     fullscreen API, so this is
      a layout mode, not the Fullscreen API. Mobile-only: the desktop
      two-column layout already gives the map most of the screen.
      `mapExpanded` is derived, not stored, so resizing/rotating past the
@@ -144,8 +142,8 @@ export default function App() {
   const [wantMapExpanded, setWantMapExpanded] = useState(false)
   const mapExpanded = wantMapExpanded && isMobile
 
-  /* The panel's two screens on a phone (PLAN `phone-space`, user
-     2026-09-27): 'plan' (addresses, time, FIND_ROUTE) and 'route' (the
+  /* The panel's two screens on a phone (#118): 'plan' (addresses, time,
+     FIND_ROUTE) and 'route' (the
      trip summary, the four routes, directions). CSS does the hiding, on
      phones only, from the section's data-view -- desktop shows both at
      once. A shared link opens on 'route': its trip is already chosen.
@@ -158,7 +156,7 @@ export default function App() {
 
   /* FIND_ROUTE lands here only after Controls has let both fields finish
      resolving typed text, so the points they found are already queued
-     ahead of this flag -- which is why the decision is made on the NEXT
+     ahead of this flag -- which is why the decision is made on the next
      render (React's "adjust state while rendering"), where start/end are
      current, rather than in the click's closure, where they aren't. A
      field that found nothing leaves its point empty: then nothing
@@ -187,8 +185,8 @@ export default function App() {
 
   // Mirror state → URL (labels included — the point is the truth, the
   // label is what the field showed for it). The time only when one was
-  // picked (user, 2026-09-26): a link without it means "now" whenever
-  // it's opened, which is what most shared routes want.
+  // picked: a link without it means "now" whenever it's opened, which
+  // is what most shared routes want.
   const searchRef = useRef('')
   useEffect(() => {
     const params = new URLSearchParams()
@@ -245,8 +243,7 @@ export default function App() {
 
   // Map clicks fill A, then B, then start a fresh route. On a phone's
   // route screen that fresh start also goes back to the plan screen,
-  // where B and FIND_ROUTE are (user, 2026-09-27: tapping the map there
-  // is still useful -- it replaced "taps do nothing on the route screen").
+  // where B and FIND_ROUTE are.
   function handleMapClick(p: Point) {
     if (isMobile && showRoute) leaveRoute()
     if (!start || (start && end)) {
@@ -275,11 +272,11 @@ export default function App() {
           so a remount can't re-fire it. */}
       {!mapExpanded && <Header page="map" />}
 
-      {/* <main> wraps BOTH the map and the panel: the panel is the app's
+      {/* <main> wraps both the map and the panel: the panel is the app's
           primary input, not a sidebar — without it the page is an empty
-          map of New York — so it can't honestly be <aside>/"complementary"
-          (craftsmanship review 2026-09-09). Each half is its own named
-          region inside main: MapView's "Map", and the <section> below. */}
+          map of New York — so it can't honestly be <aside>/"complementary".
+          Each half is its own named region inside main: MapView's "Map",
+          and the <section> below. */}
       <main className={styles.layout}>
         <div className={mapExpanded ? `${styles.mapArea} ${styles.mapAreaExpanded}` : styles.mapArea}>
           {/* The wordmark <h1> left with the header, and a page with zero
@@ -307,7 +304,7 @@ export default function App() {
         </div>
 
         {/* A named <section> = a "region" landmark, so the panel is still
-            one jump away in a landmark list. Stays MOUNTED while the map
+            one jump away in a landmark list. Stays mounted while the map
             is expanded, unlike the header: display:none (panelHidden)
             keeps the address fields' typed-but-unresolved text and the
             aria-live regions alive, while still removing the panel from

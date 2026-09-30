@@ -33,12 +33,8 @@ export function formatDistance(meters: number): string {
 /** ETA as value/unit pairs, for the same <small>-styled markup as
  * formatDistanceParts. Under an hour it reads "42 min"; from an hour up,
  * "2 hr 19 min", with a zero remainder dropped ("2 hr", never
- * "2 hr 0 min"). These units only fit on one stat-box line because the
- * stat values render in a PROPORTIONAL face (RouteStats.module.css's
- * .statVal) — in the app's monospace they were a third spaces and
- * wrapped; short "2h 19m" units were tried in between (2026-08-28).
- * Rounds the raw minutes ONCE, up front, then splits — so 59.6 rolls
- * over to "1 hr" and can never render as "60 min". */
+ * "2 hr 0 min"). Rounds the raw minutes once, up front, then splits — so
+ * 59.6 rolls over to "1 hr" and can never render as "60 min". */
 export function formatEtaParts(minutes: number): Array<{ value: string; unit: string }> {
   const total = Math.round(minutes)
   if (total < 60) return [{ value: `${total}`, unit: 'min' }]
@@ -49,10 +45,9 @@ export function formatEtaParts(minutes: number): Array<{ value: string; unit: st
   return parts
 }
 
-/** Spoken twin of the eta stat box: the visible "2 hr 9 min" is compact
- * for the eye, but read aloud "hr"/"mi" are cryptic (VoiceOver pass,
- * 2026-08-31) -- RouteStats renders the visual aria-hidden and gives the
- * screen reader this instead. */
+/** Spoken twin of the eta: the visible "2 hr 9 min" is compact for the
+ * eye, but read aloud "hr"/"mi" are cryptic -- the visual is rendered
+ * aria-hidden and the screen reader gets this instead. */
 export function spokenEta(minutes: number): string {
   return formatEtaParts(minutes)
     .map((part) => {

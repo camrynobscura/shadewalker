@@ -10,13 +10,13 @@ export function routeUrl(from: string, to: string, w = 15): string {
   return `/?from=${from}&to=${to}&w=${w}`
 }
 
-// Two real pilot-tile points a few blocks apart in Carroll Gardens —
+// Two real pilot-fixture points a few blocks apart in Carroll Gardens —
 // close enough that every tree_weight preset resolves quickly.
 export const POINT_A = '40.6800,-73.9980'
 export const POINT_B = '40.6720,-73.9880'
 
-// Well outside the pilot tile's coverage polygon — triggers the server's
-// 422 rejection and RouteStats's error branch.
+// Well outside the pilot fixture's coverage — triggers the server's 422
+// rejection and the panel's error branch.
 export const POINT_OUTSIDE_COVERAGE = '40.7580,-73.9855'
 
 // Substring-matched (case-insensitive) so the SAME table serves both the
@@ -45,11 +45,10 @@ const REVERSE_GEOCODE_RESULTS: Record<string, string> = {
   [reverseKey(POINT_OUTSIDE_COVERAGE)]: 'Somewhere Ave',
 }
 
-/** Intercepts OUR OWN /geocode proxy (in the browser, before any request
- * leaves the page) so tests never reach the real backend — which since
- * 2026-08-30 would itself call the public Photon instance upstream, a
- * free fair-use service an automated suite must not hammer. Same
- * hermeticity rule as the Nominatim days, one hop earlier. Covers both
+/** Intercepts our own /geocode proxy (in the browser, before any request
+ * leaves the page) so tests never reach the real backend — which would
+ * itself call the public Photon instance upstream, a free fair-use
+ * service an automated suite must not hammer. Covers both
  * directions -- forward search (typed address text -> a point, keyed by
  * the `q` param) and reverse (a point that landed in start/end from
  * anywhere -- a URL param via routeUrl(), a map click, a geolocation fix
@@ -82,7 +81,7 @@ export async function mockGeocode(page: Page): Promise<void> {
   })
 }
 
-/** Asks the REAL test backend for 02:00 on July 15 (PLAN `night-shade`).
+/** Asks the real test backend for 02:00 on July 15 (#112).
  * The app sends no time and the backend's clock is pinned to noon
  * (playwright.config.ts), so this appends the time to the app's own /route
  * request on its way out; a request's own time beats the pinned clock
@@ -93,28 +92,26 @@ export async function atNight(page: Page): Promise<void> {
   )
 }
 
-/** Playwright's fake clock, PAUSED at `at` before the page loads: the
+/** Playwright's fake clock, paused at `at` before the page loads: the
  * app's own timers then move only when the test calls runFor(). Installed
  * a minute early, because until it's paused the clock follows real time
  * in steps of up to 100ms, and pausing at the very time it was installed
  * at throws "Cannot fast-forward to the past" whenever a step lands in
- * between -- the burn-in hit it on a loaded machine (2026-09-29). */
+ * between. */
 export async function pauseClockAt(page: Page, at: Date): Promise<void> {
   await page.clock.install({ time: new Date(at.getTime() - 60_000) })
   await page.clock.pauseAt(at)
 }
 
 /** The chosen route's Directions heading: RouteStats renders it only
- * once a route has arrived, so it's the "a route drew" signal (the
- * stats box whose labels did that job left for the route rows,
- * 2026-09-27). */
+ * once a route has arrived, so it's the "a route drew" signal. */
 export function routeDrawn(page: Page) {
   return page.getByRole('heading', { name: 'Directions' })
 }
 
 /** FIND_ROUTE (spoken "Find route"), phones only: there typed addresses
- * and map taps only set points, and the route waits for this (since
- * 2026-09-27). Desktop has no button and routes by itself. */
+ * and map taps only set points, and the route waits for this. Desktop
+ * has no button and routes by itself. */
 export async function findRoute(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Find route' }).click()
 }

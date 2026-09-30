@@ -27,25 +27,25 @@ export function AddressField({
   label: string
   /** The field's map-marker letter ("A" start, "B" end). Rendered as a
    * chip inside the input's left edge, mobile only — where the visible
-   * labels are dropped (user call 2026-09-03, reclaiming panel height)
-   * the chip is the field's identity, echoing the map's A/B markers so
-   * field and marker read as the same object. Desktop keeps the labels
-   * and hides the chip. aria-hidden: the <label> names the input at
-   * every width (visually hidden on phones, never display:none). */
+   * labels are dropped to reclaim panel height, the chip is the field's
+   * identity, echoing the map's A/B markers so field and marker read as
+   * the same object. Desktop keeps the labels and hides the chip.
+   * aria-hidden: the <label> names the input at every width (visually
+   * hidden on phones, never display:none). */
   marker: string
   example: string
   field: ReturnType<typeof useAddressField>
-  /** Icon button seated inside the input's right edge WHILE THE FIELD IS
-   * EMPTY — the start field's ⌖ (2026-09-02, replacing the button row).
-   * Once there's text the slot is the per-field ✕, rendered here rather
-   * than composed by Controls because clearing has to hand focus back to
-   * the input, and the input's ref lives here. */
+  /** Icon button seated inside the input's right edge while the field is
+   * empty — the start field's ⌖. Once there's text the slot is the
+   * per-field ✕, rendered here rather than composed by Controls because
+   * clearing has to hand focus back to the input, and the input's ref
+   * lives here. */
   emptyAccessory?: ReactNode
   /** Extra content for the status line — the location error, composed by
    * Controls. The field's own NOT_FOUND wins when both apply: it's the
    * answer to the more recent action (typing beats a parked error). */
   notice?: ReactNode
-  /** Enter with nothing highlighted, AFTER the typed text starts
+  /** Enter with nothing highlighted, after the typed text starts
    * resolving: the End field's FIND_ROUTE (Controls waits for the
    * lookup before routing). */
   onSubmit?: () => void
@@ -60,13 +60,13 @@ export function AddressField({
   /* Full-screen search mode (mobile only). The fields sit mid-screen on
      the stacked mobile layout — below where the iOS keyboard's top edge
      lands — so Safari scrolled the whole window to lift a focused field
-     into view, exposing bare canvas below the one-screen-tall app (the
-     "green box", 2026-09-02). Expanding the focused field to a fixed
-     full-screen layer puts the input at the TOP of the screen, so Safari
-     has nothing to scroll for — and the suggestion list gets real room,
-     which the squeezed mobile panel never had. Same DOM node, same
-     combobox semantics, just repositioned: focus never moves, so
-     `expanded` can simply BE "focused while mobile" — any blur (keyboard
+     into view, exposing bare canvas below the one-screen-tall app.
+     Expanding the focused field to a fixed full-screen layer puts the
+     input at the top of the screen, so Safari has nothing to scroll for
+     — and the suggestion list gets real room, which the squeezed mobile
+     panel never had. Same DOM node, same combobox semantics, just
+     repositioned: focus never moves, so `expanded` can simply be
+     "focused while mobile" — any blur (keyboard
      Done, CANCEL, tabbing away) collapses it, which is also why it needs
      no dialog role or focus trap. */
   const isMobile = useMediaQuery(MOBILE_LAYOUT_QUERY)
@@ -75,15 +75,15 @@ export function AddressField({
   const inputRef = useRef<HTMLInputElement>(null)
   const fieldRef = useRef<HTMLDivElement>(null)
 
-  /* While the overlay is open the correct window scroll is EXACTLY 0 —
+  /* While the overlay is open the correct window scroll is exactly 0 —
      the input is pinned to the top by design, and nothing at the document
      level legitimately scrolls (the suggestion list scrolls itself). But
      Safari queues its keyboard scroll-into-view against the field's
-     PRE-expansion position and lands it asynchronously, after both the
+     pre-expansion position and lands it asynchronously, after both the
      re-layout and any one-shot reset — a field tapped low in a scrolled
-     panel left the whole overlay shoved out of view that way (phone,
-     2026-09-02). So pin for the overlay's whole lifetime: any scroll that
-     appears while it's open gets put back, whenever it lands. */
+     panel leaves the whole overlay shoved out of view that way. So pin
+     for the overlay's whole lifetime: any scroll that appears while it's
+     open gets put back, whenever it lands. */
   useEffect(() => {
     if (!expanded) return
     const pin = () => {
@@ -103,7 +103,7 @@ export function AddressField({
     }
   }, [expanded])
 
-  /* Recents open whenever the field is FOCUSED AND EMPTY, however it got
+  /* Recents open whenever the field is focused and empty, however it got
      that way — a fresh focus, the ✕ (whose mousedown preventDefault
      keeps focus in the field), select-all-delete. State-driven rather
      than hung off the focus event so every emptying path behaves the
@@ -119,7 +119,7 @@ export function AddressField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focused, field.query])
 
-  /* Whether the NEXT blur should skip acting on typed text (CANCEL,
+  /* Whether the next blur should skip acting on typed text (CANCEL,
      Escape) — a ref, not state: it's consumed by the blur handler in the
      same interaction, never rendered. */
   const abandonRef = useRef(false)
@@ -133,22 +133,19 @@ export function AddressField({
    * instead (tabIndex -1: script-focusable, never a tab stop): a div
    * summons no keyboard, so the reading/tab position stays at the field
    * just edited rather than dropping to <body>, where the next Tab
-   * restarted from the top of the page and VoiceOver lost its place
-   * (craftsmanship review 2026-09-23). preventScroll: the panel must
-   * not jump as the overlay leaves. */
+   * restarts from the top of the page and VoiceOver loses its place.
+   * preventScroll: the panel must not jump as the overlay leaves. */
   function collapse(abandon = false) {
     abandonRef.current = abandon
     inputRef.current?.blur()
     fieldRef.current?.focus({ preventScroll: true })
   }
 
-  /* Expand BEFORE focus, not in response to it. On focus, Safari computes
+  /* Expand before focus, not in response to it. On focus, Safari computes
      its keyboard scroll-into-view against the field's position at that
      instant — and depending on iOS version it delivers that move as a
      window scroll (the pin above catches it) or as a pure visual-viewport
-     pan that no script can undo (a scrolled-down panel left the overlay
-     shoved out of view on the phone, 2026-09-02, while a newer-iOS
-     simulator behaved). Beating both: on touchstart — which fires before
+     pan that no script can undo. Beating both: on touchstart — which fires before
      any focus — flushSync the expanded layout in, then focus the input
      synchronously (still inside the user gesture, so the keyboard still
      opens). By the time Safari measures, the input is already at the top
@@ -198,14 +195,13 @@ export function AddressField({
       ref={fieldRef}
       tabIndex={-1} /* collapse() parks focus here — see it for why */
       className={expanded ? `${styles.addressField} ${styles.fieldExpanded}` : styles.addressField}
-      /* While expanded, a press on the overlay's DEAD SPACE must not
+      /* While expanded, a press on the overlay's dead space must not
          steal focus and collapse the session — the same preventDefault
          the options and CANCEL use, widened to the container. The input
          itself is exempted so its own mousedown still places the caret.
          This also absorbs the browser's synthesized mouse events that
          trail a touch tap and land at pre-expansion coordinates (they
-         collapsed the overlay the instant it opened under Playwright's
-         tap, 2026-09-02). */
+         would collapse the overlay the instant it opened). */
       onMouseDown={(e) => {
         if (expanded && e.target !== inputRef.current) e.preventDefault()
       }}
@@ -214,13 +210,12 @@ export function AddressField({
           it always did as a direct flex child; as a flex row only when
           expanded, to seat CANCEL beside it. */}
       <div className={expanded ? styles.expandedHead : styles.fieldHead}>
-        {/* The label IS the input's accessible name (native <label>, no
-            aria-label on the input — craftsmanship review 2026-09-09).
-            Twin spans, the app's one technique for the terminal voice:
-            the screen shows "Start_point", the spoken form drops the
-            underscore ("Start underscore point" otherwise — VoiceOver
-            pass 2026-08-31). Same split as the Shade_walker wordmark and
-            the Shade_priority legend. */}
+        {/* The label is the input's accessible name (native <label>, no
+            aria-label on the input). Twin spans, the app's one technique
+            for the terminal voice: the screen shows "Start_point", the
+            spoken form drops the underscore ("Start underscore point"
+            otherwise). Same split as the Shade_walker wordmark and the
+            Shade_priority legend. */}
         <label htmlFor={id} className={styles.fieldLabel}>
           <span aria-hidden="true">{label}</span>
           <span className={styles.visuallyHidden}>{spokenLabel}</span>
@@ -274,16 +269,16 @@ export function AddressField({
           }}
         />
         {field.query !== '' ? (
-          /* The in-field ✕ (2026-09-02, replacing CLEAR_ROUTE): clears one
-             field — and with it that field's point and marker. mousedown
-             preventDefault so a tap neither steals focus nor, on mobile,
-             reads as a reason to expand or collapse the search — clearing
-             is an edit, not a session boundary. That same preventDefault
-             means only a KEYBOARD activation ever has the button itself
-             focused, and that's the case that needs help: the button
-             unmounts as it clears, which dropped focus to <body> (audit
-             2026-09-09). Hand it back to the input; pointer users never
-             had it there, so nothing moves for them. */
+          /* The in-field ✕: clears one field — and with it that field's
+             point and marker. mousedown preventDefault so a tap neither
+             steals focus nor, on mobile, reads as a reason to expand or
+             collapse the search — clearing is an edit, not a session
+             boundary. That same preventDefault means only a keyboard
+             activation ever has the button itself focused, and that's
+             the case that needs help: the button unmounts as it clears,
+             which would drop focus to <body>. Hand it back to the input;
+             pointer users never had it there, so nothing moves for
+             them. */
           <button
             type="button"
             className={styles.fieldAccessory}
@@ -300,13 +295,12 @@ export function AddressField({
         ) : (
           emptyAccessory
         )}
-        {/* A FAKE placeholder: a real one is announced in the value slot
-            before the label (skipping into the panel said "e.g. 250 Court
-            St" instead of "Start_point"), and the user wants the example
-            visible but entirely unspoken (VoiceOver pass, 2026-08-31).
-            aria-hidden + pointer-events:none makes it pure decoration;
-            rendered only while the field is empty, same as the real
-            thing. */}
+        {/* A fake placeholder: a real one is announced in the value slot
+            before the label (skipping into the panel would say "e.g. 250
+            Court St" instead of "Start_point"), and the example should be
+            visible but entirely unspoken. aria-hidden +
+            pointer-events:none makes it pure decoration; rendered only
+            while the field is empty, same as the real thing. */}
         {field.query === '' && (
           <span className={styles.fakePlaceholder} aria-hidden="true">
             e.g. {example}
@@ -355,8 +349,7 @@ export function AddressField({
       {/* role="status" = a polite live region: screen readers announce the
           result without stealing focus. Nothing shown for 'searching': a
           lookup is sub-second, and a per-field "searching" line just
-          flickered on and off (it also once duplicated the old FIND_ROUTE
-          button's own pending label). */}
+          flickers on and off. */}
       <p
         className={
           field.status === 'notfound' || field.status === 'unavailable' || notice

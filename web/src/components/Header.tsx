@@ -3,14 +3,13 @@ import { InfoIcon } from './icons'
 import styles from './Header.module.css'
 
 /* Whether this page load gets the cursor's three-blink hello. Map page
-   only, and once per TAB SESSION (user call 2026-09-01): every page here
-   is a full navigation, so without the sessionStorage memory the blink
-   re-fired on About and on every return trip. Module-level memo, not
-   state: computed once per page load, stable across re-renders (and
-   StrictMode's double-invocations, which would otherwise consume the
-   flag before the real render read it). try/catch because storage
-   access can throw (private modes); the fallback blinks per map load,
-   which is the pre-fix behavior minus About. */
+   only, and once per tab session: every page here is a full navigation,
+   so without the sessionStorage memory the blink would re-fire on About
+   and on every return trip. Module-level memo, not state: computed once
+   per page load, stable across re-renders (and StrictMode's
+   double-invocations, which would otherwise consume the flag before the
+   real render read it). try/catch because storage access can throw
+   (private modes); the fallback just blinks on every map load. */
 let blinkDecision: boolean | null = null
 function cursorShouldBlink(onMap: boolean): boolean {
   if (!onMap) return false
@@ -27,8 +26,7 @@ function cursorShouldBlink(onMap: boolean): boolean {
 
 /* Phones only (CSS): the ⓘ opens what the desktop header says beside
    the wordmark, which phones hide to fit the panel's two screens, plus
-   the way to About (user, 2026-09-28; a panel-footer ABOUT button had
-   read too strong, 2026-09-03). A tap-to-open disclosure, not a hover
+   the way to About. A tap-to-open disclosure, not a hover
    tooltip: phones have no hover. It closes on the ⓘ, Escape, or a tap
    anywhere else -- which the backdrop takes, so that tap can't also drop
    a route point on the map. Rendered only while open, so its copy of
@@ -89,18 +87,16 @@ function AboutPopover() {
   )
 }
 
-/* The one site header, shared by the map page and About (user call
-   2026-09-01 — the two pages' headers had already drifted apart, and
-   every redesign would have had to land twice; About became a second
-   React entry for exactly this component). The `page` prop carries
-   every difference between the two renderings:
+/* The one site header, shared by the map page and About (About is a
+   second React entry for exactly this component, so the two headers
+   can't drift apart). The `page` prop carries every difference between
+   the two renderings:
    - the map page's wordmark is that page's <h1>; About has a real h1 of
      its own ("About Shade Walker"), so its wordmark is a styled <p> —
      one h1 per page;
    - the tagline/instructions block is map-page-only;
-   - the nav link is reciprocal (user call 2026-09-01, revisiting the
-     same-day same-link call): ABOUT on the map page, MAP on About —
-     with two pages, the nav names the OTHER destination. */
+   - the nav link is reciprocal: ABOUT on the map page, MAP on About —
+     with two pages, the nav names the other destination. */
 export function Header({ page }: { page: 'map' | 'about' }) {
   const onMap = page === 'map'
   const Wordmark: 'h1' | 'p' = onMap ? 'h1' : 'p'
@@ -109,14 +105,14 @@ export function Header({ page }: { page: 'map' | 'about' }) {
       <Wordmark className={styles.title}>
         {/* The wordmark is a home link -- clicking it navigates to "/"
             (no query params), the app's default state, which clears any
-            route (user call 2026-08-31). A full navigation, not an
-            in-place clear, so it also resets the map center and zoom to
-            default -- a true reset. Twin spans, not aria-label: VoiceOver
-            reads "Shade_walker" as one mushed word, so the spoken form
-            drops the underscore while the screen keeps it — and an
-            aria-label here became the NAME OF THE PAGE'S H1 ("Shade
-            Walker, home" in every headings list; audit 2026-09-09).
-            Text content names the link and the heading the same way. */}
+            route. A full navigation, not an in-place clear, so it also
+            resets the map center and zoom to default -- a true reset.
+            Twin spans, not aria-label: VoiceOver reads "Shade_walker" as
+            one mushed word, so the spoken form drops the underscore while
+            the screen keeps it — and an aria-label here would become the
+            name of the page's h1 ("Shade Walker, home" in every headings
+            list). Text content names the link and the heading the same
+            way. */}
         <a href="/" className={styles.homeLink}>
           <span aria-hidden="true">Shade_walker</span>
           <span className={styles.visuallyHidden}>Shade Walker</span>
@@ -127,19 +123,18 @@ export function Header({ page }: { page: 'map' | 'about' }) {
           />
         </a>
       </Wordmark>
-      {/* Tagline + instructions ride BESIDE the wordmark (user call
-          2026-08-30: the header was spending three stacked lines of
-          height on text that earns one row). Siblings of the wordmark,
-          not inside it: the accessible heading stays just the wordmark.
-          The whole block is map-page-only (user call 2026-09-01): About's
-          header is just wordmark + nav. On the map the instructions line
-          never toggles on route state -- it once hid itself when a route
-          existed and flickered on every click. */}
+      {/* Tagline + instructions ride beside the wordmark (three stacked
+          lines of height for text that earns one row). Siblings of the
+          wordmark, not inside it: the accessible heading stays just the
+          wordmark. The whole block is map-page-only: About's header is
+          just wordmark + nav. On the map the instructions line never
+          toggles on route state -- hiding it when a route exists flickers
+          on every click. */}
       {onMap && (
         <div className={styles.headerText}>
           <p className={styles.tagline}>
             {/* The prompt glyph is decoration -- unspoken, or every read
-                starts with "greater than" (VoiceOver pass, 2026-08-31). */}
+                starts with "greater than". */}
             <span aria-hidden="true">&#62; </span>find the shadiest walking route in NYC
           </p>
           <p className={styles.instructions}>

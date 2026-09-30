@@ -13,8 +13,8 @@ test('a route request that never answers times out with its own message', async 
   await mockGeocode(page)
   // Paused before navigation so the app's own setTimeout runs on a fake
   // clock that only runFor() moves. An installed-but-running clock keeps
-  // ticking with real time through the page load, which ate into the 10s
-  // deadline and failed ~1 in 6 runs even on an idle machine (2026-09-25).
+  // ticking with real time through the page load, which eats into the 10s
+  // deadline and makes the test flaky.
   await pauseClockAt(page, new Date('2026-06-15T12:00:00'))
   await page.route('**/route?*', () => {
     /* never fulfilled: a hung worker */

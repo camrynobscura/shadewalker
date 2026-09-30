@@ -33,64 +33,52 @@ const GLYPH_PATHS: Record<Exclude<RouteStep['action'], 'depart'>, string> = {
   /* Three rules hold across every path below, all settled against the
      rendered 18px (one viewBox unit = 1.125px):
 
-     1. WHATEVER RUNS INTO AN ARROWHEAD STOPS ONE UNIT SHORT OF THE APEX.
+     1. Whatever runs into an arrowhead stops one unit short of the apex.
         Run it all the way in and the 1.8-wide stroke's square cap
         projects past the head's outline as two small corners flanking
-        the point — measured 0.42px on the elbows and sharps, 0.18px on
-        continue's shaft. Ending a unit early tucks the cap inside the
-        head's own stroke. cross_side never showed it because its bar
-        already stopped short, which is what first identified the cause.
+        the point (0.42px on the elbows and sharps, 0.18px on continue's
+        shaft). Ending a unit early tucks the cap inside the head's own
+        stroke.
 
-     2. EVERY glyph's x-extent centers on 8, so a column of them lines
-        up. Four were exceptions — the elbows sat at 9 and 7, the sharps
-        at 8.75 and 7.25, i.e. left-vs-right differing by 2.25px and
-        1.7px in a vertical rail. Each pair is now an exact mirror about
-        x=8. (Ink centers still differ by ~0.2px, because a miter point
-        reaches 1.27 units past an apex while a square cap reaches 0.9 —
-        not worth off-scale coordinates to chase.)
+     2. Every glyph's x-extent centers on 8, so a column of them lines
+        up; each left/right pair is an exact mirror about x=8. (Ink
+        centers still differ by ~0.2px, because a miter point reaches
+        1.27 units past an apex while a square cap reaches 0.9 — not
+        worth off-scale coordinates to chase.)
 
-     3. EVERY TAIL SHOWS 3 UNITS BELOW ITS HEAD, ending at y=11, not the
-        y=14 they were first drawn at. An arrow's visual mass sits in its
-        upper half, so a longer tail was a lone stroke hanging past the
-        step text's baseline — it read as a descender and made the arrow
-        look uncentered. At y=11 the inked bottom (plus the cap's 0.9)
-        lands on the baseline; y=14 hung below it and y=10 floated above,
-        both tried. This is why continue's shaft is 5.5 units rather than
-        3: it starts up inside the head at y=5.5 and only the run from
-        the head's own y=8 downward is visible, so it shows the same 3
-        units as an elbow's stub and every glyph bottoms out together. */
+     3. Every tail shows 3 units below its head, ending at y=11. An
+        arrow's visual mass sits in its upper half, so a longer tail is a
+        lone stroke hanging past the step text's baseline — it reads as
+        a descender and makes the arrow look uncentered. At y=11 the
+        inked bottom (plus the cap's 0.9) lands on the baseline. This is
+        why continue's shaft is 5.5 units rather than 3: it starts up
+        inside the head at y=5.5 and only the run from the head's own
+        y=8 downward is visible, so it shows the same 3 units as an
+        elbow's stub and every glyph bottoms out together. */
   continue: 'M8 11 V5.5 M4.5 8 L8 4.5 L11.5 8',
-  /* Elbow wings reach y=5.25/10.75, not the 4.5/11.5 they were first
-     drawn at (still exact 45deg; tip reach 2.75 units, was 3.5). At full
-     height the HEAD was the descender: a square cap on a 45deg tip
-     corners out 1.27 units past the endpoint (not the 0.9 of a flat
-     cap), so the lower wing inked ~1px below the text baseline even
-     with the stub sitting on it (user call: the pointer fits inside the
-     text's height). At 2.75 the head bottoms out level with the stub,
-     and its reach matches cross_side's heads, already at 5.25/10.75. */
+  /* Elbow wings reach y=5.25/10.75 (exact 45deg; tip reach 2.75 units).
+     At full height the head is the descender: a square cap on a 45deg
+     tip corners out 1.27 units past the endpoint (not the 0.9 of a flat
+     cap), so a lower wing at 11.5 would ink ~1px below the text baseline
+     even with the stub sitting on it. At 2.75 the head bottoms out level
+     with the stub, and its reach matches cross_side's heads. */
   left: 'M12 11 V8 H5 M6.75 5.25 L4 8 L6.75 10.75',
   right: 'M4 11 V8 H11 M9.25 5.25 L12 8 L9.25 10.75',
-  /* Sharps redrawn 2026-08-29 (user call, judged against live routes:
-     Prospect Park's West Dr -> East Dr wishbone). The old drawing had
-     three measured defects: the head's arm overlapped the shaft's stroke
-     by 0.8u ("touching"), the tail inked 2u below every other glyph's
-     shared 11.9u bottom, and the 45deg bend mitered into a 2.35u spike.
-     Now: shaft at x=11.25 bottoming on the family line; a 45deg return
-     sweeping the full width to an L-head whose corner IS the point
-     (wings right+up = pointing down-left); 1.7u of daylight between the
-     wing end and the shaft. The bend is a REAL JOIN, kept sane by the
-     path's strokeMiterlimit={2}: a 45deg miter would spike 2.35u past
-     the corner, and abutting two capped subpaths instead was tried and
-     visibly misfit (the diagonal's edge peeled off the stub's flank
-     ~2px below its top -- user caught it). The limit turns joins
-     tighter than 60deg into a flat chamfer; the sharps' bend is the
-     ONLY join under 60deg in all six glyphs, so nothing else changes.
-     Ink extents center on 8 exactly and top out level with the
-     elbows. */
+  /* Sharps: shaft at x=11.25 bottoming on the family line; a 45deg
+     return sweeping the full width to an L-head whose corner is the
+     point (wings right+up = pointing down-left); 1.7u of daylight
+     between the wing end and the shaft. The bend is a real join, kept
+     sane by the path's strokeMiterlimit={2}: a 45deg miter would spike
+     2.35u past the corner, and abutting two capped subpaths instead
+     visibly misfits (the diagonal's edge peels off the stub's flank
+     ~2px below its top). The limit turns joins tighter than 60deg into
+     a flat chamfer; the sharps' bend is the only join under 60deg in
+     all six glyphs, so nothing else changes. Ink extents center on 8
+     exactly and top out level with the elbows. */
   sharp_left: 'M11.25 11 V4.5 L5.5 10.25 M7.75 11 H4.75 V8',
   sharp_right: 'M4.75 11 V4.5 L10.5 10.25 M8.25 11 H11.25 V8',
   /* Heads kept shallow so the wings don't crowd the middle — a clear
-     stretch of shaft must stay visible between them (user call). */
+     stretch of shaft must stay visible between them. */
   cross_side: 'M4 8 H12 M5.5 5.25 L3 8 L5.5 10.75 M10.5 5.25 L13 8 L10.5 10.75',
 }
 
@@ -133,13 +121,12 @@ interface RouteStatsProps {
 }
 
 export function RouteStats({ route, description, loading }: RouteStatsProps) {
-  // Spoken-only, FIRST route only: the arrival announcement otherwise
+  // Spoken-only, first route only: the arrival announcement otherwise
   // jumps from "FINDING" straight to results, right past the
   // Shade_priority control -- the one control that matters most at that
   // exact moment. A screen-reader user who never wanders upward would
-  // simply not know it exists (VoiceOver pass, 2026-08-31). Announced
-  // once; the flag flips after the first arrival and the tip unmounts
-  // (removals are never announced).
+  // simply not know it exists. Announced once; the flag flips after the
+  // first arrival and the tip unmounts (removals are never announced).
   const [priorityHinted, setPriorityHinted] = useState(false)
   // An effect ON PURPOSE (the one oxlint `set-state-in-effect` exception):
   // the flag must flip AFTER the tip has been on screen, so the live region
@@ -171,31 +158,24 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
               decoration a screen reader shouldn't spell out. */}
           <p className={styles.visuallyHidden}>Finding your route…</p>
           <div aria-hidden="true" className={styles.loadingBlock}>
-            {/* The growing vine (picked over a glitch box, falling leaves
-                and a pixel tree, 2026-09-01): one path draws itself across
-                the open panel -- horizontal growth reads as progress with
-                no bar -- sprouting leaves as the tip passes and running
-                visibly behind the label's letters (no backing patch; user
-                call). Deliberately no box either: that treatment belonged
-                to the rejected glitch candidate. */}
-            {/* No visible text (user call, 2026-09-01, after trying the
-                label overlaid, above, and colored): the vine alone is the
-                pending state -- motion with a direction reads as work, and
-                the visually-hidden sentence above keeps the spoken
-                announcement intact. The ONE exception is reduced motion,
+            {/* The growing vine: one path draws itself across the open
+                panel -- horizontal growth reads as progress with no bar --
+                sprouting leaves as the tip passes and running visibly
+                behind the label's letters (no backing patch, no box). */}
+            {/* No visible text: the vine alone is the pending state --
+                motion with a direction reads as work, and the
+                visually-hidden sentence above keeps the spoken
+                announcement intact. The one exception is reduced motion,
                 where there is no motion to read as work and a still vine
-                is just decoration: CSS swaps the vine for this plain line
-                (user call 2026-09-23; until then the block sat at
-                opacity 0 for the whole wait, a static opacity the
-                cancelled animation never lifted). aria-hidden with the
-                rest of the block — the sentence above is the spoken one. */}
+                is just decoration: CSS swaps the vine for this plain line.
+                aria-hidden with the rest of the block — the sentence above
+                is the spoken one. */}
             <p className={styles.loadingText}>
               <span>&gt; </span>finding your route…
             </p>
             <div className={styles.vineStage}>
               <svg viewBox="0 0 520 64" preserveAspectRatio="none" className={styles.vineSvg}>
-                {/* One vine (tried three 2026-09-01, walked back same day —
-                    user call). Leaf anchors are computed points ON the
+                {/* One vine. Leaf anchors are computed points on the
                     Bézier path (crest/trough/slope), so every leaf's base
                     touches the vine and grows out of it — origin classes
                     put the scale-from point at that base corner. Pointed
@@ -248,9 +228,7 @@ export function RouteStats({ route, description, loading }: RouteStatsProps) {
         </>
       )}
       {/* A rejected route's error message is Controls' alert slot, right
-          above the address fields (its `error` prop) -- not here. This
-          component only ever rendered it when a route successfully loaded
-          anyway, so there's nothing route-specific left for it to say. */}
+          above the address fields (its `error` prop) -- not here. */}
       {route && !loading && !priorityHinted && (
         <p className={styles.visuallyHidden}>
           Tip: the Shade priority setting above these results chooses how far the route detours for extra
@@ -294,8 +272,8 @@ function ShareButton() {
   return (
     <div className={styles.share}>
       <button type="button" className={styles.shareButton} onClick={onShare} aria-label="Share route">
-        {/* Icon is decoration (user ask 2026-09-03) — the aria-label
-            above stays the whole spoken name. */}
+        {/* Icon is decoration — the aria-label above stays the whole
+            spoken name. */}
         <ShareIcon />
         SHARE_ROUTE
       </button>
@@ -315,16 +293,13 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
       {/* A real heading (the only one below the page's own <h1>): this
           introduces read-only output, the chosen route's directions, so
           it gets a heading's navigation benefit rather than a label's.
-          Was "My_route" over a stats box until 2026-09-27, when the
-          route numbers moved into the Shade_priority rows (PLAN
-          `phone-space`); plain "Directions" has no underscore to split
-          into a spoken twin. */}
+          Plain "Directions" has no underscore to split into a spoken
+          twin. */}
       <h2 className={styles.sectionTitle}>Directions</h2>
       <div className={styles.routeBody}>
         <div className={styles.directionsGroup}>
-          {/* The one caution the product owes every route (user-approved
-              wording, 2026-08-28), ABOVE the list so it reads before the
-              instructions do (user call, 2026-08-28). Deliberately GENERAL:
+          {/* The one caution the product owes every route, above the list
+              so it reads before the instructions do. Deliberately general:
               uncertainty about street names is disclosed structurally,
               per-step, as "unnamed path", not by a blanket note. */}
           <p className={styles.disclaimer}>
@@ -337,7 +312,7 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
               <span className={styles.visuallyHidden}>Caution: </span>
               walking routes may not always reflect real-world conditions —{' '}
               {/* The moment a user doubts the data is the moment they'll take
-                  the explanation (user call 2026-08-30). */}
+                  the explanation. */}
               <a className={styles.cautionLink} href="/about.html#caution">
                 learn more
               </a>
@@ -345,28 +320,28 @@ function StatsBody({ route, description }: { route: RouteFeature; description: s
           </p>
 
           {stats.segments.length > 0 ? (
-            /* Ordered list, not the old one-sentence paragraph: each turn gets
-               its own line, and a screen reader announces "item 2 of 4" instead
-               of one long run-on. Built from `segments` (structured data)
-               rather than parsing `description` (English prose), so it
-               can use formatDistance() and stay unit-consistent with the rest
-               of the panel. Always the selected preset's directions -- Shade
+            /* Ordered list, not one sentence: each turn gets its own line,
+               and a screen reader announces "item 2 of 4" instead of one
+               long run-on. Built from `segments` (structured data) rather
+               than parsing `description` (English prose), so it can use
+               formatDistance() and stay unit-consistent with the rest of
+               the panel. Always the selected preset's directions -- Shade
                priority's NONE option gives the plain shortest route directly
                (same segments), so there's no separate route to switch to here. */
-            /* role="list" is NOT redundant: the stylesheet sets
+            /* role="list" is not redundant: the stylesheet sets
                list-style: none for the flush-left numbering, which strips
                the list role in Safari/VoiceOver. */
             <ol className={styles.directionsList} role="list">
               {stats.segments.map((step, i) => (
                 <li key={i}>
                   <StepGlyph action={step.action} />
-                  {/* Two lines by design, everywhere (user, 2026-09-03):
-                      the one-liner "text — 524 ft" sat right at the panel's
-                      line length at every width, so the wrap point was
-                      whatever fell last — the bare number, the bare unit —
-                      a different orphan per step. Instruction first (it's
-                      what you scan for mid-walk), then how far to continue
-                      along it, as its own quieter line. */}
+                  {/* Two lines by design, everywhere: a one-liner "text —
+                      524 ft" sits right at the panel's line length at every
+                      width, so the wrap point is whatever falls last — the
+                      bare number, the bare unit — a different orphan per
+                      step. Instruction first (it's what you scan for
+                      mid-walk), then how far to continue along it, as its
+                      own quieter line. */}
                   <span>
                     <span aria-hidden="true" className={styles.stepMain}>
                       {stepText(step)}

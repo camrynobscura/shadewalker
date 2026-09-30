@@ -12,12 +12,12 @@ test('deliberate entries become recents once a route draws', async ({ page }) =>
   await page.keyboard.press('Enter')
   // The resolve has settled (its point reached the URL mirror) — but
   // with no route yet, nothing is recorded: a lone entry must not
-  // surface in the other field's recents (user call 2026-09-03).
+  // surface in the other field's recents.
   await expect(page).toHaveURL(/from=/)
   expect(await page.evaluate(() => localStorage.getItem('sw-recents'))).toBeNull()
 
   // The picked suggestion completes the route, which is what commits
-  // both entries: the typed text under the TYPED text, the pick under
+  // both entries: the typed text under the typed text, the pick under
   // the suggestion's full label.
   await end.fill('court')
   await page.getByRole('option', { name: 'Court St & Baltic St, Brooklyn' }).click()
@@ -62,11 +62,11 @@ test('recents survive a reload and are keyboard-pickable', async ({ page }) => {
 })
 
 test('an arrow pressed the instant the list appears keeps its highlight', async ({ page }) => {
-  // CI's flake on main after #113: the highlight's reset ran as an
-  // effect, a beat AFTER the new list was on screen, so an ArrowDown
-  // landing in that gap was wiped and Enter then resolved the empty text
-  // instead of picking. Machine-speed typing hit the gap only sometimes;
-  // this hits it every time — a MutationObserver fires as the options
+  // If the highlight's reset ran as an effect, a beat after the new list
+  // was on screen, an ArrowDown landing in that gap would be wiped and
+  // Enter would then resolve the empty text instead of picking.
+  // Machine-speed typing hits the gap only sometimes; this hits it every
+  // time — a MutationObserver fires as the options
   // are inserted (the same task React commits them in, before any
   // effect) and sends the key right there. Recents are seeded directly:
   // how they get recorded is the first test's job.
@@ -93,7 +93,7 @@ test('an arrow pressed the instant the list appears keeps its highlight', async 
   await start.click()
   const recents = page.getByRole('listbox', { name: 'Start point recent addresses' })
   await expect(recents.getByRole('option')).toHaveText(['3rd St & 3rd Ave', '250 Court St'])
-  // No event marks "every effect has run", so wait out the old reset's
+  // No event marks "every effect has run", so wait out an effect's
   // window, then prove the highlight outlived it.
   await page.waitForTimeout(300)
   await expect(recents.locator('[aria-selected="true"]')).toHaveText('3rd St & 3rd Ave')
@@ -104,7 +104,7 @@ test('an arrow pressed the instant the list appears keeps its highlight', async 
 test('points arriving from outside the field record nothing', async ({ page }) => {
   // A URL-restored point drives the exact externalPoint path a map tap
   // does (see fixtures.ts on why tapping the Leaflet map itself is too
-  // brittle headless) — its reverse-geocoded label must NOT become a
+  // brittle headless) — its reverse-geocoded label must not become a
   // recent: nobody typed it, and the "nearest thing" name is noise.
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
@@ -121,9 +121,9 @@ test('points arriving from outside the field record nothing', async ({ page }) =
 })
 
 test('clearing during an in-flight lookup drops the late answer', async ({ page }) => {
-  // The ✕-mid-lookup resurrection (caught 2026-09-03): a geocode answer
-  // arriving after its field was cleared used to refill the point.
-  // Delaying the geocode makes the sub-second race deterministic — this
+  // A geocode answer arriving after its field was cleared must not
+  // refill the point. Delaying the geocode makes the sub-second race
+  // deterministic — this
   // route registers after mockGeocode, so it runs first and hands the
   // request back to the mock only after the field is long cleared.
   await mockGeocode(page)

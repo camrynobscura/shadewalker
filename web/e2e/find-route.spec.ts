@@ -10,8 +10,8 @@ import {
   routeUrl,
 } from './fixtures'
 
-// FIND_ROUTE and the phone's two screens (PLAN `phone-space`, user
-// 2026-09-27). On a phone, typed addresses and map taps only set points;
+// FIND_ROUTE and the phone's two screens (#118). On a phone, typed
+// addresses and map taps only set points;
 // the route waits for FIND_ROUTE, the checkpoint where a wrong address
 // is caught and the step to the route screen: a one-line trip box, the
 // four route rows, directions; the trip box goes back. Desktop has no

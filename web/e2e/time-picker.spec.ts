@@ -2,10 +2,10 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 import { mockGeocode, pauseClockAt, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
 
-// The time pill (PLAN `time-and-layers`): a small pill under the address
-// fields -- and on a phone's route screen, under the trip line -- that
-// reads "Leave now" until a time is set, then "Depart <when>" or "Arrive
-// <when>". It opens a small white menu under it (PillMenu, 2026-09-29):
+// The time pill (#118): a small pill under the address fields -- and on
+// a phone's route screen, under the trip line -- that reads "Leave now"
+// until a time is set, then "Depart <when>" or "Arrive <when>". It opens
+// a small white menu under it (PillMenu):
 // Leave now, Depart at or Arrive by, the last two with native date + time
 // inputs. Everything applies as you go, on a phone too -- a pick at once,
 // typing after a pause. Leave now closes the menu; so do a tap outside
@@ -16,9 +16,9 @@ import { mockGeocode, pauseClockAt, POINT_A, POINT_B, routeDrawn, routeUrl } fro
 // to July 15 noon for this suite) decides.
 //
 // This spec also runs in WebKit (playwright.config's `webkit` project):
-// Safari doesn't focus a tapped radio -- focus goes to the panel -- and
-// the menu once read that as "focus left, close", so a tap on Depart at
-// closed it instead of picking (2026-09-29). Chromium can't see that.
+// Safari doesn't focus a tapped radio -- focus goes to the panel -- and a
+// menu that reads that as "focus left, close" loses the tap meant to
+// pick. Chromium can't see that.
 
 const NIGHT_LINE = 'after dark // the whole city is in shade'
 const TIME_PARAMS = ['month', 'day', 'hour', 'minute', 'arrive']
@@ -99,8 +99,8 @@ test.describe('on desktop', () => {
     })
     // A time field changes value at every step: each key typed on desktop
     // (13:00 passes through 01:00), each notch of a phone's wheel. fill()
-    // makes those changes the same way in every engine; what KEYS do to a
-    // time field doesn't (in CI, Linux WebKit's ignored them, 2026-09-29).
+    // makes those changes the same way in every engine; what keys do to a
+    // time field doesn't (Linux WebKit ignores them).
     const field = page.getByLabel('time (NYC)')
     for (const time of ['01:00', '13:00', '13:15']) {
       await field.fill(time)
@@ -289,7 +289,7 @@ test.describe('on desktop', () => {
     const pill = await timePill(page, 'Leave now').boundingBox()
     expect(endField && pill).toBeTruthy()
     expect(pill!.y).toBeGreaterThan(endField!.y + endField!.height)
-    // A pill, not a third field (user, 2026-09-28): narrower and shorter.
+    // A pill, not a third field: narrower and shorter.
     expect(pill!.width).toBeLessThan(endField!.width / 2)
     expect(pill!.height).toBeLessThan(endField!.height)
   })
@@ -304,13 +304,14 @@ test.describe('on a phone', () => {
     await page.goto('/')
     const pill = timePill(page, 'Leave now')
     await pill.tap()
-    // A menu under the pill, not the whole screen (the picker it replaced).
+    // A menu under the pill, not the whole screen.
     const pillBox = (await pill.boundingBox())!
     const box = (await menu(page).boundingBox())!
     expect(box.y).toBeGreaterThan(pillBox.y + pillBox.height)
     expect(box.width).toBeLessThan(390 - 2 * 16)
 
-    // The tap picks and the menu stays open -- in Safari it used to close.
+    // The tap picks and the menu stays open -- Safari's focus rules would
+    // otherwise close it.
     await page.getByRole('radio', { name: 'Depart at' }).tap()
     await expect(page.getByLabel('date', { exact: true })).toBeVisible()
     await expect(timePill(page, /Depart/)).toBeVisible()
@@ -368,9 +369,9 @@ test.describe('on a phone', () => {
     await expect(routeDrawn(page)).toBeVisible()
     await page.getByRole('button', { name: /^Change trip:/ }).tap()
     // The switch lands a moment later (history.back()), and both screens
-    // have a "Start time: Leave now" pill. Tapped too soon, the test grabbed
-    // the route screen's, which then hid; Playwright waited on it for 30s
-    // (CI's WebKit, 2026-09-29). FIND_ROUTE is on the plan screen only.
+    // have a "Start time: Leave now" pill. Tapped too soon, the tap grabs
+    // the route screen's, which then hides, and Playwright waits on it for
+    // 30s. FIND_ROUTE is on the plan screen only.
     await expect(page.getByRole('button', { name: 'Find route' })).toBeVisible()
 
     const routes: string[] = []

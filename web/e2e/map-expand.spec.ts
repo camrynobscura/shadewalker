@@ -2,10 +2,10 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { mockGeocode } from './fixtures'
 
-// The mobile full-screen map mode (2026-09-02): a toggle in the map's
-// top-right corner hides the header AND the panel so the map takes the
-// whole screen (user call: the stacked 45vh map felt cramped exactly when
-// a route exists and the panel matters least). It's a layout mode, not
+// The mobile full-screen map mode: a toggle in the map's top-right
+// corner hides the header and the panel so the map takes the whole
+// screen (the stacked 45vh map feels cramped exactly when a route exists
+// and the panel matters least). It's a layout mode, not
 // the Fullscreen API — iPhone Safari has no element fullscreen. These
 // specs pin the mode's lifecycle: what disappears, what comes back, and
 // that hidden-not-unmounted panel state survives a round trip.
@@ -44,7 +44,7 @@ test('Escape collapses the expanded map', async ({ page }) => {
 })
 
 test('panel state survives an expand/collapse round trip', async ({ page }) => {
-  // The panel is display:none while expanded, NOT unmounted — typed-but-
+  // The panel is display:none while expanded, not unmounted — typed-but-
   // unresolved field text must still be there when it comes back.
   await mockGeocode(page)
   await page.goto('/')

@@ -1,7 +1,7 @@
 /* Inline SVG icons, not glyph characters: ⌖ (U+2316) renders as tofu in
-   iOS's monospace fallback chain (caught in the iOS 26.3 simulator,
-   2026-09-02), and an icon that may or may not exist per-device isn't an
-   icon. stroke="currentColor" follows the host button's color states.
+   iOS's monospace fallback chain, and an icon that may or may not exist
+   per-device isn't an icon. stroke="currentColor" follows the host
+   button's color states.
    Every icon is aria-hidden — the button's aria-label (or visible text)
    is the accessible name; these are decoration. */
 
@@ -92,10 +92,9 @@ export function InfoIcon() {
 /** The share mark (box with an up arrow, the iOS-familiar form): sits
  * inside SHARE_ROUTE's text. The box's top edge is split so the arrow's
  * shaft passes through the gap instead of crossing a stroke. The head is
- * narrower than the gap on purpose — a first draft put the wing tips at
- * the same x as the stub ends and they read as touching (user catch,
- * 2026-09-03); at 2-unit wings and 3.5-unit stubs the closest inks keep
- * ~0.6 units of daylight. Shaft stops a unit short of the apex, or its
+ * narrower than the gap on purpose — wing tips at the same x as the stub
+ * ends read as touching; at 2-unit wings and 3.5-unit stubs the closest
+ * inks keep ~0.6 units of daylight. Shaft stops a unit short of the apex, or its
  * square cap corners out past the head (RouteStats' glyph rule #1). */
 export function ShareIcon() {
   return (

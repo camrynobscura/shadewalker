@@ -49,10 +49,9 @@ interface PillMenuProps {
   children: ReactNode
 }
 
-/** A trip-option pill and the small white menu it opens (PLAN
- * `time-and-layers`, user 2026-09-29: the big square picker didn't go
- * with the round pill). The menu floats under the pill, over whatever is
- * below it, and is round like the pill.
+/** A trip-option pill and the small white menu it opens (#120). The
+ * menu floats under the pill, over whatever is below it, and is round
+ * like the pill.
  *
  * It is a native popover, so the browser draws it above everything --
  * out of the phone's pill row, which scrolls sideways and would clip it
@@ -124,8 +123,8 @@ export function PillMenu({ pill, menuClassName, onOpen, onClose, children }: Pil
     const to = e.relatedTarget
     if (!to || e.currentTarget.contains(to)) return
     // Safari doesn't focus a tapped radio: focus goes to the nearest
-    // focusable ANCESTOR (the panel), which Tab never reaches. Closing
-    // then lost the tap to the route rows underneath.
+    // focusable ancestor (the panel), which Tab never reaches. Closing
+    // then would lose the tap to the route rows underneath.
     if (to.contains(e.currentTarget)) return
     // The pill's own click closes the menu (popoverTarget).
     if (to !== pillRef.current) close()

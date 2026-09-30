@@ -1,15 +1,15 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useGeolocation, type GeoPosition } from './useGeolocation'
 
-/* One ⌖ tap = one gated fill (user calls, 2026-09-02). The first fix
-   watchPosition delivers is often cell-tower-grade — the field test froze
-   a start point blocks away while the live blue dot (which keeps
-   updating) was right — so a tap ARMS a fill rather than grabbing
-   whatever fix exists at that instant. The fill fires on the first fix
-   accurate to ACCURACY_GATE_M; if none arrives within SETTLE_TIMEOUT_MS,
-   the best fix so far is good enough (indoors, bad reception — waiting
-   forever helps no one). After filling, the start NEVER chases later,
-   better fixes: the live use case is someone walking the route with the
+/* One ⌖ tap = one gated fill. The first fix watchPosition delivers is
+   often cell-tower-grade — it can put a start point blocks away while
+   the live blue dot (which keeps updating) is right — so a tap arms a
+   fill rather than grabbing whatever fix exists at that instant. The
+   fill fires on the first fix accurate to ACCURACY_GATE_M; if none
+   arrives within SETTLE_TIMEOUT_MS, the best fix so far is good enough
+   (indoors, bad reception — waiting forever helps no one). After
+   filling, the start never chases later, better fixes: the live use
+   case is someone walking the route with the
    page open, and a start point that follows the walker redraws the route
    under them. Re-tapping ⌖ is the deliberate way to retarget. */
 const ACCURACY_GATE_M = 50
@@ -58,7 +58,7 @@ export function useLocationFill(onFill: (p: GeoPosition) => void): LocationFill 
     const best = pending.best && pending.best.accuracy <= fix.accuracy ? pending.best : fix
     pending.best = best
     if (fix.accuracy <= ACCURACY_GATE_M) {
-      // A passing fix fills with ITSELF, not best-so-far: both clear the
+      // A passing fix fills with itself, not best-so-far: both clear the
       // bar, and the fresh one describes where the phone is now.
       fill(fix)
     } else if (Date.now() - pending.armedAt >= SETTLE_TIMEOUT_MS) {
@@ -84,7 +84,7 @@ export function useLocationFill(onFill: (p: GeoPosition) => void): LocationFill 
     if (position) consider(position)
   }
 
-  // The settle timeout: fires even if no NEW fix arrives after arming
+  // The settle timeout: fires even if no new fix arrives after arming
   // (the gate only runs when one does). No fix at all by the deadline →
   // stay armed, and the gate's own deadline branch fills from whatever
   // arrives first.

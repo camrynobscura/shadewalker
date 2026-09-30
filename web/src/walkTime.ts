@@ -103,7 +103,7 @@ export function walkTimeFromLink(params: URLSearchParams): WalkTime | null {
 }
 
 /** A Moment as the Date that formats it. UTC on purpose: the Moment
- * already IS New York's wall clock, and formatting it in the device's
+ * already is New York's wall clock, and formatting it in the device's
  * zone would shift it by the difference. */
 function utcDate(t: Moment): Date {
   return new Date(Date.UTC(t.year, t.month - 1, t.day, t.hour, t.minute))
@@ -118,8 +118,8 @@ export function describeClock(t: Moment): string {
 
 const DAY_MS = 86_400_000
 
-/** The time pill's text, as short as it can be and still say when
- * (user, 2026-09-28): "Arrive 1:00 PM" today, "Arrive Tue 1:00 PM" in
+/** The time pill's text, as short as it can be and still say when:
+ * "Arrive 1:00 PM" today, "Arrive Tue 1:00 PM" in
  * the next six days -- people plan by the weekday -- and "Arrive 10/5,
  * 1:00 PM" further out, or for a day already past (an old link). "Depart
  * …" the same way; the verb keeps an arrival from passing for one. */

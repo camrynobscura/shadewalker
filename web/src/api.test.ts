@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fetchRoute, geocode, GeocodeUnavailableError, reverseGeocode, RouteError } from './api'
 
-// Both functions are thin fetches against our own /geocode proxy since
-// 2026-08-30 — label building (including the address-not-POI reverse
-// rule, the Lucali story) lives server-side now and is pinned in
-// tests/test_server_geocode.py. What's left to test here is exactly what
-// this file owns: the response shapes and the null paths.
+// Both functions are thin fetches against our own /geocode proxy — label
+// building (including the address-not-POI reverse rule) lives server-side
+// and is pinned in tests/test_server_geocode.py. What's left to test here
+// is exactly what this file owns: the response shapes and the null paths.
 
 function mockFetchOnce(body: unknown, ok = true, status = ok ? 200 : 502) {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok, status, json: () => Promise.resolve(body) }))

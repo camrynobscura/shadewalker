@@ -18,15 +18,14 @@ import { CollapseIcon, CrosshairIcon, ExpandIcon } from './icons'
 import styles from './MapView.module.css'
 
 // Where the map opens before any route exists: Washington Square, framing
-// Greenwich Village + the East Village (user call 2026-09-01). Midtown
-// looked dramatic but its shade scores are low and FLAT, so first clicks
-// there returned near-identical routes across every preset; Village blocks
-// vary enough that the presets visibly diverge, which is the actual demo.
-// (Was Midtown 2026-08-31; Carroll Gardens, the pilot area, before that.)
+// Greenwich Village + the East Village. Midtown looks dramatic but its
+// shade scores are low and flat, so first clicks there return
+// near-identical routes across every preset; Village blocks vary enough
+// that the presets visibly diverge, which is the actual demo.
 const INITIAL_CENTER: [number, number] = [40.732, -73.9985]
 
-/* CARTO started watermarking keyless raster tile requests in 2026-08
-   ("API KEY REQUIRED" repeated across the map). The key is a build-time
+/* CARTO watermarks keyless raster tile requests ("API KEY REQUIRED"
+   repeated across the map). The key is a build-time
    input (VITE_CARTO_KEY in web/.env.local, gitignored) and is public by
    nature — it rides in every tile URL a visitor's browser requests, so
    keeping it out of git is rotation hygiene, not secrecy. Keyless builds
@@ -97,17 +96,14 @@ function InvalidateOnResize() {
    every side still let a fitted point land right behind one of them.
    The bottom's 100px keeps every fitted point out of the whole bottom
    strip, so it covers the legend in either corner; the sides' 60px clear
-   the zoom buttons and the toggle. The left was 190px "for the legend's
-   width" until 2026-09-29 -- redundant under that bottom strip, and on a
-   390px phone it was half the map: pairs framed into its right side and
-   zoomed out (measured: a tapped pair's midpoint at x=260 of 390).
+   the zoom buttons and the toggle.
 
    Phones take less top and bottom: their map is 40% of the screen, and
-   160px of padding left an iPhone SE's 220px map 60px for the pair -- a
-   Brooklyn-Manhattan trip framed at zoom 9, its markers 37px apart (user,
-   2026-09-29). The sides already clear both top controls, so the top
-   keeps only half a marker (15px) and a little; the bottom clears the
-   legend's 67px and half a marker. */
+   the desktop padding would leave an iPhone SE's 220px map 60px for the
+   pair (a Brooklyn-Manhattan trip framed at zoom 9, its markers 37px
+   apart). The sides already clear both top controls, so the top keeps
+   only half a marker (15px) and a little; the bottom clears the legend's
+   67px and half a marker. */
 const FIT_PAD_TOP_LEFT: [number, number] = [60, 60]
 const FIT_PAD_BOTTOM_RIGHT: [number, number] = [60, 100]
 const PHONE_FIT_PAD_TOP_LEFT: [number, number] = [60, 20]
@@ -157,7 +153,7 @@ function RouteFraming({
   baseline: RouteFeature | null
 }) {
   const map = useMap()
-  // The endpoint pair the map last framed, compared by VALUE: the same
+  // The endpoint pair the map last framed, compared by value: the same
   // pair firing this effect again means only the preset (or a re-fetch)
   // changed, which is the case the guard below may hold still.
   const framedPairRef = useRef<string | null>(null)
@@ -176,12 +172,12 @@ function RouteFraming({
     ]
     const pair = `${start.lat},${start.lon}|${end.lat},${end.lon}`
     // Preset switch with the new route already fully on screen: hold the
-    // camera. Refitting anyway nudged the map sideways on every
+    // camera. Refitting anyway nudges the map sideways on every
     // Shade_priority flip (each preset's bounds differ slightly), which
-    // reads as jitter when flipping through routes to compare them
-    // (user, 2026-09-07). A route that escapes the current view -- e.g.
-    // switching to MAX while zoomed in on a MED detail -- still falls
-    // through to the fit, pan and zoom both.
+    // reads as jitter when flipping through routes to compare them. A
+    // route that escapes the current view -- e.g. switching to MAX while
+    // zoomed in on a MED detail -- still falls through to the fit, pan
+    // and zoom both.
     if (pair === framedPairRef.current && fullyVisible(map, points)) return
     const { topLeft, bottomRight } = fitPadding()
     map.fitBounds(points, {
@@ -192,12 +188,11 @@ function RouteFraming({
     })
     framedPairRef.current = pair
     // Deliberately no handling for "only one of start/end set": panning
-    // the instant point A lands was more disruptive than useful in
-    // practice -- it re-centers/zooms the view around a point the user
-    // likely just clicked while already looking straight at it. Wait for
-    // the pair to frame together instead. A lone point TYPED or picked in
-    // a field is different -- usually somewhere else -- and is
-    // RevealLonePoint's.
+    // the instant point A lands is more disruptive than useful -- it
+    // re-centers/zooms the view around a point the user likely just
+    // clicked while already looking straight at it. Wait for the pair to
+    // frame together instead. A lone point typed or picked in a field is
+    // different -- usually somewhere else -- and is RevealLonePoint's.
   }, [start, end, selected, baseline, map])
 
   return null
@@ -212,11 +207,11 @@ function Legend({ hasRoute }: { hasRoute: boolean }) {
   if (!hasRoute) return null
   return (
     // Named: an unnamed grouping announces as "list, 3 items" with no
-    // clue what the list IS (2026-08-30 tree-read finding).
+    // clue what the list is.
     <ul className={styles.legend} aria-label="Map legend">
       <li className={styles.legendRow}>
-        {/* The picked preset's route, whichever it is: "shadiest" was wrong
-          for MED, LOW and NONE (user, 2026-09-28). */}
+        {/* The picked preset's route, whichever it is: "shadiest" would be
+          wrong for MED, LOW and NONE. */}
         <span className={styles.legendSwatch} aria-hidden="true" />
         your route
       </li>
@@ -228,13 +223,12 @@ function Legend({ hasRoute }: { hasRoute: boolean }) {
   )
 }
 
-/** Pans to `point` whenever a NEW object arrives — the imperative "look
+/** Pans to `point` whenever a new object arrives — the imperative "look
  * here" channel, used when a location fix fills the start field so the
  * map visibly answers the tap (RouteFraming deliberately ignores single
- * points, so without this a far-from-viewport fix changed nothing on
- * screen — user field report, 2026-09-02). Object identity is the
- * trigger on purpose: re-requesting location pans again even when the
- * fix lands on the same coordinates. */
+ * points, so without this a far-from-viewport fix would change nothing
+ * on screen). Object identity is the trigger on purpose: re-requesting
+ * location pans again even when the fix lands on the same coordinates. */
 function PanTo({ point }: { point: Point | null }) {
   const map = useMap()
   useEffect(() => {
@@ -251,9 +245,9 @@ function lonePoint(start: Point | null, end: Point | null): Point | null {
 }
 
 /** Pans to an address typed or picked for A or B while the other point is
- * still empty, keeping the zoom, when it's outside the padded view: the
- * marker used to land off-screen, so a pick looked like it did nothing
- * (user, 2026-09-29). Map taps never come through here -- a tap lands
+ * still empty, keeping the zoom, when it's outside the padded view:
+ * otherwise the marker lands off-screen and a pick looks like it did
+ * nothing. Map taps never come through here -- a tap lands
  * where the user is already looking (RouteFraming's note). `point` is a
  * fresh object per entry, handled once, against the endpoints of the
  * render it arrived in: if the other field filled meanwhile, the pair is
@@ -283,7 +277,7 @@ function RevealLonePoint({
 }
 
 /** Two things Leaflet's own DOM needs that react-leaflet can't set from
- * props (audit 2026-09-09). The container is a keyboard tab stop (arrow
+ * props. The container is a keyboard tab stop (arrow
  * keys pan, +/- zoom) that announced as nothing but its contents; it
  * gets a role and a short name — a group, not a landmark, so it's read
  * on focus and never in the landmark list — and `describedBy` points at
@@ -293,7 +287,7 @@ function RevealLonePoint({
  * lines — is hidden from AT: it read as a nameless image, and the
  * directions list is the accessible route. The svg exists only once the
  * first path is drawn, so this re-checks on every render (one
- * querySelector); it must stay the LAST child of MapContainer so its
+ * querySelector); it must stay the last child of MapContainer so its
  * effect runs after the Polylines' have added their layers. */
 function MapA11y({ describedBy }: { describedBy: string }) {
   const map = useMap()
@@ -310,9 +304,9 @@ function MapA11y({ describedBy }: { describedBy: string }) {
 /** "Locate me" — a Leaflet control in the bottom-right corner, the React
  * button portaled into the control's container. A control, not a plain
  * button inside the map, for disableClickPropagation, as Leaflet's own
- * controls have: without it a tap on the button ALSO reached the map as
- * a click and dropped a route point under it (found 2026-09-27; e2e
- * location.spec pins it). */
+ * controls have: without it a tap on the button also reaches the map as
+ * a click and drops a route point under it (e2e location.spec pins
+ * it). */
 function LocateButton({ position }: { position: GeoPosition | null }) {
   const map = useMap()
   const [container] = useState(() => {
@@ -339,8 +333,8 @@ function LocateButton({ position }: { position: GeoPosition | null }) {
     >
       {/* Icon is decoration (aria-hidden inside the component); the text
           after it is the accessible name. SVG, not the ⌖ character — that
-          glyph renders as tofu in iOS's mono fallback chain (2026-09-02),
-          and it's the same mark as the start field's location accessory. */}
+          glyph renders as tofu in iOS's mono fallback chain, and it's the
+          same mark as the start field's location accessory. */}
       <CrosshairIcon /> Locate me
     </button>,
     container,
@@ -403,15 +397,14 @@ export function MapView({
         Click to set your start and end points; arrow keys pan and plus and minus keys zoom. You can also type
         addresses in the route controls.
       </p>
-      {/* zoomAnimation must be OFF under reduced motion, not just quick:
+      {/* zoomAnimation must be off under reduced motion, not just quick:
           base.css's prefers-reduced-motion rule nulls every CSS
           transition, and Leaflet's animated zoom waits on a transitionend
           event to leave its "animating" state -- an event a nulled
           transition may never fire. Stuck there, Leaflet silently ignores
           every later setView/fitBounds: one click of the +/- control
           could freeze route framing, PanTo and Locate-me for the rest of
-          the session (found via the steady-preset-camera e2e,
-          2026-09-07). Instant zoom is also simply what the preference
+          the session. Instant zoom is also simply what the preference
           asks for. Mount-time read by design: react-leaflet map options
           are immutable, and a mid-session OS toggle is rare enough to
           not chase. */}
@@ -425,25 +418,25 @@ export function MapView({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url={TILE_URL}
           subdomains={['a', 'b']} /* only the two hosts we preconnect in index.html */
-          // detectRetina is DELIBERATELY OFF, and maxNativeZoom is why.
+          // detectRetina is deliberately off, and maxNativeZoom is why.
           //
           // With it on, Leaflet fills the URL's {r} token with @2x and asks
-          // for tiles one zoom level ABOVE the map's own. CARTO serves @2x
-          // only to z17: a z18 @2x request does not 404, it HANGS and times
+          // for tiles one zoom level above the map's own. CARTO serves @2x
+          // only to z17: a z18 @2x request does not 404, it hangs and times
           // out (measured 2026-08-24 -- z17 @2x 200, z18 @2x 15s timeout,
           // while plain z18 and z19 both return 200). Leaflet leaves a tile
-          // it never receives blank, so zooming in past a point scattered
-          // grey squares over the map and zooming back out cleared them.
+          // it never receives blank, so zooming in past that point scatters
+          // grey squares over the map.
           //
           // Plain tiles go to z19, so turning this off buys real detail at
-          // exactly the zoom that matters here: seeing WHICH SIDE of a street
+          // exactly the zoom that matters here: seeing which side of a street
           // a route uses is the whole point of per-sidewalk routing. The cost
-          // is softer rendering on high-DPI screens, accepted knowingly
-          // (user decision, 2026-08-24). It should also help Lighthouse
-          // performance, since a base tile is a quarter of @2x's pixels.
+          // is softer rendering on high-DPI screens, accepted knowingly. It
+          // should also help Lighthouse performance, since a base tile is a
+          // quarter of @2x's pixels.
           //
           // maxNativeZoom is the belt-and-braces half: it caps what is
-          // REQUESTED while maxZoom caps what the map allows, so past z19
+          // requested while maxZoom caps what the map allows, so past z19
           // Leaflet upscales the last real tile instead of requesting one
           // that may not exist. That makes blank tiles structurally
           // impossible even if CARTO's ceiling moves again.
@@ -463,12 +456,12 @@ export function MapView({
             fake the Greenhouse glow (SVG strokes can't blur). Colour comes
             from the className (MapView.module.css, on the theme tokens);
             pathOptions carries only geometry.
-            className MUST be a top-level prop, never inside pathOptions:
+            className must be a top-level prop, never inside pathOptions:
             top-level props reach Leaflet's constructor, so the class is on
             the SVG element when it's created; pathOptions goes through
             setStyle() after the layer is added, which never touches the
-            class. StrictMode's double mount hid that in dev — production
-            shipped blue routes (2026-09-23). */}
+            class. StrictMode's double mount hides that in dev, so
+            production is where unstyled routes show. */}
         {baseline && (
           <>
             <Polyline

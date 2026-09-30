@@ -49,13 +49,13 @@ export interface RouteFeature {
     length_m: number
     minutes: number
     tree_count: number
-    /** Fraction (0-1) of the route that is shaded: tree canopy and, since
-     * the building-shadows work, building shadows for the moment the
-     * server computed it (see `hour`/`minute` on the response), combined
-     * by union. Continuous since 2026-08-17: each block contributes
-     * min(density / saturation, 1) of its length, no per-edge cliff. */
+    /** Fraction (0-1) of the route that is shaded: tree canopy and
+     * building shadows for the moment the server computed it (see
+     * `hour`/`minute` on the response), combined by union. Continuous:
+     * each block contributes min(density / saturation, 1) of its length,
+     * no per-edge cliff. */
     shade_fraction: number
-    /** Fraction (0-1) of the route's tree score that is park-canopy AREA
+    /** Fraction (0-1) of the route's tree score that is park-canopy area
      * credit rather than countable trees -- when it dominates, the raw
      * tree_count undersells the real cover (a Central Park loop can be
      * "83% shaded, 3 trees"), so RouteStats hides the count. */
@@ -146,7 +146,7 @@ export async function fetchRoute(
     // A 4xx with our detail is the server explaining itself (outside
     // coverage, no path, rate limited). A 5xx, or a body that isn't ours,
     // is the server being broken -- a plain Error, so the caller shows
-    // its generic wording rather than "Routing failed (502)" (2026-09-09).
+    // its generic wording rather than "Routing failed (502)".
     if (res.status < 500 && detail) throw new RouteError(detail)
     // slowapi's stock 429 body has no detail; ours does, but keep the
     // wait message even if that handler ever goes missing.
@@ -159,7 +159,7 @@ export async function fetchRoute(
 /** The address search itself couldn't answer — the proxy or Photon is
  * down, or there's no network — as opposed to answering "no match".
  * Thrown so a field can show SEARCH_DOWN instead of NOT_FOUND, which
- * used to send people retyping an address that was fine (2026-09-09). */
+ * would send people retyping an address that was fine. */
 export class GeocodeUnavailableError extends Error {}
 
 export interface GeocodeResult extends Point {
@@ -203,10 +203,10 @@ export async function suggest(query: string, signal: AbortSignal): Promise<Geoco
 /** The reverse of geocode(): a point the user picked (a map click, a
  * geolocation fix) back to a short address label, so an address field
  * can show real text instead of the point that filled it. Null when
- * nothing address-shaped is nearby OR the lookup failed — either way
+ * nothing address-shaped is nearby or the lookup failed — either way
  * the caller keeps its own coordinate fallback. The address-not-POI
- * rule (an address field must never read "Lucali") moved server-side
- * with the proxy: server/geocode.py's _reverse_label. */
+ * rule (an address field must never read "Lucali") lives server-side:
+ * server/geocode.py's _reverse_label. */
 export async function reverseGeocode(point: Point): Promise<string | null> {
   const params = new URLSearchParams({ lat: String(point.lat), lon: String(point.lon) })
   let res: Response

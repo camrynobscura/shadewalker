@@ -29,10 +29,9 @@ export interface GeolocationListeners {
  * and a Lighthouse best-practices failure.
  *
  * `position` is null until the first fix; `error` says why when a failure
- * is the reason (until 2026-09-02 errors were swallowed into the same
- * null, which left the ⌖ accessory stuck on "acquiring" forever after a
- * denial — `use-location-ux`'s founding bug). A later successful fix
- * clears the error: watchPosition keeps trying, and e.g. a timeout
+ * is the reason (swallowing errors into the same null would leave the ⌖
+ * accessory stuck on "acquiring" forever after a denial). A later
+ * successful fix clears the error: watchPosition keeps trying, and e.g. a timeout
  * followed by a real fix is a recovery, not a failure. The app works
  * fully without location either way.
  *

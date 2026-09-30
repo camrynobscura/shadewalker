@@ -2,17 +2,18 @@ import { expect, test } from '@playwright/test'
 import { mockGeocode, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
 
 // axe-core inspects markup, not actual tab behavior — this checks the part
-// it can't: that CLAUDE.md's accessibility promises (skip link, logical
+// it can't: that the app's accessibility promises (skip link, logical
 // order, visible focus, arrow-key radio group) hold up when you actually
 // drive the app with a keyboard, nothing else.
 
 test('reaches and operates every control in order via keyboard alone', async ({ page }) => {
-  // routeUrl() lands with start/end already set, which now reverse-geocodes
-  // into the address fields on load -- mock it or this hits live Nominatim.
+  // routeUrl() lands with start/end already set, which reverse-geocodes
+  // into the address fields on load -- mock it or this hits the live
+  // geocoder.
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
   // Wait for the route so both fields hold text and their ✕ accessories
-  // (which replaced CLEAR_ROUTE, 2026-09-02) are part of the tab order.
+  // are part of the tab order.
   await expect(routeDrawn(page)).toBeVisible()
 
   await page.keyboard.press('Tab')
@@ -69,7 +70,7 @@ test('reaches and operates every control in order via keyboard alone', async ({ 
   await page.keyboard.press('Enter')
   await expect(page.getByRole('combobox', { name: 'Start point' })).toHaveValue('')
   // The ✕ unmounts as it clears; a keyboard activation must land focus on
-  // the emptied input, not on <body> (audit 2026-09-09).
+  // the emptied input, not on <body>.
   await expect(page.getByRole('combobox', { name: 'Start point' })).toBeFocused()
   await expect(routeDrawn(page)).toBeHidden()
   await expect(page.getByRole('button', { name: 'Use location' })).toBeVisible()

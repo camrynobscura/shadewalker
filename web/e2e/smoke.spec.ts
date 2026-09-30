@@ -14,7 +14,7 @@ test('searching two addresses draws a route with stats and directions', async ({
   await page.keyboard.press('Enter')
 
   await expect(routeDrawn(page)).toBeVisible()
-  // The tree count: a line under the route rows (the old stat).
+  // The tree count: a line under the route rows.
   await expect(page.getByText(/trees? along the way/).first()).toBeVisible()
   // The directions list is the only <ol> on the page, so the tag alone
   // disambiguates without a test-only hook.
@@ -57,12 +57,12 @@ test('loading a shared route URL fills in the address fields via reverse geocodi
 
 test('the way to About survives every width, the phone pop-up included', async ({ page }) => {
   // ≤720px the header's ABOUT word gives way to the ⓘ, which opens a
-  // pop-up holding the app's two-line intro and the ABOUT link
-  // (2026-09-28). The risk this guards: both forms hidden at some width
-  // leaves phones with NO path to About, and the swap regressing the
-  // zoomed-phone wrap (the whole reason the word left) would put the ⓘ
-  // below the wordmark again. 320px is the reflow floor and the tightest
-  // fit for wordmark + icon on one row.
+  // pop-up holding the app's two-line intro and the ABOUT link. The risk
+  // this guards: both forms hidden at some width leaves phones with no
+  // path to About, and the swap regressing the zoomed-phone wrap (the
+  // reason the word gives way) would put the ⓘ below the wordmark.
+  // 320px is the reflow floor and the tightest fit for wordmark + icon
+  // on one row.
   await page.setViewportSize({ width: 320, height: 667 })
   await page.goto('/')
   const info = page.getByRole('button', { name: 'About Shade Walker' })
@@ -125,10 +125,10 @@ test('on a phone the ⓘ pop-up sits over the map and closes without touching it
 })
 
 test('the About page is a scrollable document', async ({ page }) => {
-  // Regression: about.css imports index.css for the tokens, and the app's
-  // fixed-viewport guard there (html/body overflow:hidden, 2026-08-31)
-  // silently clipped this page's scroll until about.css restored document
-  // behavior. A short viewport guarantees the prose overflows it.
+  // about.css must not inherit the app shell's fixed-viewport guard
+  // (index.css's html/body overflow:hidden), which would silently clip
+  // this page's scroll. A short viewport guarantees the prose overflows
+  // it.
   await page.setViewportSize({ width: 800, height: 450 })
   await page.goto('/about.html')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
