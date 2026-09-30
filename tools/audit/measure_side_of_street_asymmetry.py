@@ -3,16 +3,15 @@
 THE CLAIM BEING TESTED
 ----------------------
 The case for rebuilding on sidewalk data rests on this: a street's two
-sides often have very different tree cover, and a centerline model
-reports only their average -- so it tells you a street is "moderately
+sides often have very different tree cover, and a model with one line
+per street reports only their average -- so it tells you a street is "moderately
 shady" when really one side is shaded and the other is bare.
 
-That has been asserted repeatedly in this project without measurement.
-This measures it.
+This measures it rather than asserting it.
 
 METHOD
 ------
-For every walkable street centerline in the four boroughs, take the real
+For every walkable street in the four boroughs, take the real
 NYC Forestry tree points within 20m, and assign each to the LEFT or
 RIGHT of the street using the sign of the cross product against the
 nearest segment. Then compare the two sides.
@@ -22,7 +21,7 @@ one mature London plane shades more pavement than three saplings, and a
 count alone would understate real asymmetry.
 
 A street is "lopsided" when one side holds >= 70% of the shade. That is
-the population a centerline model necessarily gets wrong for at least
+the population a one-line-per-street model necessarily gets wrong for at least
 one of its two pavements.
 
 Local only. Staten Island excluded.
@@ -52,8 +51,7 @@ from tools.audit.measure_sidewalk_only_coverage import (  # noqa: E402
 
 from pipeline import config  # noqa: E402
 
-# The pinned extract, from the one place that defines it -- this line
-# used to be a copy in each of these scripts.
+# The pinned extract, from the one place that defines it.
 EXTRACT = config.OSM_EXTRACT_PATH
 BOROUGHS = os.path.join(REPO, "data", "raw", "socrata",
                         "borough_boundaries_wh2p-dxnf.geojson")
@@ -62,7 +60,7 @@ TREES = os.path.join(REPO, "data", "raw", "socrata", "trees_*_v3.json")
 K = 111320.0 * math.cos(math.radians(40.7))
 LAT_M = 110540.0
 
-# Street trees sit in the pavement strip; 20m from the centerline covers
+# Street trees sit in the pavement strip; 20m from the street line covers
 # both sides of an ordinary street and most of an avenue without reaching
 # into the next block.
 TREE_REACH_M = 20.0
@@ -80,7 +78,7 @@ def width_class(tags):
     """Narrow vs wide, because the two errors compound differently.
 
     On a narrow street the same trees shade both pavements, so a
-    centerline average is nearly right. On a wide avenue the far side's
+    whole-street average is nearly right. On a wide avenue the far side's
     trees shade nothing you walk on -- so the average is wrong even when
     the two sides are SYMMETRIC, and doubly wrong when they are not.
 
@@ -231,7 +229,7 @@ def main():
           f"({len(extreme) / len(results) * 100:.1f}%)")
     print(f"  ALL trees on one side:          {len(onesided):,} "
           f"({len(onesided) / len(results) * 100:.1f}%)")
-    print(f"\n  A centerline model reports the AVERAGE for both pavements,")
+    print(f"\n  A one-line-per-street model reports the average for both pavements,")
     print(f"  so on those {len(lop) / len(results) * 100:.0f}% of streets it")
     print(f"  is wrong for at least one side by construction.")
 

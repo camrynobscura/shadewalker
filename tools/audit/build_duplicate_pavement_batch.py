@@ -18,13 +18,13 @@ in seconds.
 WHY NOT THE CSCL RATIO
 ----------------------
 The obvious test -- assigned length vs the block's own CSCL centerline
-length -- is INVALID for this. A centerline segment can be far shorter than
+length -- is invalid for this. A centerline segment can be far shorter than
 the run of kerb conflated to it, so that ratio flags ordinary blocks (it
 reported 13% of the city, and measure_edge_block_alignment.py then showed
 edges are aligned and only 2.0% of length is miscredited).
 
 This instead compares a face's total assigned pavement against the ground
-its pieces actually cover -- both measured from OUR data, no CSCL. Pieces
+its pieces actually cover -- both measured from our data, no CSCL. Pieces
 laid end to end give ~1. Pieces stacked in parallel give ~2.
 
 DESIGN

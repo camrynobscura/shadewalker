@@ -4,14 +4,13 @@ WHAT THIS DERIVES
 -----------------
 config.DENSITY_AT_FULL_COVERAGE -- the Forestry density at which pavement
 is fully covered by canopy, the single saturation point for routing cost
-AND displayed shade. Originally fit 2026-08-25 (25,000 sidewalks, 2m
-walker strip, three methods agreeing 0.027-0.033 -> 0.031); that script
-was scratchpad-era and wiped. This is the durable rebuild, needed
-whenever anything upstream of density changes -- e.g. TREE_ATTACH_MAX_M,
-whose 5->8m widening (2026-08-27) is why this file exists.
+and displayed shade. First fit 2026-08-25 (25,000 sidewalks, 2m walker
+strip, three methods agreeing 0.027-0.033 -> 0.031) by an earlier one-off
+script; this is the durable version, to re-run whenever anything upstream
+of density changes (TREE_ATTACH_MAX_M, for one).
 
 VALIDATE BEFORE TRUSTING (the instrument rule): run it against the
-CURRENT production export first. It must reproduce ~0.031 within the
+current production export first. It must reproduce ~0.031 within the
 0.027-0.033 band on data whose answer is known, or the script is wrong
 and its new number is worthless.
 
@@ -21,12 +20,12 @@ and its new number is worthless.
 
 METHOD
 ------
-Sample sidewalk edges (the one pavement kind carrying BOTH signals),
+Sample sidewalk edges (the one pavement kind carrying both signals),
 compute each edge's peak-season Forestry density and its measured leaf
 fraction over the same 2m walker strip production uses
 (pipeline/scoring/canopy.py:leaf_fraction), then fit the zero-intercept
-slope three ways. Three METHODS, one dataset -- agreement checks the
-estimator, not the data (convergence-is-not-correctness, CLAUDE.md);
+slope three ways. Three methods, one dataset -- agreement checks the
+estimator, not the data;
 the independent check is validation against the known 0.031.
 
 Edges with density > 0.2 (6x saturation) are excluded: those are the
@@ -96,7 +95,7 @@ def main() -> int:
         if rec is None or rec["length_m"] < args.min_edge_m:
             continue
         # Sidewalk edges Forestry could not answer carry raster-derived
-        # scores since 2026-08-27 (canopy.score_sidewalk_fallback), and
+        # scores (canopy.score_sidewalk_fallback), and
         # tree_park_canopy marks exactly that. Keeping them in the sample
         # would regress the raster against itself and drag the fit toward
         # the current DENSITY_AT_FULL_COVERAGE by construction.

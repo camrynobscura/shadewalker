@@ -18,8 +18,8 @@ full four-preset ladder through route() -- best of REPS repeats, so a
 busy laptop lands in the spread, not in the number.
 
 Numbers are dev-machine numbers: they prove an algorithm got faster or
-slower, never what the live site does (the Mac under-predicted the
-droplet by more than the measured core ratio, HISTORY.md 2026-09-07).
+slower, never what the live site does (the Mac has under-predicted the
+droplet by more than the measured core ratio).
 
 USAGE
 -----

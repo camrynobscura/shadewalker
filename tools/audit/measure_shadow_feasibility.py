@@ -5,22 +5,21 @@ WHY THIS EXISTS
 ---------------
 pipeline/scoring/shadows.py answers "what share of this edge is in a
 building's shadow" for 288 (month, hour) slots. Before it runs on 488k
-edges and 1.08M footprints, the user decides (PLAN `building-shadows`,
-Gate 1) on MEASUREMENTS: engine accepted or not, sample step, grid cell,
-slot set, reach, build-time budget. This produces them on five test
-areas, one per borough (the boroughs are too different for one pilot --
-BUILDING-SHADOWS.md section 4.6 has their crude verdicts).
+edges and 1.08M footprints, the go/no-go (#108) rests on measurements:
+engine accepted or not, sample step, grid cell, slot set, reach,
+build-time budget. This produces them on five test areas, one per
+borough (the boroughs are too different for one pilot).
 
 VALIDATE FIRST (the instrument rule)
 ------------------------------------
 The 2026-09-08 numbers were produced by a crude engine: all-vector, 5 m
-slices, ONE point per slice, sidewalk points only, hand-computed sun,
-buildings FULLY INSIDE the area bbox only (Socrata within_box), rays no
+slices, one point per slice, sidewalk points only, hand-computed sun,
+buildings fully inside the area bbox only (Socrata within_box), rays no
 longer than the area's tallest building / tan(el). Part 1 reproduces
 exactly that computation with today's exact sweep engine. If those
 numbers do not come back, the instrument is wrong and nothing after it
 can be believed. (First run, 2026-09-24: four areas within 0.7 points;
-Midtown read 2-4.5 points HIGH until the building set was matched --
+Midtown read 2-4.5 points high until the building set was matched --
 the crude run had dropped every tower straddling or outside its 1 km
 box, which is what shades Midtown at low sun. Matched, all five
 reproduce to 0.1 point. The production run uses buildings within
@@ -79,8 +78,8 @@ from pipeline.scoring import shadows                   # noqa: E402
 
 logger = logging.getLogger("measure_shadow_feasibility")
 
-# The five areas of BUILDING-SHADOWS.md section 4.6, and the crude verdicts
-# recorded there (sidewalk points shaded, %; crossings where recorded).
+# The five test areas, and the crude 2026-09-08 verdict for each
+# (sidewalk points shaded, %; crossings where recorded).
 AREAS = {
     "midtown": Bbox(lat_min=40.750, lat_max=40.760, lon_min=-73.990, lon_max=-73.978),
     "bronx": Bbox(lat_min=40.845, lat_max=40.855, lon_min=-73.910, lon_max=-73.898),

@@ -3,8 +3,8 @@
 WHAT THIS DERIVES
 -----------------
 The exponent in the display-only transform  displayed = 1-(1-coverage)^k
-(the `display-curve` branch; brief in history/display-curve.md).
-Displayed shade for a sidewalk is calibrated to the AVERAGE canopy
+(#42; applied in web/src/shade.ts).
+Displayed shade for a sidewalk is calibrated to the average canopy
 coverage of the 2m walker strip (config.CANOPY_SAMPLE_STRIP_M, via
 fit_exchange_rate.py) -- but a walker drifts to the shadiest walking
 line the pavement offers. This measures, citywide: production strip
@@ -13,7 +13,7 @@ the k that maps average -> best, length-weighted.
 
 INSTRUMENT VALIDATION (runs first, gate on it): the Mall promenade
 (40.77204,-73.97172 -> 40.77020,-73.97242) was measured 2026-08-27 at
-centerline ~74.2% / best lane +10m ~91.3%, with a U-shaped lane profile
+along its middle ~74.2% / best lane +10m ~91.3%, with a U-shaped lane profile
 (elms arch in from the sides; sky-holes over the middle). The lane
 reader here must reproduce those within ~4 points on the live route's
 geometry (needs the routing server on :8000) or nothing else it says
@@ -26,7 +26,7 @@ the same data must reproduce these):
     band +/-1.0m  LSQ k = 1.19   weighted median 1.16
     band +/-1.5m  LSQ k = 1.23   weighted median 1.19
     implied k near-constant across coverage deciles (1.15-1.25 above
-    20% coverage) -- the functional FORM validated, not just the value.
+    20% coverage) -- the functional form validated, not just the value.
   PATH-KIND (1,500 of 36,890, 88.6 km):
     band +/-2.0m  k = 1.46      band +/-3.0m  k = 1.72
     (the Mall at +/-10m works out to ~1.79: lane choice grows with

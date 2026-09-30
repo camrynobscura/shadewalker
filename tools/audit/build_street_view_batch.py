@@ -8,9 +8,8 @@ sidewalks, drawn 29% from Manhattan and 65% from Queens while Brooklyn --
 a third of the city's pavement -- contributes 1.3%. Every precision figure
 resting on it should be treated as unestablished.
 
-Human eyes on Street View are the better instrument, and the user has asked
-to be given these batches rather than have decisions made on weaker
-evidence. This makes one.
+Human eyes on Street View are the better instrument, so decisions here
+rest on these batches rather than on weaker evidence. This makes one.
 
 DESIGN
 ------

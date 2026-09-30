@@ -1,22 +1,20 @@
 """How often is a derived sidewalk name RIGHT, ABSENT, or WRONG?
 
-The holdout test for turn-directions' naming work, rebuilt 2026-08-27 as a
-durable tool (its 2026-08-23 predecessor lived in a session scratchpad and
-was wiped; PLAN cited it as existing long after it was gone).
+The holdout test for the naming derivation (pipeline/graph/naming.py).
 
 RECORDED BASELINES (street-achievable subset, by length, RIGHT/none/WRONG)
 --------------------------------------------------------------------------
-2026-08-23 original run: 43.3% precision overall, 81.8% near-street.
+2026-08-23 run: 43.3% precision overall, 81.8% near-street.
 2026-08-28 grid (reproduced those exactly, then decided the rule):
   nearest street, no parallel filter:   69.8 / 24.8 / 5.4
   nearest PARALLEL street (ADOPTED):    75.9 / 20.6 / 3.5   -- and it
     names 27.5% more edges citywide (249,931 vs 196,055), keeping 98.2%
-    of previously-named length. naming.py ships this as of 2026-08-28.
-  parallel + face-cscl must agree:      66.2 / 32.3 / 1.5   -- declined
-    FOR NOW (user call: coverage over the last halving of wrong; the
-    drawn route is the authority and never depends on names). Re-decide
-    after alias normalization (OSM '6th Avenue' vs CSCL 'Avenue of the
-    Americas'), which is most of its coverage cost.
+    of previously-named length. naming.py ships this.
+  parallel + face-cscl must agree:      66.2 / 32.3 / 1.5   -- declined:
+    coverage over the last halving of wrong (the drawn route is the
+    authority and never depends on names). Re-decide after alias
+    normalization (OSM '6th Avenue' vs CSCL 'Avenue of the Americas'),
+    which is most of its coverage cost.
 
 METHOD
 ------
@@ -26,15 +24,15 @@ Blank those names, let each naming source answer, and score three buckets:
   RIGHT   derived name == the hidden real name (normalized)
   NONE    the source declined ("unnamed path" in the app)
   WRONG   a confident different name -- the bucket that sends a walker
-          down the wrong street. The product bar (user, 2026-08-23):
-          "unnamed path" beats a wrong street name, so THIS bucket is
+          down the wrong street. The product bar: "unnamed path" beats a
+          wrong street name, so THIS bucket is
           what any chosen policy must drive toward zero.
 
 SOURCES
 -------
-  naming.py       the SHIPPED derivation (nearest parallel street since
-                  2026-08-28) -- this tool measures whatever ships, so a
-                  naming.py change re-measures itself here.
+  naming.py       the SHIPPED derivation (nearest parallel street) --
+                  this tool measures whatever ships, so a naming.py
+                  change re-measures itself here.
   face-cscl       the block face's CSCL street name (blockface.py conflates
                   every sidewalk to a face for tree scoring; the face's
                   `street` attribute is otherwise unused for naming).

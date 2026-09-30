@@ -61,8 +61,7 @@ from tools.audit.measure_sidewalk_only_coverage import (  # noqa: E402
 
 from pipeline import config  # noqa: E402
 
-# The pinned extract, from the one place that defines it -- this line
-# used to be a copy in each of these scripts.
+# The pinned extract, from the one place that defines it.
 EXTRACT = config.OSM_EXTRACT_PATH
 BOROUGHS = os.path.join(REPO, "data", "raw", "socrata",
                         "borough_boundaries_wh2p-dxnf.geojson")
@@ -76,7 +75,7 @@ LAT_M = 110540.0
 # buffers start overlapping on a narrow street, which would manufacture
 # agreement.
 PEDESTRIAN_BUFFER_M = 2.0
-# A sidewalk must be at least this far from the centerline to be counted
+# A sidewalk must be at least this far from the street line to be counted
 # as "a side", and no further than this, or we pick up the next street.
 SIDE_MIN_M, SIDE_MAX_M = 3.0, 25.0
 MIN_SIDEWALK_LEN_M = 40.0

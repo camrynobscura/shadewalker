@@ -1,7 +1,7 @@
 """Forestry-vs-raster gap census over sidewalks, per neighborhood.
 
-THE QUESTION (user, 2026-08-27)
--------------------------------
+THE QUESTION
+------------
 How much real canopy sits over sidewalks that the public tree dataset
 cannot account for -- private front-yard trees especially? For every
 sidewalk edge inside each neighborhood box, two readings over the SAME
@@ -9,7 +9,7 @@ sidewalk edge inside each neighborhood box, two readings over the SAME
 
   displayed  what the app shows today: min((ev + dec x month_factor) /
              length / DENSITY_AT_FULL_COVERAGE, 1) at peak month --
-             the server's own formula, server/graph_store.py:761-764.
+             the server's own formula, graph_store.py's _tree_fraction.
   measured   what the 2021 land-cover raster sees: production
              canopy.leaf_fraction, the instrument the display scale was
              calibrated against (tools/audit/fit_exchange_rate.py).
@@ -23,11 +23,10 @@ production export this must reproduce, length-weighted:
   Greenwich Village  442 edges / 20.5 km   displayed 46.8  raster 36.4
   Bed-Stuy           755 edges / 33.0 km   displayed 48.8  raster 47.3
 
-WHAT THE 2026-08-27 RUN FOUND (full account:
-history/garden-canopy-gap.md; decision: deferred until the successor
-raster -- see REFETCH.md's raster watch):
+WHAT THE 2026-08-27 RUN FOUND (acting on it is deferred until a successor
+raster):
 
-- Neighborhood NETS are small (-2.2 / -10.4 / -1.5 pts) but hide two
+- Neighborhood nets are small (-2.2 / -10.4 / -1.5 pts) but hide two
   cancelling errors, same signature in all three boxes: garden blocks
   displaying ~34% where the raster sees ~53% (17-19% of brownstone
   sidewalk length understated >10 pts), and tree-packed blocks
@@ -71,7 +70,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("gap")
 
 # (lat_min, lat_max, lon_min, lon_max) -- tight neighborhood cores,
-# chosen 2026-08-27 to exclude parks (Von King and Fulton Park sit just
+# chosen to exclude parks (Von King and Fulton Park sit just
 # outside the Bed-Stuy box, Washington Square just south of the Village
 # one). Greenwich Village is the control: heavy canopy, essentially all
 # of it public street trees, buildings at the lot line -- a fair
@@ -231,8 +230,8 @@ _MAP_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8">
 const DATA = __DATA__;
 const CENTERS = __CENTERS__;
 const map = L.map('map').setView(CENTERS['Carroll Gardens'], 16);
-// detectRetina off + explicit zoom ceiling: the grey-squares trap
-// (web/CLAUDE.md) -- never ask a tile host for zooms it does not serve.
+// detectRetina off + explicit zoom ceiling: never ask a tile host for
+// zooms it does not serve, or it paints grey squares.
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxNativeZoom: 19, maxZoom: 19, detectRetina: false,
   attribution: '&copy; OpenStreetMap'

@@ -4,12 +4,12 @@ WHY THIS EXISTS
 ---------------
 The shade table is 288 uint8 per edge -- 140.7 MB citywide by
 construction -- riding in a file whose settled rules are "one file, JSON,
-inspectable, streamed into server RAM at startup" (CLAUDE.md). The
-2026-09-08 synthetic measurements (BUILDING-SHADOWS.md section 4.4)
-ruled out plain int lists (3x startup) and left three candidates. This
-writes each of them FROM THE SAME REAL BUILD and measures what the box
-will pay: bytes shipped, GraphStore.load() wall time, peak RSS of the
-loading process, and the field's own decode cost. The user decides.
+inspectable, streamed into server RAM at startup". Synthetic
+measurements (2026-09-08) ruled out plain int lists (3x startup) and
+left three candidates. This writes each of them from the same real build
+and measures what the box will pay: bytes shipped, GraphStore.load()
+wall time, peak RSS of the loading process, and the field's own decode
+cost.
 
 CANDIDATES (each in its own directory under --out-dir)
 ------------------------------------------------------
@@ -25,12 +25,11 @@ CANDIDATES (each in its own directory under --out-dir)
                GraphStore's *.json.gz glob ignores it today.
 
 Every candidate decodes to the SAME table -- checked here, so the choice
-is about cost only. At Gate 2 GraphStore did not read the field yet
-(PR 2 step 8), so "load" was what that loader paid for the bigger JSON
-and the decode column what the field would add; since PR 2 the loader
-decodes it, so a re-run's "load" includes the decode. Mac numbers are
-relative; the box measurement is deploy day's (CLAUDE.md: a Mac peak is
-not a Linux budget).
+is about cost only. Before #109 GraphStore did not read the field, so
+"load" was what that loader paid for the bigger JSON and the decode
+column what the field would add; since #109 the loader decodes it, so a
+re-run's "load" includes the decode. Mac numbers are relative; the box
+measurement is deploy day's (a Mac peak is not a Linux budget).
 
     uv run python tools/audit/measure_export_candidates.py
     uv run python tools/audit/measure_export_candidates.py --export path/to/other/citywide.json.gz
@@ -96,8 +95,7 @@ def _load_best(dir_path, runs: int):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    # Gate 2 ran on data/practice_export/ (deleted 2026-09-25); the real
-    # export has identical content, so it is the default now.
+    # The real export is the default; --export points at a practice build.
     parser.add_argument("--export", default="data/export/citywide.json.gz")
     parser.add_argument("--out-dir", default=f"data/audits/{dt.date.today().isoformat()}/export_candidates")
     parser.add_argument("--runs", type=int, default=2, help="load() runs per candidate; best wall, worst RSS")

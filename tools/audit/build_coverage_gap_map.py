@@ -13,27 +13,17 @@ NOTHING IS COMPUTED. There is no join between the two layers, no distance
 threshold, no verdict, no cells -- both layers are drawn as they are and
 the reader does the comparing. That is the point of the design, not a
 shortcut in it: every machine answer to "is there a sidewalk beside this
-kerb" needs a distance constant, and this project's history with those is
-bad (TREE_BUFFER_M crept 12 -> 14). A picture needs none, and the eye is
-better at it anyway.
+kerb" needs a distance constant, and every such constant drifts. A picture
+needs none, and the eye is better at it anyway.
 
 RED IS NOT A TO-DO LIST. OSM is frequently right to have drawn nothing --
-E 167 St is tagged `sidewalk=no` and the user confirmed one side genuinely
-has none. THE GOVERNING RULE STANDS: we do not draw sidewalks OSM is
-missing. This exists to know where the app is blind, nothing more.
+E 167 St is tagged `sidewalk=no` and one side of it genuinely has none,
+checked by eye. The governing rule stands: we do not draw sidewalks OSM
+is missing. This exists to know where the app is blind, nothing more.
 
-WHAT REPLACED WHAT
-------------------
-This file used to render `measure_sidewalk_only_coverage.py`'s 250m gap
-CELLS from `data/audits/2026-08-22/sidewalk_only_gaps.geojson`. That input
-was deleted with its dated directory, so the tool had been crashing on
-load rather than merely being stale -- and cells could never answer "which
-SIDE of which street", which is the whole question under a per-side model.
-The old version is at `git show 50db191:tools/audit/build_coverage_gap_map.py`.
-
-Output is deliberately NOT written to a dated directory. Dating it is what
-turned the last version into dead code: the map is a view of current data,
-regenerated whenever the data moves, not a measurement pinned to a day.
+Output is deliberately not written to a dated directory: the map is a
+view of current data, regenerated whenever the data moves, not a
+measurement pinned to a day.
 
 Usage:
   uv run python tools/audit/build_coverage_gap_map.py
@@ -276,8 +266,8 @@ map.fitBounds(BOUNDS);
 
 // maxNativeZoom lets the deepest real tile be upscaled past z19 instead of
 // the layer returning nothing. Without it, zooming in past what the host
-// actually serves paints grey squares over the map -- the same bug that hit
-// web/src/components/MapView.tsx on 2026-08-24.
+// actually serves paints grey squares over the map -- the same bug
+// web/src/components/MapView.tsx guards against.
 const sat = L.tileLayer(
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   {maxNativeZoom: 19, maxZoom: 21, attribution: 'Esri World Imagery'}).addTo(map);

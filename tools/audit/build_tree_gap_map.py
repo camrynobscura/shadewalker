@@ -7,8 +7,7 @@ WHY THIS EXISTS
 `park-canopy` rests on a claim: that Forestry (`hn5i-inap`) cannot see a
 large part of the canopy in NYC's parks. That claim has been measured three
 ways and every one of them is a ratio. A ratio cannot tell you whether the
-trees in a park you have WALKED are on the map, and the user has walked most
-of these parks. So: draw the trees, draw the park outlines, and let a human
+trees in a park you have walked are on the map. So: draw the trees, draw the park outlines, and let a human
 who knows the ground look at it.
 
 NOTHING HERE IS COMPUTED. Same discipline as build_coverage_gap_map.py --
@@ -423,8 +422,8 @@ window.__map = map;
 window.__data = {trees: TREES, city: CITY, osm: OSM};
 
 // maxNativeZoom lets the deepest real tile upscale past z19 instead of the
-// layer returning nothing and painting grey squares -- the bug that hit
-// web/src/components/MapView.tsx on 2026-08-24.
+// layer returning nothing and painting grey squares -- the bug
+// web/src/components/MapView.tsx guards against.
 const sat = L.tileLayer(
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   {maxNativeZoom: 19, maxZoom: 21, attribution: 'Esri World Imagery'}).addTo(map);
