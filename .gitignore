@@ -20,6 +20,9 @@ web/dist/
 # macOS
 .DS_Store
 
+# Editor: VS Code's Markdown Preview Enhanced writes its config here
+.crossnote/
+
 # Claude Code local (per-machine) state — settings, plans, scheduled-task locks
 .claude/
 

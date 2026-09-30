@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { Header } from './Header.tsx'
 import shared from '../shared.module.css'
 
@@ -11,6 +11,20 @@ import shared from '../shared.module.css'
    targets #caution here — keep that id. (Own file rather than inline in
    the about.tsx entry so the react-refresh only-export-components rule
    stays satisfied — the same split main.tsx/App.tsx use.) */
+/* A link that leaves the site opens a new tab, so the page a reader came
+   from stays put, and assistive tech hears the change of context. Current
+   browsers imply rel=noopener on target=_blank; it is stated for older
+   ones. Not noreferrer: the linked sites may see where visitors came
+   from. */
+function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener">
+      {children}
+      <span className={shared.visuallyHidden}> (opens in a new tab)</span>
+    </a>
+  )
+}
+
 export function AboutPage() {
   // Being a React entry breaks native fragment navigation: the browser
   // retries scrolling to location.hash only until the document's load
@@ -40,20 +54,21 @@ export function AboutPage() {
         <section>
           <h2>Why I built this</h2>
           <p>
-            I live in between one of the leafiest neighborhoods in Brooklyn (Carroll Gardens, 8.2 trees per
-            acre) and one of the most tree sparse ones (Gowanus, 4.1 trees per acre) so I'm very aware of the
-            difference it can make to go on a shady walk vs an unshady one during the heights of our
-            increasingly brutal summers. I'd always thought it would be cool if I could have some sort of
-            alternative map app that would give me directions I needed, but could tell me if there were a
-            slightly shadier way for me to get to my destination with just a slightly longer walk.
+            I live between one of the leafiest neighborhoods in Brooklyn (Carroll Gardens, where sidewalks are
+            on average about 55% shaded by trees in the summer) and one of the most tree-sparse ones (Gowanus,
+            about 28% shaded), so I'm very aware of the difference it can make to go on a mostly shaded walk
+            versus one with almost no shade cover during a hot summer day. I'd always thought it would be cool
+            if I could have some sort of alternative map app that would give me the walking directions I
+            needed, but could also tell me if there were a slightly shadier route that could still get me to
+            my destination with only a small detour.
           </p>
           <p>
-            So that is where the idea for Shade Walker was born. It gives you directions in NYC that help keep
-            you in the shade so you can stay cooler, using the city's own tree data and building outlines to
-            calculate the shadiness of different routes. You pick your start and end points, and your
-            willingness to go out of your way to get a shadier route, and the app will serve you the best
-            path. The routes now also account for the shadows buildings cast onto the sidewalks, hour by hour,
-            not just the trees.
+            That thought was where the idea for Shade Walker was born. It gives you walking directions in NYC
+            to help keep you in the shade as much as possible, so you can stay cooler. The app uses the city's
+            own tree data and building outlines to calculate the shadiness of different routes. You pick your
+            start and end points, and your willingness to go out of your way to get a shadier route, and the
+            app will serve you the best path. The routes account for the shadows buildings cast onto the
+            sidewalks, hour by hour, as well as the shadows from trees.
           </p>
         </section>
 
@@ -61,25 +76,28 @@ export function AboutPage() {
           <h2>A hotter city</h2>
           <p>
             NYC's summers have been getting hotter, and extreme heat is a genuinely dangerous part of them: by
-            the city's own count, roughly 500 New Yorkers die prematurely from hot weather each year, and that
-            risk falls hardest on the neighborhoods with the least cooling, which are often the ones with the
-            fewest trees (
-            <a href="https://a816-dohbesp.nyc.gov/IndicatorPublic/data-features/heat-report/">
-              2026 heat-related mortality report
-            </a>
-            ). We all know how taxing it is walking out in the direct sun on a hot, humid day, but some shade
-            makes things a little more manageable, and that's what this app tries to help with.
+            the city's own count,{' '}
+            <ExternalLink href="https://a816-dohbesp.nyc.gov/IndicatorPublic/data-features/heat-report/">
+              roughly 500 New Yorkers die prematurely from hot weather each year
+            </ExternalLink>
+            , and the risk falls hardest on lower-income neighborhoods, which also tend to have the fewest
+            trees. We all know how brutal it is walking outside during a heatwave, but shade makes it a little
+            more manageable, and that's what this app tries to help with.
           </p>
           <p>
-            However, an app is not heat safety. For the real thing, the city government has resources that can
-            help: NYC Emergency Management's{' '}
-            <a href="https://www.nyc.gov/site/em/ready/extreme-heat.page">Beat the Heat</a> page, the Health
-            Department's{' '}
-            <a href="https://www.nyc.gov/site/doh/health/emergency-preparedness/emergencies-extreme-weather-heat.page">
+            However, this app is not a stand-in for heat safety. To learn more about how to take care of
+            yourself and loved ones in hot weather, check out some resources from the city government: NYC
+            Emergency Management's{' '}
+            <ExternalLink href="https://www.nyc.gov/site/em/ready/extreme-heat.page">
+              Beat the Heat
+            </ExternalLink>{' '}
+            page, the Health Department's{' '}
+            <ExternalLink href="https://www.nyc.gov/site/doh/health/emergency-preparedness/emergencies-extreme-weather-heat.page">
               Hot Weather and Your Health
-            </a>
-            , and the <a href="https://finder.nyc.gov/coolingcenters">cooling center finder</a> during heat
-            emergencies. If you or someone near you shows signs of heat illness, call 911.
+            </ExternalLink>
+            , and the{' '}
+            <ExternalLink href="https://finder.nyc.gov/coolingcenters">cooling center finder</ExternalLink>{' '}
+            during heat emergencies. If you or someone near you shows signs of heat illness, call 911.
           </p>
         </section>
 
@@ -89,32 +107,40 @@ export function AboutPage() {
           <ul>
             <li>
               <strong>The map and the routing</strong> come from{' '}
-              <a href="https://www.openstreetmap.org/about">OpenStreetMap</a>: every sidewalk, crosswalk, park
-              path and stairway we route along, with each side of a street as its own path.
+              <ExternalLink href="https://www.openstreetmap.org/about">OpenStreetMap</ExternalLink>: all the
+              sidewalks, crosswalks, park paths and stairways we route along, with each side of a street as
+              its own separate path.
             </li>
             <li>
-              <strong>The trees</strong> come from the{' '}
-              <a href="https://tree-map.nycgovparks.org/">NYC Tree Map</a>, the city's constantly updated
-              record of roughly 900,000 individually mapped street and park trees. For each tree we use its
-              location to put it on our map, the trunk diameter to estimate the shade produced by its canopy,
-              and species to decide if its shade survives the winter (deciduous vs evergreen).
+              <strong>The trees</strong> come from NYC Open Data's{' '}
+              <ExternalLink href="https://data.cityofnewyork.us/d/hn5i-inap">
+                Forestry Tree Points
+              </ExternalLink>{' '}
+              dataset, which is the city's record of around 900,000 individually mapped trees, updated
+              regularly. For each tree we use its location to put it on our map, the trunk diameter to
+              estimate the shade produced by its canopy, and species to decide if its shade survives the
+              winter (deciduous vs evergreen).
             </li>
             <li>
               <strong>Park canopy</strong> comes from a 2021 aerial land-cover survey of NYC, which sees
-              treetops from above. It fills in some gaps where the tree dataset doesn't cover (like Central
-              Park, and a few other areas) so those paths still receive shade credit.
+              treetops from above. It fills in some gaps that the forestry dataset from above doesn't cover
+              (like Central Park, and a few other areas) so those paths still receive shade credit.
             </li>
             <li>
               <strong>The buildings</strong> come from the city's{' '}
-              <a href="https://data.cityofnewyork.us/d/5zhs-2jue">Building Footprints</a> dataset: the outline
-              and roof height of roughly 1.08 million buildings. With the sun's position for a given month and
-              hour, that tells us which stretches of sidewalk sit in a building's shadow at that time.
+              <ExternalLink href="https://data.cityofnewyork.us/d/5zhs-2jue">
+                Building Footprints
+              </ExternalLink>{' '}
+              dataset, which holds the outline and roof height of more than a million buildings in NYC. With
+              the sun's position at a given month and hour and the building height, we can calculate which
+              parts of a sidewalk fall under a building's shadow.
             </li>
           </ul>
           <p>
-            The background map is drawn by <a href="https://carto.com/attributions">CARTO</a>, and address
-            search is answered by <a href="https://photon.komoot.io/">Photon</a>, an open geocoder from
-            komoot. We refresh our copies of the map, the trees and the buildings once a month.
+            The background map is drawn by{' '}
+            <ExternalLink href="https://carto.com/attributions">CARTO</ExternalLink>, and address search is
+            answered by <ExternalLink href="https://photon.komoot.io/">Photon</ExternalLink>, an open geocoder
+            from komoot. We refresh our copies of the map, the trees, and the buildings once a month.
           </p>
         </section>
 
@@ -123,19 +149,21 @@ export function AboutPage() {
           <p>
             Every block or path in the city gets a shade score derived from how many trees are near it, how
             big they are, how much canopy the aerial survey sees overhead (for parks not covered by the
-            original tree dataset) and, by the hour, the shadows of buildings. For the month and time of day
-            you ask, the app works out where the sun is and which sidewalks the nearby buildings shade at that
-            moment. It also takes into account that certain trees lose their leaves in the fall/winter, so the
-            same street scores shadier in July than in April, and one side of it scores shadier at 9am than at
-            4pm. After dark, the whole city is in shade, so every Shade_priority setting gives the fastest
-            route.
+            original tree dataset) and, by the hour, the shadows of buildings. Given a specific time, the app
+            calculates where the sun is and which sidewalks fall under shade from nearby buildings, and it
+            also takes into account that certain trees lose their leaves in the fall/winter. After dark, the
+            whole city is in shade, so every shade priority setting in the app will just give you the fastest
+            route. There's also a selector that lets you choose to get a shade score from different layers, so
+            you can include just tree shade (for the leafiest walk) or just building shade, instead of the
+            default that includes both.
           </p>
           <p>
             When you ask for a route, the app weighs your walking time and the shade along your potential
-            routes. The Shade_priority setting is the exchange rate between them. NONE ignores shade entirely
-            and gives you the plain fastest walk. LOW takes a shadier street only when it costs nearly
-            nothing. MED accepts short detours. MAX will take the longest detour to stay under the trees. Each
-            row shows that route's minutes, distance and shade, so you can compare them at a glance.
+            routes. The Shade Priority setting is the exchange rate between them. 'None' ignores shade
+            entirely and gives you the plain fastest walk, 'Low' takes a shadier street only when it costs
+            nearly nothing, 'Medium' accepts short detours, and 'Maximum' will take the longest detour to keep
+            you shaded. Each row shows the route's minutes, distance, and shade, so you can compare them at a
+            glance.
           </p>
         </section>
 
@@ -149,35 +177,32 @@ export function AboutPage() {
               it (like species, diameter, condition) and it's also slightly outdated.
             </li>
             <li>
-              <strong>Young trees.</strong> Since the aerial survey is from 2021 anything that's been planted
-              since then is undercounted.
+              <strong>The park canopy is a 2021 snapshot.</strong> The gaps in the forestry data are filled in
+              by a 2021 aerial survey, which is now slightly outdated, so a park tree that's been planted or
+              lost since then still holds the 2021 data.
             </li>
             <li>
-              <strong>The tree count.</strong> It counts only individually mapped trees, not park canopy, so a
-              route shaded mostly by canopy won't show one.
+              <strong>The "trees along the way" number.</strong> This number under a route counts only
+              individually mapped trees, not park canopy, so a route shaded mostly by canopy can show a small
+              number and still be shady.
             </li>
             <li>
-              <strong>Building shadows are for right now.</strong> They're computed for the moment you ask,
-              from the sun's position sampled on the hour once a month and blended in between, so a route you
-              share re-routes at whatever time it's opened. The ground is treated as flat and every building
-              as a plain block of its recorded roof height: elevated tracks, bridges, scaffolding and sidewalk
-              sheds cast no shadow here, and a recorded height can lag a demolition or a new tower by months.
-            </li>
-            <li>
-              <strong>In winter the trees are bare</strong>, so routes follow building shadows instead. On a
-              cold January day the shadiest route really is the cold side of the street. The app is about
-              shade, so it stays honest about that rather than guessing when you'd rather be in the sun.
+              <strong>Some shadows are missing.</strong> The building data only includes outlines and roof
+              heights, so every building is treated as a plain block on flat ground. The building shadows are
+              also just from buildings, not other structures that also cast shadow, like elevated tracks,
+              bridges, scaffolding and sidewalk sheds (we don't have that data).
             </li>
             <li>
               <strong>Some places can't be routed</strong>, and that's due to data limitations from our
               reliance on OpenStreetMap. We rely on OSM for our information about NYC's sidewalks, paths and
               crossings, and because OSM is built by volunteers, its sidewalk coverage is uneven. The thinnest
-              coverage areas are in the Bronx, Staten Island and the outer edges of the city.
-            </li>
-            <li>
-              The good news is that anyone can fix this.{' '}
-              <a href="https://www.openstreetmap.org/fixthemap">Map a missing sidewalk on OpenStreetMap</a>{' '}
-              and it will show up in Shade Walker within about a month, when we do our monthly map refresh.
+              coverage areas are in the Bronx, Staten Island and the outer edges of the city. The good news is
+              that anyone can fix this.{' '}
+              <ExternalLink href="https://www.openstreetmap.org/fixthemap">
+                Map a missing sidewalk on OpenStreetMap
+              </ExternalLink>{' '}
+              and it will show up in Shade Walker within a month or two, after we do our next monthly map
+              refresh.
             </li>
           </ul>
         </section>
@@ -185,32 +210,44 @@ export function AboutPage() {
         <section id="caution">
           <h2>Trust your eyes</h2>
           <p>
-            Shade Walker is built from data, and data is always a step behind the street. Scaffolding goes up,
-            sidewalks close, a storm takes down a tree, and our map refreshes monthly, so none of that reaches
-            the app right away. If a route tells you one thing and the street in front of you says another,
-            believe the street.
+            Shade Walker is built from data, and data is not always accurately reflected in real life. NYC is
+            an ever-changing creature, and our data might not take into account scaffolding that's gone up,
+            sidewalks that are closed for construction, or a storm taking down a tree. If a route tells you
+            one thing and the street in front of you says another, believe the street.
           </p>
           <p>
             Treat the routes as suggestions, not instructions: stay aware of your surroundings, cross where
             it's safe rather than exactly where the line crosses, and use your own judgment about where to
-            walk. The app knows where the trees and the buildings are. You know everything else.
+            walk. The app knows where the trees and the buildings are, but you know everything else.
           </p>
         </section>
 
         <section>
           <h2>Credits</h2>
           <p>
-            Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>,
-            available under the Open Database License. Tree data and building footprints from{' '}
-            <a href="https://opendata.cityofnewyork.us/">NYC Open Data</a> (NYC Parks Forestry and the Office
-            of Technology and Innovation). Park and path canopy from{' '}
-            <a href="https://doi.org/10.5281/zenodo.14053441">New York City Land Cover (2021)</a> © The Nature
-            Conservancy, developed under contract by the University of Vermont Spatial Analysis Laboratory,
-            used under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a>: we
-            sample it along each path to score its shade, and it is provided as-is, without warranty. Basemap
-            tiles by <a href="https://carto.com/attributions">CARTO</a>. Geocoding by{' '}
-            <a href="https://photon.komoot.io/">Photon</a>, from komoot. Shade Walker is open source, and you
-            can <a href="https://github.com/camrynobscura/shadewalker">read the code on GitHub</a>.
+            Map data ©{' '}
+            <ExternalLink href="https://www.openstreetmap.org/copyright">
+              OpenStreetMap contributors
+            </ExternalLink>
+            , available under the Open Database License. Tree data and building footprints from{' '}
+            <ExternalLink href="https://opendata.cityofnewyork.us/">NYC Open Data</ExternalLink> (NYC Parks
+            Forestry and the Office of Technology and Innovation). Park and path canopy from{' '}
+            <ExternalLink href="https://doi.org/10.5281/zenodo.14053441">
+              New York City Land Cover (2021)
+            </ExternalLink>{' '}
+            © The Nature Conservancy, developed under contract by the University of Vermont Spatial Analysis
+            Laboratory, used under{' '}
+            <ExternalLink href="https://creativecommons.org/licenses/by-nc-sa/4.0/">
+              CC BY-NC-SA 4.0
+            </ExternalLink>
+            : we sample it along each path to score its shade, and it is provided as-is, without warranty.
+            Basemap tiles by <ExternalLink href="https://carto.com/attributions">CARTO</ExternalLink>.
+            Geocoding by <ExternalLink href="https://photon.komoot.io/">Photon</ExternalLink>, from komoot.
+            Shade Walker is open source, and you can{' '}
+            <ExternalLink href="https://github.com/camrynobscura/shadewalker">
+              read the code on GitHub
+            </ExternalLink>
+            .
           </p>
         </section>
       </main>
