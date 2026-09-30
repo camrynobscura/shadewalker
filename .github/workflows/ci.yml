@@ -60,7 +60,7 @@ jobs:
         run: npm run test:e2e
       # Burn-in: on a PR, the test files it changed run 10 more times, so a
       # test that fails 1 run in 3 on these machines fails here, before it
-      # merges (a flaky WebKit test got through, 2026-09-29).
+      # merges.
       # --only-changed diffs against the base branch's tip; the checkout is
       # shallow, so fetch that one commit.
       - if: github.event_name == 'pull_request'

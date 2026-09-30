@@ -99,11 +99,6 @@ sudo mkdir -p /var/log/caddy && sudo chown caddy:caddy /var/log/caddy
 # Prove the deployable works locally before shipping it: one uvicorn
 # process serving the real dist + API + rate limiter + headers, exactly
 # as the box runs it. (Needs a local data/export/ + the build above.)
-# (The .coverage_cache.json shipping ritual that used to live here died
-# 2026-09-03 with the map's coverage outline — startup no longer computes
-# coverage rings at all, so the >1.77GB recompute that OOM'd the droplet
-# on 2026-09-01 no longer exists as a code path. A stale cache file in
-# data/export/ is ignored.)
 ./deploy/smoke_test.sh
 
 # Ship code + dist + export, sync the slim venv, restart
@@ -140,8 +135,7 @@ sudo systemctl reload caddy                   # picks up the Caddyfile; TLS auto
 Three UptimeRobot **keyword** monitors — keyword, not plain HTTP,
 because a keyword monitor GETs the body and proves the app actually
 composed the page, while a plain monitor's probe only proves the socket
-answers (and its HEAD probes are what surfaced the HEAD-404 bug on
-2026-09-01):
+answers:
 
 - **Homepage:** `https://shadewalker.nyc/` — keyword `Shade Walker`.
 - **Alive:** `https://shadewalker.nyc/health` — keyword `ok`.
@@ -151,8 +145,7 @@ answers (and its HEAD probes are what surfaced the HEAD-404 bug on
 
 ### Crash investigation (per incident)
 
-The deploy user deliberately has NO standing journal access (decided
-2026-09-02) — crashes are investigated on request, not watched for. When
+The deploy user deliberately has no standing journal access — crashes are investigated on request, not watched for. When
 one happens (UptimeRobot alerts), grant a one-time read as root:
 
 ```bash
@@ -170,8 +163,9 @@ parks the unit failed, so the journal record persists either way.
 
 ## 5. Ongoing — monthly refresh → redeploy
 
-Run the refresh ritual on the laptop (REFETCH.md: OSM re-pin + tree bust +
-build), then just:
+Run the monthly refresh on the laptop (OSM re-pin, tree and building
+cache bust, build — the steps are in the issue
+`.github/workflows/monthly-refresh-reminder.yml` opens), then just:
 
 ```bash
 (cd web && VITE_CARTO_KEY=<key> npm run build)   # only if the frontend changed
@@ -188,10 +182,10 @@ Data refresh = restart, by design — there is no live reload (see
 `deploy/Caddyfile` or `deploy/shadewalker.service` is NOT live until
 this is done by hand. Everything below is as `deploy`, never `root@`:
 root login is closed after §1's hardening, and a `root@` attempt is a
-failed authentication that fail2ban counts — on 2026-09-09 one such
-attempt (plus the retry that followed) banned the laptop's IP for the
-default 10 minutes, port 22 connection-refused, and the DigitalOcean web
-console fails the same way because it also logs in as root. The
+failed authentication that fail2ban counts — one such attempt and its
+retry once banned the laptop's IP for the default 10 minutes (port 22
+connection-refused), and the DigitalOcean web console fails the same way
+because it also logs in as root. The
 `deploy` user's passwordless sudo covers only `systemctl restart
 shadewalker`; each command below prompts for the deploy account's
 password once.

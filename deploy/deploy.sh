@@ -40,9 +40,8 @@ rsync -avzR --delete \
 	"$HOST:$DEST/"
 
 # --delete above is a no-op from a Mac: the stock rsync has been Apple's
-# openrsync since macOS 14, and a real run against the box left a stray
-# file in place (2026-09-23; 35 old hashed /assets had piled up since
-# launch). So prune explicitly: inside each shipped DIRECTORY, whatever
+# openrsync since macOS 14, and a real run against the box left stray
+# files in place (35 old hashed /assets had piled up). So prune explicitly: inside each shipped DIRECTORY, whatever
 # the box has that this tree doesn't is removed, one line per file. This
 # is what keeps a deleted module out of server/, and a stray *.json.gz
 # out of data/export — the server loads EVERY one it finds there.

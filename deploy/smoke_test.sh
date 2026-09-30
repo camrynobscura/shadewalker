@@ -24,8 +24,7 @@ SERVER_PID=$!
 trap 'kill "${SERVER_PID}" 2>/dev/null' EXIT
 
 # Wait for /health — the citywide load measured 5.9s on the laptop
-# (2026-09-03, after the coverage-ring compute was deleted with the map's
-# coverage outline). The high ceiling is insurance for slower machines
+# (2026-09-03). The high ceiling is insurance for slower machines
 # and future model growth; the loop exits the moment the server is
 # ready, so it costs a passing run nothing.
 ready=0

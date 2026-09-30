@@ -1,7 +1,7 @@
 # Caddyfile — Shade Walker (shadewalker.nyc)
 #
 # STANDARD Caddy build, no plugins. Rate limiting is app-level (slowapi),
-# decided 2026-08-31, so there is NO xcaddy/custom-binary step — install
+# so there is no xcaddy/custom-binary step — install
 # Caddy from its official apt repo and it keeps updating cleanly.
 #
 # Caddy is the TLS terminator + reverse proxy in front of the uvicorn
@@ -24,8 +24,8 @@ shadewalker.nyc {
 
 		# Fail fast on a hung worker. Caddy's default is NO response
 		# timeout, so a request the app accepted but never answered
-		# held the edge connection open indefinitely (2026-09-09
-		# review). The browser client gives up at 10s on its own
+		# holds the edge connection open indefinitely.
+		# The browser client gives up at 10s on its own
 		# (web/src/hooks/useRouteQuery.ts); this is the backstop for
 		# everything else -- curl, monitors, the tunnel -- and it
 		# returns a 504 instead of a hang. Route compute is ~1s at
@@ -42,7 +42,7 @@ shadewalker.nyc {
 		# Force HTTPS for a year, subdomains included.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
-		# CSP — exactly the origins the frontend uses (verified 2026-08-31
+		# CSP — exactly the origins the frontend uses (verified
 		# against the built app):
 		#   default : self only
 		#   img     : self + data: URIs + CARTO basemap tiles
