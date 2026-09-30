@@ -15,6 +15,7 @@
      text instead of white (5.1:1), cyan deepens to #0077a3 (4.7:1). */
   --bg: #e6f2e9;
   --panel: #eff8f1;
+  --paper: #f8fcf8; /* long-form prose ground (About): paler than --panel, not white — white glares */
   --panel-raised: #ffffff;
   --border: #5c9a78; /* 3.3:1 on white, 3.05:1 on --panel: non-text AA (was #9dc7ac, 1.9:1) */
   --line: #cfe5d6; /* hairlines between sections */
