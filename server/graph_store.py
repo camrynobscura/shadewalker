@@ -1,7 +1,7 @@
 """In-memory routing graph, loaded once at server startup from data/export/.
 
-Design (the memory-conscious layout from the plan):
-- Per-edge NUMBERS live in numpy arrays — one tightly-packed array per
+Design:
+- Per-edge numbers live in numpy arrays — one tightly-packed array per
   attribute, indexed by edge position. This is what keeps the citywide
   graph in the hundreds-of-MB range instead of gigabytes (a Python list
   of dicts carries ~10× overhead per value).
@@ -14,11 +14,11 @@ Design (the memory-conscious layout from the plan):
   non-numeric, only touched for the handful of edges on a returned route).
 - igraph (a C graph library with Python bindings) holds the topology and
   runs Dijkstra; a Shapely STRtree snaps clicked coordinates to the
-  nearest point on the nearest reachable STREET (not the nearest
+  nearest point on the nearest reachable street (not the nearest
   intersection, and not simply the nearest edge regardless of whether it
   goes anywhere — see snap_pair for why both distinctions matter).
 
-Costs are NOT precomputed: each request's month + tree_weight produce a
+Costs are not precomputed: each request's month + tree_weight produce a
 fresh cost array with two vectorized numpy lines — microseconds for the
 whole graph — which keeps every slider value exact rather than quantized.
 """
@@ -48,7 +48,7 @@ from pipeline import config
 logger = logging.getLogger(__name__)
 
 # Building-shade table layout (pipeline/sun.py, meta.shade_slots): 12 months
-# x 24 hours, month-major; rows are the sun on the ANCHOR day of the month.
+# x 24 hours, month-major; rows are the sun on the anchor day of the month.
 SHADE_SLOTS = 288
 SHADE_ANCHOR_DAY = 15
 SHADE_LAYERS = ("trees", "buildings", "both")
@@ -114,7 +114,7 @@ def _dark_slots(sun_table) -> np.ndarray:
     return dark
 
 
-# load()'s dedupe keys pack (node pair, multigraph key, side) into ONE int
+# load()'s dedupe keys pack (node pair, multigraph key, side) into one int
 # per edge (see load()'s MEMORY SHAPE): the key gets 17 bits, the side code
 # 3. load() raises rather than let an export that exceeds them collide.
 _DEDUPE_KEY_BITS = 17
@@ -124,7 +124,7 @@ _HASH_MASK = (1 << 64) - 1
 
 # igraph's C layer emits this RuntimeWarning from get_shortest_paths()
 # whenever the two endpoints sit in different components. snap_pair()
-# (below) now keeps /route from ever calling route() with such a pair in
+# (below) keeps /route from ever calling route() with such a pair in
 # the first place -- two real, genuinely disconnected places (mainland
 # <-> Governors Island, eventually Staten Island) get a clean "no route"
 # from snap_pair() itself, cheaper than a Dijkstra call that walks the
@@ -146,13 +146,13 @@ def _dist2(p: list[float] | np.ndarray, q: np.ndarray) -> float:
 # ── Turn-by-turn step building ──────────────────────────────────────────
 #
 # A route arrives as tiny legs -- one per graph edge, chopped wherever OSM
-# chopped the pavement -- and used to be rendered one line per name change,
-# which made a 3km walk read as 72 lines: every corner is
-# [run along A] [8m crossing] [run along A], so the crossings and kerb
-# scraps shredded each street into fragments. Geometry alone cannot fix it
-# (a filter loose enough to keep real corners keeps 2m kerb jogs; one tight
-# enough to drop the jogs collapsed the Brooklyn Bridge to a single step --
-# measured 2026-08-23). So folding is EVIDENCE-based, no length thresholds:
+# chopped the pavement. Rendered one line per name change, a 3km walk
+# reads as 72 lines: every corner is [run along A] [8m crossing] [run
+# along A], so the crossings and kerb scraps shred each street into
+# fragments. Geometry alone cannot fix it (a filter loose enough to keep
+# real corners keeps 2m kerb jogs; one tight enough to drop the jogs
+# collapses the Brooklyn Bridge to a single step). So folding is
+# evidence-based, no length thresholds:
 #
 #   - a crossing/traffic-island leg (OSM's own label) is never a street
 #     someone walks along: it folds into the runs around it regardless of
@@ -161,11 +161,11 @@ def _dist2(p: list[float] | np.ndarray, q: np.ndarray) -> float:
 #     side street -- either way a labeling artifact, not a walk).
 #   - an unnamed leg folds into an adjacent run only when that run's name
 #     is among the leg's own fold_names (pipeline/graph/naming.py's
-#     plausible-parents evidence). A nameless path NO street claims stays
+#     plausible-parents evidence). A nameless path no street claims stays
 #     an honest "unnamed path" step whatever its length -- that is the 69m
 #     park cut-through, and hiding it would misreport where the walker
 #     walks.
-#   - a step boundary is where the street NAME changes; bearings supply
+#   - a step boundary is where the street name changes; bearings supply
 #     only the word (left/right/straight).
 #   - a side switch inside one street ("cross to the north side") is
 #     believed only when a crossing leg sits between the two sides --
@@ -268,7 +268,7 @@ def _build_runs(legs: list[dict]) -> list[dict]:
                 break
         if changed:
             continue
-        # a connector at a NAME boundary (turning off A onto B) is
+        # a connector at a name boundary (turning off A onto B) is
         # transition ground; it joins the arrival street's step. The
         # crossing at a corner is the common case.
         for i in range(1, len(runs) - 1):
@@ -309,18 +309,17 @@ def _leg_bearing_180(coords) -> float:
 
 
 def _split_run_at_side_switches(run) -> list[dict]:
-    """One street run -> pieces at real side switches. A switch needs BOTH
+    """One street run -> pieces at real side switches. A switch needs both
     a new non-empty side and, since the last sided leg, a crossing
-    PERPENDICULAR to the direction of travel -- crossing your own street
+    perpendicular to the direction of travel -- crossing your own street
     is always across your path, while the corner crossing over a side
     street runs along it. Without the perpendicularity test, the 6.78% of
     block boundaries where the compass word shifts (bends, near-diagonal
-    tilts -- measured on the 2026-08-28 export) would each fire a phantom
-    "cross to the X side" at their corner crossing. A side flip with no
-    perpendicular crossing behind it is treated as the data artifact it
-    is and ignored.
+    tilts; measured 2026-08-28) would each fire a phantom "cross to the X
+    side" at their corner crossing. A side flip with no perpendicular
+    crossing behind it is treated as the data artifact it is and ignored.
 
-    Each piece's displayed side is the word carrying a strict MAJORITY of
+    Each piece's displayed side is the word carrying a strict majority of
     the piece's sided length -- a run that genuinely bends between words
     shows none rather than the first half's."""
     pieces = [{"name": run["name"], "legs": [], "switched": False}]
@@ -412,31 +411,26 @@ def build_steps(legs: list[dict]) -> list[dict]:
 
 def clamp_shade_monotonic(routes: list[dict], weights: list[float]) -> list[dict]:
     """Enforce the Shade_priority promise across a batch of routes: as
-    tree_weight increases, a route's shade_fraction must never DECREASE.
+    tree_weight increases, a route's shade_fraction must never decrease.
     Returns a new list aligned with `routes`/`weights`; any route that would
     break the guarantee is replaced by the shadiest lower-or-equal-weight
     route already in the batch.
 
-    Why this is needed: since 2026-08-26 cost and display share one
-    saturation point (config.DENSITY_AT_FULL_COVERAGE), so the old driver
-    -- the router rewarding density the stat could not credit -- is gone.
-    What remains is photo-finishes: near-tied routes swapping at a higher
-    weight, where the winner's displayed FRACTION lands a hair lower
-    (cost is hyperbolic per edge, the fraction is linear, so they rank
-    near-equal mixtures differently). Measured on 188 random pairs
-    (2026-08-26): 8 dips, every one 0.1-1.2 points, routes 1-21m apart.
-    Also measured: widening the preset ladder multiplies the dips (8 ->
-    23 at [0,8,30,150]) while buying ~3 points of median shade, so the
-    guard scales with any future preset change. Earlier history: 0/24
-    sampled pairs pre-clamp on 2026-08-17 -- a read that hid a 3.8% real
-    rate until n=400, which is why this guard does not get retired on a
-    small clean sample. /route computes every preset in one
-    call, so this is pure post-processing: it only ever falls back to a real
-    route the batch already produced, never one worse on shade than the
-    preset's own route -- the walker strictly benefits, and length/time can
-    only stay level or drop when it fires (the fallback route is shorter).
+    Why this is needed: cost and display share one saturation point
+    (config.DENSITY_AT_FULL_COVERAGE), but cost is hyperbolic per edge and
+    the displayed fraction is linear, so they rank near-equal mixtures
+    differently. Near-tied routes can swap at a higher weight with the
+    winner's displayed fraction a hair lower. Measured on 188 random pairs
+    (2026-08-26): 8 dips, every one 0.1-1.2 points, routes 1-21m apart,
+    and widening the preset ladder multiplies them (8 -> 23 at
+    [0,8,30,150]), so the guard stays whatever the presets become. /route
+    computes every preset in one call, so this is pure post-processing:
+    it only ever falls back to a real route the batch already produced,
+    never one worse on shade than the preset's own route -- the walker
+    strictly benefits, and length/time can only stay level or drop when
+    it fires (the fallback route is shorter).
 
-    Substitutes the WHOLE route dict (geometry + every stat together), never
+    Substitutes the whole route dict (geometry + every stat together), never
     just the shade number, so nothing downstream can disagree. Order-robust:
     walks weights ascending regardless of the requested order and returns the
     result in the original positions. shade_fraction is already rounded to
@@ -508,20 +502,20 @@ class GraphStore:
         # Which connected component each edge belongs to -- see
         # snap_pair() for why this is tracked at all: every component is
         # kept and every one is snappable, so requiring a component
-        # REACHABLE FROM BOTH endpoints is the only thing standing between
+        # reachable from both endpoints is the only thing standing between
         # a click and a disconnected fragment near it.
         self._edge_component = np.empty(0, dtype=np.int32)
         self._tree_deciduous = np.empty(0, dtype=np.float32)
         self._tree_evergreen = np.empty(0, dtype=np.float32)
         # float32, not int32: block-face scoring gives an edge a fractional
-        # SHARE of its block's trees (a face with 3 trees over 10 edges =
+        # share of its block's trees (a face with 3 trees over 10 edges =
         # 0.3 each), and an integer dtype would round every one of those to
         # zero on load. route() still reports a whole number -- it sums the
         # shares along the path and rounds once at the end.
         self._tree_count = np.empty(0, dtype=np.float32)
         # The slice of _tree_deciduous that is park-canopy credit rather
-        # than countable trees (FIXES item 4) -- already inside
-        # _tree_deciduous, so it's a share of the score, never an addition.
+        # than countable trees -- already inside _tree_deciduous, so it's a
+        # share of the score, never an addition.
         self._tree_park_canopy = np.empty(0, dtype=np.float32)
         # Building shade: uint8 (SHADE_SLOTS, n_edges), slot rows contiguous
         # so one (month, hour) row is a single strided read -- see
@@ -529,7 +523,7 @@ class GraphStore:
         # (the committed pilot fixture, tests' synthetic tiles).
         self._building_shade = np.zeros((SHADE_SLOTS, 0), dtype=np.uint8)
         self._sun_table = None   # meta.sun_table as loaded; routing reads it only via _dark_slots
-        # Which slots are night in that table -- a dark slot counts as FULL
+        # Which slots are night in that table -- a dark slot counts as full
         # shade (_building_fraction). All False until a table loads.
         self._dark_slots = np.zeros(SHADE_SLOTS, dtype=bool)
         # Density arrays per (month, day, hour, minute, layers): route()
@@ -540,9 +534,9 @@ class GraphStore:
         # place (tests do) must clear it.
         self._density_cache: dict[tuple, np.ndarray] = {}
         self._names: list[str] = []
-        # Direction-rendering fields (2026-08-28): OSM's own kind
-        # ("footway/crossing"...) so crossings fold into the street run
-        # they interrupt; the COMPASS side of the parent street; and the
+        # Direction-rendering fields: OSM's own kind ("footway/crossing"...)
+        # so crossings fold into the street run they interrupt; the
+        # compass side of the parent street; and the
         # fold_names evidence for absorbing nameless scraps. All three
         # default empty for exports that predate them.
         self._kinds: list[str] = []
@@ -567,21 +561,19 @@ class GraphStore:
         glob-and-merge shape is load-bearing: the e2e tier points
         EXPORT_DIR at a directory holding only the pilot fixture.
 
-        MEMORY SHAPE (`server-memory`, 2026-09-26): every per-edge
-        temporary lives in a flat buffer (array.array / bytearray), never
-        as one Python object per edge. CPython's small-object allocator
-        returns memory to the OS only in whole 1 MiB arenas, and only once
-        an arena is completely empty. The previous loader built ~520 MB of
-        small temporaries (floats, id strings, dedupe tuples, an ndarray
-        and a bytes row per edge) interleaved with the ~120 MB of objects
-        that stay (node ids, names), so no arena ever emptied and the
-        process kept its load-time peak for life. Measured on Linux (an
-        Ubuntu 24.04 container calibrated to the box within 1-2%): 1,149
-        MB after load then, 574 MB now, output identical attribute for
-        attribute and route for route (HISTORY 2026-09-26). The only
-        per-edge Python objects left are the ones ijson creates for the
+        MEMORY SHAPE (#111): every per-edge temporary lives in a flat
+        buffer (array.array / bytearray), never as one Python object per
+        edge. CPython's small-object allocator returns memory to the OS
+        only in whole 1 MiB arenas, and only once an arena is completely
+        empty. A loader that builds hundreds of MB of small temporaries
+        (floats, id strings, dedupe tuples, a bytes row per edge)
+        interleaved with the objects that stay (node ids, names) never
+        empties an arena, and the process keeps its load-time peak for
+        life: 1,149 MB after load that way, 574 MB this way, measured in a
+        Linux container calibrated to the production box. The only
+        per-edge Python objects here are the ones ijson creates for the
         edge being read -- freed before the next edge, so the next one
-        reuses their memory -- and the permanent ones, which are SHARED:
+        reuses their memory -- and the permanent ones, which are shared:
         one object per distinct street name, side or fold tuple. Keep it
         that way: a per-edge list of fresh Python objects brings the
         retention back."""
@@ -594,12 +586,12 @@ class GraphStore:
                 "export to run against that instead."
             )
         # Pass 1: every node from every export file, so the complete node universe
-        # is known before any edge is ingested. STREAMED (ijson straight off
+        # is known before any edge is ingested. Streamed (ijson straight off
         # the gzip stream), never json.loads of the whole file: the parsed
-        # citywide payload alone costs ~1.0GB as Python objects (measured
-        # 2026-09-01 -- 489k edge dicts whose coords are lists of lists of
-        # Python floats, ~50x the bytes of the same points as arrays), and
-        # holding it is what OOM'd the 2GB droplet. Each file is re-streamed
+        # citywide payload alone costs ~1.0GB as Python objects (489k edge
+        # dicts whose coords are lists of lists of Python floats, ~50x the
+        # bytes of the same points as arrays), which does not fit the 2GB
+        # box. Each file is re-streamed
         # in pass 2 rather than held; the second decompress+parse costs
         # seconds and keeps peak RAM near steady-state. Coordinates go
         # straight into one flat double array (lon, lat, lon, lat, ...).
@@ -621,18 +613,18 @@ class GraphStore:
         self._dark_slots = _dark_slots(self._sun_table)
         n_nodes = len(node_xy) // 2
 
-        # Pass 2 state: flat columns, one entry per KEPT edge, all in step.
+        # Pass 2 state: flat columns, one entry per kept edge, all in step.
         u_col = array.array("q")   # endpoints as node indices, in the export's own (u, v) order
         v_col = array.array("q")
         length = array.array("d")
         deciduous = array.array("d")
         evergreen = array.array("d")
         counts = array.array("d")
-        # .get()-defaulted on read: tiles exported before v19 (the committed
-        # pilot test fixture) predate the field entirely, and 0.0 is exactly
-        # what they mean -- no canopy credit was computed for them.
+        # .get()-defaulted on read: exports that predate the field (the
+        # committed pilot fixture) mean exactly 0.0 -- no canopy credit was
+        # computed for them.
         canopy_credit = array.array("d")
-        # Lists of SHARED objects (see the docstring): the list itself is one
+        # Lists of shared objects (see the docstring): the list itself is one
         # buffer; its entries point at one object per distinct value.
         names: list[str] = []
         kinds: list[str] = []
@@ -672,25 +664,15 @@ class GraphStore:
 
         def _emit(u_idx, v_idx, key, side, seg_length_m, decid, everg,
                   cnt, canopy, name, kind, folds, coords, shade):
-            """Add one edge (a whole edge, or one piece of a split one) to
-            the graph arrays, through the existing border-dedupe. Splitting
-            reduces the severed-overlap class to the already-solved
-            duplicate-border-edge class: after the split, two overlapping
-            copies have identical endpoints and identical coords, so this
-            same dedupe collapses them."""
-            # In the tiled era border edges appeared in two neighboring
-            # tiles; a canonical (sorted) node pair makes both copies hash
-            # identically. Each tile scored its copy against only its own
-            # tree fetch, so the
-            # copies can disagree -- when they do, keep the better-scored
-            # one, not the first-seen one. Both copies count trees in the
-            # identical corridor, so a copy can only be MISSING trees its
-            # tile's fetch didn't cover, never have extras: higher tree
-            # value == closer to complete. (First-seen-wins silently kept
-            # the worse copy 3,740 times citywide, including a 1.7km Harlem
-            # River Drive Greenway edge held at 0 trees while its other copy
-            # had 95.)
-            # The key is ONE int over node INDICES -- (sorted pair, key,
+            """Add one edge to the graph arrays, through the dedupe: load()
+            merges every export file it finds, so an edge present in two
+            files must collapse to one."""
+            # A canonical (sorted) node pair makes both copies of an edge
+            # hash identically. When the copies disagree, keep the
+            # better-scored one, not the first-seen one: a copy can only be
+            # missing trees its file didn't score, never carry extras, so a
+            # higher tree value is closer to complete.
+            # The key is one int over node indices -- (sorted pair, key,
             # side) packed into bits -- not a tuple of two id strings: the
             # id <-> index map is a bijection, so equality is unchanged, and
             # it is one small object per edge instead of three.
@@ -717,10 +699,10 @@ class GraphStore:
                 return
 
             # OSM itself sometimes contains the same way twice -- identical
-            # geometry between the same two nodes, which osmnx keeps as
-            # parallel edges under different multigraph keys (159 confirmed
-            # citywide). Keep one: same endpoints,
-            # so dropping the extra copy can't disconnect anything. Hashing
+            # geometry between the same two nodes, which the pipeline keeps
+            # as parallel edges under different keys (159 citywide). Keep
+            # one: same endpoints, so dropping the extra copy can't
+            # disconnect anything. Hashing
             # the coords (direction-insensitive, via the array's bytes)
             # instead of storing them keeps this set small; genuinely
             # different parallel edges between the same nodes (a street and
@@ -784,12 +766,12 @@ class GraphStore:
         lon_min, lat_min = self._node_lonlat.min(axis=0)
         lon_max, lat_max = self._node_lonlat.max(axis=0)
         self._bounds = (float(lon_min), float(lat_min), float(lon_max), float(lat_max))
-        # Floored at 0.01m, in ONE place for every edge: 960 real exported
+        # Floored at 0.01m, in one place for every edge: 960 real exported
         # edges have length_m 0.0 -- a sub-5cm edge rounds to 0.0 at export
         # (pipeline/export.py rounds to 0.1m) -- and a snap landing on a
         # zero-length edge turns route()'s partial-edge division into
-        # 0/0 -> NaN -> a crash at int(round(tree_count)). Found live on a
-        # Central Park test route. 1cm on a <5cm edge distorts nothing.
+        # 0/0 -> NaN -> a crash at int(round(tree_count)). 1cm on a <5cm
+        # edge distorts nothing.
         self._length = np.maximum(np.frombuffer(length, dtype=np.float64).astype(np.float32), 0.01)
         self._tree_deciduous = np.frombuffer(deciduous, dtype=np.float64).astype(np.float32)
         self._tree_evergreen = np.frombuffer(evergreen, dtype=np.float64).astype(np.float32)
@@ -832,25 +814,18 @@ class GraphStore:
         del u_col, v_col
         self._graph = igraph.Graph(n=n_nodes, edges=edge_pairs, directed=False)
 
-        # No filtering here anymore -- every component is kept. This used to
-        # drop everything but the largest connected component, because
-        # rectangular borough bboxes deliberately overreached past the real
-        # coastline (see the old BROOKLYN_BBOX), sweeping in street
-        # fragments from across the water (Jersey City, a Lower Manhattan
-        # sliver, the Rockaways) with no real connection to the rest of the
-        # data. That's no longer possible: pipeline/graph/pedestrian.py
-        # clips every way against the real borough polygons at read time,
-        # before anything reaches data/export/, so every component here is trusted as
-        # real NYC data -- including genuinely disconnected real places
-        # (Governors Island, ferry-only; eventually Staten Island, whose
-        # only bridges lead to NJ, not the rest of NYC) alongside plenty of
-        # genuinely disconnected junk (an orphaned pedestrian crossing, a
-        # plaza's interior path network -- see snap_pair() for why keeping
-        # these doesn't mean routing ever resolves onto one by mistake).
+        # Every component is kept. pipeline/graph/pedestrian.py clips every
+        # way against the real borough polygons at read time, before
+        # anything reaches data/export/, so every component here is real
+        # NYC data -- including genuinely disconnected real places
+        # (Governors Island, ferry-only; Staten Island, whose only bridges
+        # lead to NJ, not the rest of NYC) alongside plenty of genuinely
+        # disconnected junk (an orphaned pedestrian crossing, a plaza's
+        # interior path network -- see snap_pair() for why keeping these
+        # doesn't mean routing ever resolves onto one by mistake).
         # snap_pair() below is what turns "two points that legitimately
         # can't connect" into a clean 422, so a multi-component graph is a
-        # normal, supported state now, not an error condition -- see
-        # PLAN.md's borough-boundary polygon plan.
+        # normal, supported state, not an error condition.
         components = self._graph.connected_components(mode="weak")
         membership = np.asarray(components.membership, dtype=np.int32)
         self._edge_component = membership[edge_pairs[:, 0]]
@@ -867,7 +842,7 @@ class GraphStore:
     def _edge_coords(self, edge: int) -> np.ndarray:
         """Edge `edge`'s [lon, lat] points — a zero-copy view into the
         packed coordinate buffer. A row indexes like a little [lon, lat]
-        list, so callers can treat it exactly like the old nested lists."""
+        list, so callers can treat it like a nested list."""
         return self._coord_buf[self._coord_offsets[edge]:self._coord_offsets[edge + 1]]
 
     def _build_edge_index(self) -> None:
@@ -877,14 +852,13 @@ class GraphStore:
         coordinate space — a degree of longitude is shorter than a degree
         of latitude away from the equator, so scaling longitude by
         cos(latitude) is what makes "nearest" geodesically meaningful
-        rather than warped east-west. Same approximation the old node
-        KDTree used; fine at city scale.
+        rather than warped east-west. Fine at city scale.
 
         Built with one batched shapely.linestrings() call over the packed
         coordinate buffer — `indices` maps each coordinate row to the edge
         it belongs to, so all LineStrings materialize in a single C-level
         pass instead of a per-edge Python loop. That keeps this cheap at
-        citywide scale (Stage 2, ~1M edges), not just pilot scale.
+        citywide scale (~490k edges), not just pilot scale.
         """
         mean_lat = float(np.mean(self._node_lonlat[:, 1]))
         self._lat_scale = math.cos(math.radians(mean_lat))
@@ -898,10 +872,7 @@ class GraphStore:
 
     def _nearest_edge(self, lat: float, lon: float) -> tuple[int, float]:
         """Nearest edge to a point, and the real-meters distance to it.
-
-        The snap tree holds every edge, so a tree position IS an edge id.
-        It briefly held only "visible" ones under the hide rule, which
-        needed a position -> edge id mapping alongside it."""
+        The snap tree holds every edge, so a tree position is an edge id."""
         point = Point(lon * self._lat_scale, lat)
         idx, dist_deg = self._strtree.query_nearest(point, return_distance=True)
         return int(idx[0]), float(dist_deg[0]) * METERS_PER_DEGREE_LAT
@@ -938,23 +909,20 @@ class GraphStore:
         """Snap a route request's two endpoints onto edges that can
         actually reach each other.
 
-        Replaces snapping each point independently to its single nearest
-        edge, which ignored reachability entirely — a real bug: a click
-        at a real, named street corner (Union Square, a Brooklyn Bridge
-        landing) sometimes snapped onto a tiny disconnected fragment
-        instead (an orphaned pedestrian crossing, a plaza's interior path
-        network — see PLAN.md), because that fragment happened to sit a
-        few meters closer than the real, reachable street.
+        Snapping each point independently to its single nearest edge
+        would ignore reachability: a click at a real, named street corner
+        (Union Square, a Brooklyn Bridge landing) can sit a few meters
+        closer to a tiny disconnected fragment (an orphaned pedestrian
+        crossing, a plaza's interior path network) than to the real,
+        reachable street.
 
         Considering every component within MAX_SNAP_DISTANCE_M of each
         point and requiring one shared by both — rather than trying each
         candidate with a real Dijkstra call — is what keeps this cheap
         even where a click has dozens of components in range: it's a set
         intersection over already-known component membership, not a
-        search. (An earlier design that tried routing through every
-        candidate pair was measured at ~48s for a single dense request —
-        this scales with "how many components are nearby," which this
-        design doesn't.)
+        search. Routing through every candidate pair instead scales with
+        how many components are nearby (~48s for one dense request).
 
         None means no component reaches both points within
         MAX_SNAP_DISTANCE_M — the same real "no route" case as mainland
@@ -986,9 +954,9 @@ class GraphStore:
 
         Split out from snap_pair (the only caller) so *which* edge to
         snap onto (a reachability decision) and *where* on that edge (pure
-        geometry) are separate steps — this half replaces the old
-        nearest-NODE snap, which could only ever land on an intersection —
-        wrong whenever the real nearest thing is mid-block.
+        geometry) are separate steps. Snapping to a point on an edge, not
+        to a node, is what lets a snap land mid-block rather than only at
+        an intersection.
         """
         line = self._edge_lines_scaled[edge]
         point = Point(lon * self._lat_scale, lat)
@@ -1000,14 +968,13 @@ class GraphStore:
         dist_from_geom_end_m = (1.0 - frac) * self._length[edge]
 
         # An edge's geometry doesn't always run u→v (see route()'s stitching
-        # loop below for the full explanation — to_undirected() can store
-        # an edge's geometry backwards relative to its (u,v) index). Decide
-        # which real distance belongs to u vs v by checking which end of
-        # the raw geometry u actually sits at, rather than re-projecting
-        # node coordinates onto the line — that second approach breaks for
-        # a self-loop edge where u == v, since it can't tell "the short way"
-        # from "the long way" around the loop. Deriving both distances from
-        # one projection fraction sidesteps that entirely.
+        # loop below). Decide which real distance belongs to u vs v by
+        # checking which end of the raw geometry u actually sits at, rather
+        # than re-projecting node coordinates onto the line — that second
+        # approach breaks for a self-loop edge where u == v, since it can't
+        # tell "the short way" from "the long way" around the loop.
+        # Deriving both distances from one projection fraction sidesteps
+        # that entirely.
         u, v = self._graph.es[edge].tuple
         geom_start = self._edge_coords(edge)[0]
         if _dist2(geom_start, self._node_lonlat[u]) <= _dist2(geom_start, self._node_lonlat[v]):
@@ -1043,10 +1010,7 @@ class GraphStore:
         is an easy no. Inside the box isn't automatically a yes, though —
         a point in the middle of the Gowanus Canal is "inside" the pilot
         fixture's bbox but nowhere near a real sidewalk, so the second check
-        also requires a real edge within MAX_SNAP_DISTANCE_M. Nearest-EDGE
-        distance is a strictly more permissive (and more accurate) signal
-        than the old nearest-NODE distance — it can only be smaller, never
-        larger, so this never newly rejects a point that used to pass.
+        also requires a real edge within MAX_SNAP_DISTANCE_M.
 
         The bbox is padded by MAX_SNAP_DISTANCE_M so the two checks agree
         with each other: the snap check accepts a point that far past the
@@ -1068,13 +1032,11 @@ class GraphStore:
         it in _edge_density.
 
         Deciduous credit is scaled by config.CANOPY_BY_MONTH, read as each
-        month's value ON THE 15TH and blended between 15ths by the same
-        day rule as the building-shade rows (_month_blend; PLAN
-        `tree-seasonal-blend`, 2026-09-26). Until then it was one number
-        per month, so a walk's tree shade jumped overnight on the 1st --
-        0.6 -> 0.95 on May 1 and 0.8 -> 0.45 on Nov 1 under the curve of
-        the day. Day 15 is exactly the month's value, which is what every
-        `month=7` test and harness run pins."""
+        month's value on the 15th and blended between 15ths by the same
+        day rule as the building-shade rows (_month_blend, #113), so a
+        walk's tree shade never jumps overnight on the 1st. Day 15 is
+        exactly the month's value, which is what every `month=7` test and
+        harness run pins."""
         m0, m1, g = _month_blend(month, day)
         canopy = (1.0 - g) * config.CANOPY_BY_MONTH[m0 - 1] + g * config.CANOPY_BY_MONTH[m1 - 1]
         tree_score = self._tree_evergreen + self._tree_deciduous * canopy
@@ -1093,16 +1055,15 @@ class GraphStore:
         minute 0 is exactly the row. Trees blend by the same day rule
         (_tree_fraction).
 
-        A DARK slot counts as full shade (PLAN `night-shade`, 2026-09-26).
-        The build computes daylight slots only, so a dark slot's stored
-        row is 0 -- "not computed", not "no shade". Read literally, it made
-        the last hour before dark blend TOWARD zero: on the pilot fixture,
-        July 15's length-weighted mean went 0.784 at 20:00 -> 0.523 at
-        20:20 -> 0.013 at 20:59 while the sun set. With no sun there is
-        nothing to stand in, so dusk now climbs to 1.0 and dawn falls from
-        it, and once every slot the moment blends is dark (is_night) every
-        edge is 1.0. The rows stay what the build wrote: they are building
-        shadows, and night is not one.
+        A dark slot counts as full shade (#112). The build computes
+        daylight slots only, so a dark slot's stored row is 0 -- "not
+        computed", not "no shade". Read literally it would make the last
+        hour before dark blend toward zero (on the pilot fixture, July
+        15's mean went 0.78 at 20:00 to 0.01 at 20:59 while the sun set).
+        With no sun there is nothing to stand in, so dusk climbs to 1.0
+        and dawn falls from it, and once every slot the moment blends is
+        dark (is_night) every edge is 1.0. The rows stay what the build
+        wrote: they are building shadows, and night is not one.
         """
         rows = self._building_shade
         if self.is_night(month, day, hour, minute):
@@ -1147,68 +1108,35 @@ class GraphStore:
     def _edge_density(self, month: int, day: int = SHADE_ANCHOR_DAY,
                       hour: int | None = None, minute: int = 0,
                       layers: str = "both") -> np.ndarray:
-        """SHADE density per edge (score per meter, saturating at
+        """Shade density per edge (score per meter, saturating at
         config.DENSITY_AT_FULL_COVERAGE), vectorized over every edge --
         trees and building shadows combined by union: covered = 1 - (1 -
-        trees)(1 - buildings), returned as RATE x covered so everything
-        downstream (edge_costs, shade_fraction) keeps its tree-era units.
+        trees)(1 - buildings), returned as rate x covered so everything
+        downstream (edge_costs, shade_fraction) keeps its tree units.
         `hour=None` means no time was given and building shade is left
-        out -- exactly the trees-only behaviour every pre-shadow test and
-        harness run pins with `month=7` alone (day defaults to the 15th,
-        where the trees' seasonal blend is exactly the month's value).
-        `layers` is the shade pill's pick: "trees", "buildings" or "both"
-        (default), validated by /route, not here. The dark belongs to every
-        layer: with a time given, dusk and night are shade in each of them
-        (the building blend carries it; without one, _dark_share does).
-        Cached per (month, day, hour, minute, layers), a handful of
-        entries.
+        out -- the trees-only behaviour every pre-shadow test and harness
+        run pins with `month=7` alone (day defaults to the 15th, where the
+        trees' seasonal blend is exactly the month's value). `layers` is
+        the shade pill's pick: "trees", "buildings" or "both" (default),
+        validated by /route, not here. The dark belongs to every layer:
+        with a time given, dusk and night are shade in each of them (the
+        building blend carries it; without one, _dark_share does). Cached
+        per (month, day, hour, minute, layers), a handful of entries.
 
-        The tree half's history, kept in full because the cap decision was
-        measured and the numbers are worth re-reading:
-
-        Month-adjusted CANOPY COVERAGE density (score per meter,
-        saturating at config.DENSITY_AT_FULL_COVERAGE), vectorized over
-        every edge. Shared by edge_costs() and route()'s shade_fraction,
-        so the router optimizes exactly the physical quantity the user
-        is shown: density/DENSITY_AT_FULL_COVERAGE is an edge's real
-        covered fraction, and above full coverage there is nothing more
-        to buy.
-
-        WHY THE CAP, AND WHY AT THE EXCHANGE RATE AND NOT 0.02 (both
-        measured, 2026-08-25/26; the rate itself was 0.031 then and was
-        re-fit to 0.033 on 2026-08-27 when tree attachment widened to 8m
-        -- see DENSITY_AT_FULL_COVERAGE's comment): uncapped, the router
-        paid for score past full
-        coverage -- trunk inventory, not shade (at constant >=90%
-        ground-truth cover, scores span 0.00-0.058, and a blind Street
-        View test could not tell 5-6.7x score gaps apart at matched
-        coverage). Fed the park-canopy data, that phantom credit cost
-        real shade: 22/188 random pairs reported less shade than the
-        prior export, 20 of them walking more metres in the sun (worst
-        +520m). But capping at the DISPLAY constant (then 0.02) was
-        falsified even harder: 120/188 routes lost real shade, because
-        0.02 is only ~65% coverage and the 0.02-0.031 band is the
-        genuine 65%->100% difference. The cap sits where coverage
-        physically saturates, per the exchange rate in the constant's
-        own comment. Two fully-covered paths now cost the same and the
-        tie resolves by length -- measured residual: 8/188 pairs show
-        sub-1.5-point display dips between near-tied routes, which
-        clamp_shade_monotonic absorbs.
-
-        NO LENGTH FLOOR. There was one (DENSITY_LENGTH_FLOOR_M = 20.0) and it
-        is deleted, not unset -- see its epitaph in pipeline/config.py. It
-        patched a centerline-era symptom, short edges inheriting a cross
-        street's trees through a buffer corridor. Block-face scoring removes
-        the cause: an edge holds a share of its block's trees proportional to
-        its own length, so it cannot out-read its own block. Measured on the
-        citywide export 2026-08-24, short edges are LESS dense than long ones
-        (0-5m median 0.0093 against 100m+ 0.0110), so a floor would only
-        deflate correct values -- 7.6x on a 2.6m edge, and half of all
-        sidewalk edges are under 5m.
-
-        The fail-closed guard that lived here (all-zero while the floor was
-        None) is gone with it: both constants now have measured, sidewalk-era
-        values, which is the condition its own comment set for removal."""
+        Shared by edge_costs() and route()'s shade_fraction, so the router
+        optimizes exactly the physical quantity the user is shown:
+        density/DENSITY_AT_FULL_COVERAGE is an edge's real covered
+        fraction, and above full coverage there is nothing more to buy.
+        Uncapped, the router would pay for score past full coverage --
+        trunk inventory, not shade -- and that phantom credit costs real
+        shade (22/188 random pairs walked more metres in the sun, measured
+        2026-08-26). Two fully covered paths cost the same and the tie
+        resolves by length; the residual sub-1.5-point display dips
+        between near-tied routes are what clamp_shade_monotonic absorbs.
+        No per-edge length floor: block-face scoring gives an edge a share
+        of its block's trees proportional to its own length, so a short
+        edge cannot out-read its block (short edges are less dense than
+        long ones citywide)."""
         if layers not in SHADE_LAYERS:
             raise ValueError(f"layers must be one of {SHADE_LAYERS}, got {layers!r}")
         cache_key = (month, day, hour, minute, layers)
@@ -1225,10 +1153,9 @@ class GraphStore:
         elif hour is not None:
             # No building term to carry the dark, but the dark is the sun's,
             # not the buildings': "Tree shade" fades into full shade at dusk
-            # and is full shade at night like every layer (PLAN
-            # `time-and-layers`, user 2026-09-26/29; #112 had exempted it).
-            # Per slot that's 1 where dark, the trees where lit -- blended,
-            # exactly the union with the moment's dark share.
+            # and is full shade at night like every layer (#121). Per slot
+            # that's 1 where dark, the trees where lit -- blended, exactly
+            # the union with the moment's dark share.
             dark = self._dark_share(month, day, hour, minute)
             if dark:
                 covered = 1.0 - (1.0 - covered) * (1.0 - dark)
@@ -1251,7 +1178,7 @@ class GraphStore:
 
         A SnapPoint sits partway along an edge, not on a real graph node,
         so Dijkstra can't start there directly. The search starts at the
-        start edge's NEARER endpoint, and the far endpoint is folded in by
+        start edge's nearer endpoint, and the far endpoint is folded in by
         re-pricing that one edge in this request's own cost array (the
         comment at the fold below says why that is exact); the end edge's
         two endpoints are both covered because get_shortest_paths(v,
@@ -1259,17 +1186,16 @@ class GraphStore:
         target in a single run (inherent to Dijkstra, not a batching
         trick). Each candidate total adds the cost of walking the partial
         start/end edge to its endpoint, and the cheapest wins. So each
-        weight costs exactly ONE Dijkstra run: it was two (one per start
-        endpoint) until 2026-09-09, and four before the one-to-many
-        targets. This is read-only on the graph — no mutation — because
-        /route is a sync FastAPI handler that Starlette runs across a
-        thread pool, and mutating the one shared igraph.Graph per request
-        would need locking that serializes every routing request.
+        weight costs exactly one Dijkstra run. This is read-only on the
+        graph — no mutation — because /route is a sync FastAPI handler
+        that Starlette runs across a thread pool, and mutating the one
+        shared igraph.Graph per request would need locking that
+        serializes every routing request.
 
         Run count is what matters at citywide scale: each run pays ~9ms
         of fixed weight handling (the memoryview note below) plus
-        exploration that grows with route length (re-profiled 2026-09-07
-        on the citywide graph, dev Mac: ~10ms/run for a ~1km route,
+        exploration that grows with route length (measured 2026-09-07 on
+        the citywide graph, dev Mac: ~10ms/run for a ~1km route,
         ~115ms/run at ~20km; per-route-length numbers in
         pipeline/config.py's cap note).
 
@@ -1281,20 +1207,12 @@ class GraphStore:
         at a high tree_weight.
         """
         costs = self.edge_costs(tree_weight, month, day, hour, minute, layers)
-        # Continuous per-edge shade credit (FIXES item 2): an edge
-        # contributes min(density / DENSITY_AT_FULL_COVERAGE, 1) of its
-        # length to shade_fraction, replacing the old shaded-or-not
-        # threshold whose cliff-edge let near-identical routes read 0%
-        # vs 100% -- see the constant's comment for the calibration.
-        #
-        # The fail-closed branch here (all-zero while the constant was None)
-        # was removed on 2026-08-24 when the constant got a measured
-        # sidewalk-era value of 0.02. Since the 2026-08-26 unification,
-        # saturation applies to BOTH sides: _edge_density() caps at
-        # DENSITY_AT_FULL_COVERAGE, so cost and display saturate together
-        # and two fully-covered blocks tie on shade, resolving by length --
-        # see _edge_density's docstring for why the earlier split-scale
-        # design (unsaturated cost, saturated display) was falsified.
+        # Continuous per-edge shade credit: an edge contributes
+        # min(density / DENSITY_AT_FULL_COVERAGE, 1) of its length to
+        # shade_fraction, so near-identical routes can't read 0% vs 100%
+        # on a threshold. _edge_density() caps at the same constant, so
+        # cost and display saturate together and two fully-covered blocks
+        # tie on shade, resolving by length.
         shade_credit = np.minimum(
             self._edge_density(month, day, hour, minute, layers) / config.DENSITY_AT_FULL_COVERAGE, 1.0
         )
@@ -1302,11 +1220,11 @@ class GraphStore:
         best_plan = self._best_plan(start, end, costs)
 
         if best_plan is None:
-            # A legitimate outcome now, not a bug: load() keeps every
+            # A legitimate outcome, not a bug: load() keeps every
             # component (see its own comment), so two points in genuinely
             # disconnected parts of NYC -- mainland and Governors Island,
-            # eventually mainland and Staten Island -- hit this and get a
-            # clean "no route" here rather than an error.
+            # mainland and Staten Island -- hit this and get a clean "no
+            # route" here rather than an error.
             return None
 
         legs: list[dict] = []  # raw per-edge legs; build_steps folds them
@@ -1344,19 +1262,16 @@ class GraphStore:
                 next_node = v if u == current else u
                 step = self._edge_coords(e)
 
-                # An edge's stored geometry doesn't always run u→v: osmnx's
-                # to_undirected() collapses each one-way pair into a single
-                # edge but keeps whichever original direction's geometry it
-                # happened to retain, regardless of which node ended up
-                # labeled u vs v. Trusting "u == current" to predict
-                # direction was wrong for edges stored backwards — it
-                # flipped a correctly-oriented line, drawing a
-                # there-and-back spike. Checking which *end* of the raw
-                # geometry is actually closer to where we're standing is
-                # correct regardless of storage direction.
+                # An edge's stored geometry doesn't always run u→v: the
+                # export's (u, v) order and its coordinate order are
+                # independent. Trusting "u == current" to predict direction
+                # flips a correctly-oriented line into a there-and-back
+                # spike on edges stored backwards. Checking which *end* of
+                # the raw geometry is actually closer to where we're
+                # standing is correct regardless of storage direction.
                 here = self._node_lonlat[current]
                 if _dist2(step[0], here) > _dist2(step[-1], here):
-                    step = step[::-1]  # [::-1] = reversed view (JS: [...a].reverse())
+                    step = step[::-1]  # reversed view
 
                 # tolist() → plain [lon, lat] lists; numpy rows aren't
                 # JSON-serializable and coords feeds the response directly.
@@ -1380,18 +1295,15 @@ class GraphStore:
             )
             # Same proportional-credit treatment as tree_count above: the
             # partial lead-in/lead-out edges earn their own edge's
-            # per-meter credit over just the walked distance. (The old
-            # binary definition also subtracted a per-intersection
-            # exposure gap here, SHADE_CROSSING_GAP_M -- dropped with the
-            # continuous redesign, see DENSITY_AT_FULL_COVERAGE's comment.)
+            # per-meter credit over just the walked distance.
             shaded_length_m = (
                 s_dist_m * float(shade_credit[start.edge])
                 + float((self._length[edge_path] * shade_credit[edge_path]).sum())
                 + e_dist_m * float(shade_credit[end.edge])
             )
             # How much of the walked tree score is park-canopy credit vs
-            # countable trees (FIXES item 4) -- the frontend hides the
-            # raw "trees: N" stat when this share is significant, since a
+            # countable trees -- the frontend hides the raw "trees: N"
+            # stat when this share is significant, since a
             # count can't see area-based credit. Same proportional
             # partial-edge treatment as tree_count above.
             s_frac = s_dist_m / self._length[start.edge]
@@ -1443,20 +1355,20 @@ class GraphStore:
         end_options = [(end.node_u, end.dist_to_u_m), (end.node_v, end.dist_to_v_m)]
         end_nodes = [e_node for e_node, _ in end_options]
 
-        # Fold the two start endpoints into ONE run. The search begins at
+        # Fold the two start endpoints into one run. The search begins at
         # the endpoint with the smaller lead-in (`near`), and the start
         # edge is priced, in this request's own cost array, at
         # far_cost - near_cost (>= 0). Dijkstra from near then settles
         # every node x at min(d_near(x), (far_cost - near_cost) +
         # d_far(x)); add near_cost and that is min(near_cost + d_near(x),
-        # far_cost + d_far(x)) -- exactly the cheaper of the two runs this
-        # used to make. The re-priced edge touches the source, so a
-        # shortest path can only ever use it as its FIRST hop; no other
-        # path's cost changes. Verified identical to the two-run search
-        # (cost and path) on 5 hand-picked pairs x 4 weights and 44 seeded
-        # random pairs, 2026-09-09. The array is route()'s own, built fresh
-        # by edge_costs() per call, so nothing shared moves and this stays
-        # lock-free.
+        # far_cost + d_far(x)) -- exactly the cheaper of two separate
+        # runs. The re-priced edge touches the source, so a shortest path
+        # can only ever use it as its first hop; no other path's cost
+        # changes. Verified identical to a two-run search (cost and path)
+        # on 5 hand-picked pairs x 4 weights and 44 seeded random pairs
+        # (tests/test_route_search_fold.py). The array is route()'s own,
+        # built fresh by edge_costs() per call, so nothing shared moves
+        # and this stays lock-free.
         start_edge_cost = float(costs[start.edge])
         s_u_cost = start.dist_to_u_m / self._length[start.edge] * start_edge_cost
         s_v_cost = start.dist_to_v_m / self._length[start.edge] * start_edge_cost
@@ -1486,7 +1398,7 @@ class GraphStore:
         # whenever near_node and a given e_node sit in different
         # components -- snap_pair() keeps the real /route flow from
         # ever reaching this with such a pair, so in practice this is
-        # now only a defense-in-depth path (see the module-scope
+        # only a defense-in-depth path (see the module-scope
         # filter comment above for why it's silenced there rather
         # than with a per-call warnings.catch_warnings(), which isn't
         # thread-safe and /route runs across Starlette's thread pool).
@@ -1503,7 +1415,7 @@ class GraphStore:
             # network at the far endpoint: the lead-in runs from the snap
             # point straight to `far`, and the edge is not walked end to
             # end -- so it leaves the path, and the plan reads exactly as
-            # the old far-endpoint run would have written it.
+            # a run started from the far endpoint would have written it.
             if edge_path and edge_path[0] == start.edge:
                 s_node, s_dist_m, s_cost = far_node, far_dist_m, far_cost
                 edge_path = edge_path[1:]

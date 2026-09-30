@@ -1,6 +1,6 @@
 """Cap glibc's malloc arenas for the server process.
 
-WHY (`server-memory`, 2026-09-26): glibc gives each thread that allocates
+Why (#111): glibc gives each thread that allocates
 its own malloc arena, up to 8 x cores, and an arena keeps freed memory for
 reuse instead of returning it. FastAPI runs every sync endpoint on a
 threadpool, so /route's per-request arrays end up spread over several
@@ -11,7 +11,7 @@ The usual knob is the MALLOC_ARENA_MAX environment variable, but on the
 box that would live in the systemd unit, and changing the unit needs sudo
 -- the deploy user may only restart the service. mallopt(M_ARENA_MAX, n)
 sets the same limit from inside the process and ships with a normal
-deploy. It only governs arenas created AFTER the call, so it must run
+deploy. It only governs arenas created after the call, so it must run
 before the threadpool's threads first allocate: server/app.py calls it at
 the very start of startup, before the graph loads or any request arrives.
 
