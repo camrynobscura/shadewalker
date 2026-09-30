@@ -52,7 +52,7 @@ for dir in "${SHIPPED_DIRS[@]}"; do
 done
 
 # On the box: install/refresh the SLIM runtime deps (no-op if unchanged),
-# then restart. --no-default-groups = the 7 server packages only, never
+# then restart. --no-default-groups = the server packages only, never
 # the build stack. (Needs uv on the box's PATH and a sudoers rule letting
 # this user restart just this unit — see deploy/README.md.)
 ssh "$HOST" "cd '$DEST' && uv sync --no-default-groups && sudo systemctl restart shadewalker"

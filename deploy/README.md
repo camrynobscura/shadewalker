@@ -105,7 +105,7 @@ sudo mkdir -p /var/log/caddy && sudo chown caddy:caddy /var/log/caddy
 HOST=<deploy-user>@<droplet-ip> ./deploy/deploy.sh
 ```
 
-`deploy.sh` runs `uv sync --no-default-groups` on the box — the 7 runtime
+`deploy.sh` runs `uv sync --no-default-groups` on the box — the server runtime
 packages only. Then start everything:
 
 ```bash
