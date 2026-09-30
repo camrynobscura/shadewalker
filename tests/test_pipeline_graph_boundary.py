@@ -74,9 +74,9 @@ def test_park_polygon_excludes_a_roadside_typecategory():
     assert not result.contains(Point(2.5, 0.5))
 
 
-# FIXES.md 1d: typecategory alone bundles real park land in with genuinely
-# non-park land under the same label. Confirmed against the real dataset
-# (2026-08-08) that `subcategory` reliably tells the two apart -- but only
+# typecategory alone bundles real park land in with genuinely non-park
+# land under the same label. Checked against the real dataset
+# (2026-08-08): `subcategory` reliably tells the two apart -- but only
 # for the typecategories where a real bundling error was actually found
 # (Buildings/Institutions, Triangle/Plaza, Mall). Parkway/Strip/Lot/
 # Operations/Retired N/A keep their blanket exclusion regardless of
@@ -179,11 +179,10 @@ PARKWAY_WITH_A_PARK_LIKE_SUBCATEGORY = {
         {
             # Real: Belt Parkway/Shore Parkway (760 acres) carries
             # subcategory "Large Park" despite being a highway median, not
-            # walkable park interior -- already confirmed correctly
-            # excluded. This isn't a per-property bundling mistake the way
-            # Buildings/Institutions is; it's a genuinely different land
-            # type that happens to share a subcategory label, so the
-            # subcategory override must not rescue it.
+            # walkable park interior. This isn't a per-property bundling
+            # mistake the way Buildings/Institutions is; it's a genuinely
+            # different land type that happens to share a subcategory
+            # label, so the subcategory override must not rescue it.
             "properties": {"typecategory": "Parkway", "subcategory": "Large Park"},
             "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]},
         },
@@ -201,10 +200,9 @@ SELF_INTERSECTING_PARK = {
     "features": [
         {
             # A "bowtie" ring -- crosses itself at (1, 1), same defect
-            # shape as the 9 real Parks Properties polygons (including
-            # John V. Lindsay East River Park) that crashed a later
-            # .intersection() call with GEOS's "TopologyException: side
-            # location conflict" during the citywide park-canopy re-score.
+            # shape as 9 real Parks Properties polygons (including John V.
+            # Lindsay East River Park), which make a later .intersection()
+            # raise GEOS's "TopologyException: side location conflict".
             "properties": {"typecategory": "Flagship Park"},
             "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]]]},
         },
@@ -216,6 +214,6 @@ def test_park_polygon_repairs_a_self_intersecting_ring():
     result = boundary.park_polygon(SELF_INTERSECTING_PARK)
     assert result.is_valid
     # Must survive a real intersection() call, not just return without
-    # raising -- this is the exact operation that crashed on the
-    # unrepaired geometry.
+    # raising -- this is the operation that fails on the unrepaired
+    # geometry.
     result.intersection(box(0, 0, 1, 1))

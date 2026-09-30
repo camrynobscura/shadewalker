@@ -13,7 +13,7 @@ export const SUGGEST_MIN_CHARS = 3
  * newer keystroke (same abort-on-supersede idiom as useRouteQuery, so a
  * slow stale response can never paint over a fresh one), and empty
  * whenever `enabled` is false — the field owns that flag, since only it
- * knows whether the current text was TYPED (suggest) or arrived
+ * knows whether the current text was typed (suggest) or arrived
  * programmatically from a suggestion pick, a map click, or a
  * reverse-geocode fill (don't re-suggest text we generated ourselves). */
 export function useGeocodeSuggestions(query: string, enabled: boolean): GeocodeResult[] {

@@ -31,7 +31,7 @@ export function useAddressField(
   /** Reports the display text whenever it settles into representing the
    * resolved point — a picked suggestion's label, resolved typed text, a
    * reverse-geocode name. App mirrors it to the URL beside the point, so
-   * a reload shows the SAME text instead of re-deriving a (often
+   * a reload shows the same text instead of re-deriving a (often
    * different) name from the bare coordinate. */
   onLabel: (label: string) => void,
   /** The label a reload restored for `externalPoint` (from the URL) —
@@ -43,61 +43,57 @@ export function useAddressField(
   const [query, setQuery] = useState(restored ? initialLabel : '')
   const [status, setStatus] = useState<FieldStatus>(restored ? 'found' : 'idle')
   // The dropdown is wanted only while the current text is something the
-  // user TYPED (suggestions), or while a focused field is EMPTY (recents)
+  // user typed (suggestions), or while a focused field is empty (recents)
   // -- a suggestion pick, a submit, or a programmatic fill (map click,
   // reverse geocode) all turn this off, so the dropdown never reopens
   // over text this code wrote itself.
   const [suggestOn, setSuggestOn] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
   // Read fresh each time the dropdown opens (openSuggestions), so a pick
-  // made in the OTHER field is already in this one's list.
+  // made in the other field is already in this one's list.
   const [recents, setRecents] = useState<GeocodeResult[]>([])
   // Starts as the restored point when a label came back from the URL —
   // that's what stops the mount effect below from reverse-geocoding over
   // the restored text.
   const shownPointRef = useRef<Point | null>(restored ? externalPoint : null)
   // The deliberate entry (suggestion pick / resolved typed text) behind
-  // this field's CURRENT point, held until a route completes —
+  // this field's current point, held until a route completes —
   // commitRecent() records it then. Recents mean "addresses from real
-  // routes", not everything ever typed (user call 2026-09-03); nulled
-  // whenever the point it described is cleared or replaced from outside.
-  // Not set on mount for URL-restored labels: a deliberate one was
-  // already recorded when its route first drew.
+  // routes", not everything ever typed; nulled whenever the point it
+  // described is cleared or replaced from outside. Not set on mount for
+  // URL-restored labels: a deliberate one was already recorded when its
+  // route first drew.
   const pendingRecentRef = useRef<GeocodeResult | null>(null)
   // Bumped whenever the text an in-flight resolve() was about stops
   // being current (cleared, retyped) — the response is then stale and
-  // gets dropped instead of refilling the field (the ✕-mid-lookup
-  // resurrection, caught 2026-09-03).
+  // gets dropped instead of refilling the field.
   const resolveSeqRef = useRef(0)
   // The lookup resolve() has in flight, so a second caller waits for it
   // instead of starting another: FIND_ROUTE's tap blurs this field (which
   // resolves) a moment before its click asks every field to resolve, and
-  // it must wait for THAT answer before routing.
+  // it must wait for that answer before routing.
   const inflightRef = useRef<Promise<void> | null>(null)
   // Previous externalPoint, so the effect below can tell a point being
-  // CLEARED (value -> null) from the steady "no point yet" state while
+  // cleared (value -> null) from the steady "no point yet" state while
   // someone types a fresh address.
   const prevExternalRef = useRef<Point | null>(externalPoint)
 
   const suggestions = useGeocodeSuggestions(query, suggestOn)
 
-  // What the listbox holds right now: recents while the text is empty
-  // (the slot that used to show nothing), live suggestions once there's
-  // typed text. One list at a time — the keyboard/highlight machinery
-  // below only ever sees `options`.
+  // What the listbox holds right now: recents while the text is empty,
+  // live suggestions once there's typed text. One list at a time — the
+  // keyboard/highlight machinery below only ever sees `options`.
   const showingRecents = query.trim() === ''
   const options = showingRecents ? recents : suggestions
 
   // A fresh option list starts with nothing highlighted -- keeping an
   // old index would silently point Enter at whatever happens to occupy
-  // that position now. Reset DURING RENDER (React's "adjusting state when
+  // that position now. Reset during render (React's "adjusting state when
   // a prop changes" pattern), so the new list and its reset reach the
-  // screen together. It was an effect until 2026-09-26, and an effect
-  // runs a beat after the list is already showing: an ArrowDown landing
-  // in that gap was wiped a moment later, so Enter found nothing
-  // highlighted and resolved the empty text instead (the flaky
-  // recent-addresses e2e on CI; reproduced by pressing ArrowDown the
-  // instant the list rendered).
+  // screen together. An effect would run a beat after the list is
+  // already showing: an ArrowDown landing in that gap gets wiped a
+  // moment later, so Enter finds nothing highlighted and resolves the
+  // empty text instead.
   const [highlightedList, setHighlightedList] = useState(options)
   if (highlightedList !== options) {
     setHighlightedList(options)
@@ -114,7 +110,7 @@ export function useAddressField(
 
   /** A picked suggestion already carries its point -- no second geocode
    * round trip on submit; the field behaves exactly as if resolve() had
-   * just succeeded with this result. Also serves picking a RECENT (a
+   * just succeeded with this result. Also serves picking a recent (a
    * recent is a stored GeocodeResult) — re-committing one just bumps it
    * back to the front of the list. */
   function selectSuggestion(suggestion: GeocodeResult) {
@@ -144,16 +140,13 @@ export function useAddressField(
   }
 
   /** Leaving an emptied field drops the point it stood for -- the marker
-   * shouldn't outlive the text (user report 2026-08-31). Only on blur,
-   * never per-keystroke, so retyping an address doesn't nuke the marker
-   * mid-edit. Guarded on externalPoint so tabbing through an
-   * already-empty field does nothing.
+   * shouldn't outlive the text. Only on blur, never per-keystroke, so
+   * retyping an address doesn't nuke the marker mid-edit. Guarded on
+   * externalPoint so tabbing through an already-empty field does nothing.
    *
-   * Blur is also where typed text gets geocoded since 2026-09-02 — the
-   * FIND_ROUTE button's old job, moved to the moment attention leaves
-   * the field (the button was dead weight once suggestion picks and map
-   * taps auto-routed). `abandon` skips that: CANCEL and Escape end the
-   * mobile search WITHOUT acting on half-typed text. */
+   * Blur is also where typed text gets geocoded — the moment attention
+   * leaves the field. `abandon` skips that: CANCEL and Escape end the
+   * mobile search without acting on half-typed text. */
   function onBlur(abandon = false) {
     setSuggestOn(false)
     if (query.trim() === '' && externalPoint) {
@@ -164,9 +157,8 @@ export function useAddressField(
     if (!abandon) void resolve()
   }
 
-  /** The per-field ✕: text, point, and marker drop together — one field's
-   * worth of the old CLEAR_ROUTE (removed 2026-09-02; clearing both is
-   * two taps, or the wordmark's full reset). */
+  /** The per-field ✕: text, point, and marker drop together (clearing
+   * both fields is two taps, or the wordmark's full reset). */
   function clearField() {
     setQuery('')
     setStatus('idle')
@@ -181,7 +173,7 @@ export function useAddressField(
    * convention — the hook refetches for the unchanged text after its
    * debounce), and AddressField's empty-while-focused effect (recents).
    * Reloads recents each time so the list is fresh however it opens —
-   * including a pick just made in the OTHER field. */
+   * including a pick just made in the other field. */
   function openSuggestions() {
     setRecents(loadRecents())
     setSuggestOn(true)
@@ -225,7 +217,7 @@ export function useAddressField(
     // picked suggestion, USE_LOCATION — supersedes the typed text this
     // resolve started from; drop the response instead of stomping it.
     // (Those paths already set query/status, so bailing leaves the field
-    // consistent.) Likelier now that blur triggers resolve (2026-09-02).
+    // consistent.)
     if (shownPointRef.current) return
     if (result) {
       setStatus('found')
@@ -235,7 +227,7 @@ export function useAddressField(
       // restores.
       pendingRecentRef.current = { label: query, lat: result.lat, lon: result.lon }
       onResolve({ lat: result.lat, lon: result.lon })
-      // The field keeps showing the TYPED text after a resolve (not the
+      // The field keeps showing the typed text after a resolve (not the
       // geocoder's label), so that text is what the URL must restore.
       onLabel(query)
     } else {
@@ -250,9 +242,8 @@ export function useAddressField(
     if (!externalPoint) {
       // Point cleared from outside (a map tap starting a fresh pair drops
       // the end point; the ✕; this field emptied and blurred) -- empty the
-      // text so field and map never disagree (the old CLEAR_ROUTE button
-      // once left the addresses behind, user report 2026-08-31). Guarded
-      // on `prev` so it fires only on the value->null transition, never on
+      // text so field and map never disagree. Guarded on `prev` so it
+      // fires only on the value->null transition, never on
       // the steady no-point state while a fresh address is being typed.
       // suggestOn is left alone: a blurred field already has it off, and
       // on a still-focused one (the ✕) forcing it off here would close
@@ -287,7 +278,7 @@ export function useAddressField(
       // response landing late could stomp on something newer.
       if (label && shownPointRef.current === externalPoint) {
         setQuery(label)
-        // Into the URL too: a reload then restores THIS name instantly
+        // Into the URL too: a reload then restores this name instantly
         // instead of re-asking the geocoder, whose nearest-thing answer
         // isn't stable call to call (and whose failure mode is showing
         // raw coordinates).
@@ -304,7 +295,7 @@ export function useAddressField(
      * live suggestions — drives the listbox's header row and name. */
     showingRecents,
     activeIndex,
-    /** Whether the listbox is rendered: options exist AND the dropdown
+    /** Whether the listbox is rendered: options exist and the dropdown
      * phase is on (typed text, or a focused empty field). */
     open: suggestOn && options.length > 0,
     onChange,

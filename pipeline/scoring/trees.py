@@ -1,33 +1,28 @@
 """What one tree is worth, as shade.
 
-This module is deliberately GEOMETRY-FREE. It answers "how much shade is
+This module is deliberately geometry-free. It answers "how much shade is
 this tree worth, and is it evergreen or deciduous" and nothing else -- no
-distances, no buffers, no streets. That separation is why the value formula
-and its constants survived the centerline deletion intact while everything
-around them died: the test applied was "does its justification mention a
-distance, a corridor, a centerline, or a route measurement? then it is
-geometry and it dies. Is it about a tree or the calendar? it lives."
-
-Where a tree's shade LANDS is pipeline/graph/blockface.py's problem.
-How it becomes a route statistic is server/graph_store.py's.
+distances, no buffers, no streets. Where a tree's shade lands is
+pipeline/graph/blockface.py's problem. How it becomes a route statistic is
+server/graph_store.py's.
 
 THE FORMULA
 -----------
     value = condition_score x min(dbh, DBH_CAP_IN) / DBH_CAP_IN
 
-`dbh` is trunk diameter at breast height, in inches, and it is the ONLY
+`dbh` is trunk diameter at breast height, in inches, and it is the only
 size information Forestry publishes -- there is no canopy-radius field.
-Measured across 898,643 living trees: median 9in, p25 4, p75 16, p90 24,
-p99 38.
+Across 898,643 living trees: median 9in, p25 4, p75 16, p90 24, p99 38.
 
 The cap is not decoration. The largest `dbh` in the live citywide data is
-**2427 inches** -- 61 metres of trunk -- so without it one mistyped record
+2427 inches -- 61 metres of trunk -- so without it one mistyped record
 would dominate an entire block's score.
 
 Seasonality is applied later, not here: the server multiplies the deciduous
 share by config.CANOPY_BY_MONTH, blended by day for the date being routed
-(graph_store._tree_fraction), so one scored export serves every day. Evergreens are held out of that multiplication,
-which is the only reason the split exists.
+(graph_store._tree_fraction), so one scored export serves every day.
+Evergreens are held out of that multiplication, which is the only reason
+the split exists.
 """
 
 import logging
@@ -39,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 # tpcondition values that contribute no shade at all. Standing dead trees
 # are still physically present -- the fetch filters on tpstructure='Full',
-# which means "standing" and includes them -- so they must be dropped HERE.
+# which means "standing" and includes them -- so they must be dropped here.
 # 10,635 of the 898,643 living-structure trees are Dead (1.2%).
 DEAD = "Dead"
 
@@ -67,11 +62,9 @@ def tree_value(row: dict) -> TreeValue | None:
     if (row.get("tpcondition") or "").strip() == DEAD:
         return None
 
-    # dbh arrives as a STRING ("22") from Socrata, and 77 of the 898,643
-    # citywide rows carry JSON null. float(None) raises TypeError, NOT
-    # ValueError -- the pre-rebuild version of this code caught only
-    # ValueError and would have crashed the first time it ran citywide. It
-    # never did run citywide, so nobody found out.
+    # dbh arrives as a string ("22") from Socrata, and 77 of the 898,643
+    # citywide rows carry JSON null. float(None) raises TypeError, not
+    # ValueError, so both are caught.
     try:
         dbh = float(row.get("dbh") or 0)
     except (TypeError, ValueError):

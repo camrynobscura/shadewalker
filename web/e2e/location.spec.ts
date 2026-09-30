@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { mockGeocode } from './fixtures'
 
-// The use-location-ux pass (2026-09-02): one ⌖ tap = enable + gated fill
-// + recenter, errors surfaced instead of an eternal "acquiring", and
+// One ⌖ tap = enable + gated fill + recenter, errors surfaced instead of
+// an eternal "acquiring", and
 // field labels carried in the URL so a reload shows the text the field
 // showed. The accuracy gate and settle timeout live in vitest
 // (useLocationFill.test.ts) — Playwright's mock geolocation serves one
@@ -33,7 +33,7 @@ test.describe('one-tap location fill', () => {
 
   test('a tap on Locate me never drops a route point', async ({ page }) => {
     // It sits inside the map, so without Leaflet's click guard (it's a
-    // Leaflet control since 2026-09-27) the tap also reached the map.
+    // Leaflet control) the tap would also reach the map.
     await mockGeocode(page)
     await page.goto('/')
     await page.getByRole('button', { name: 'Use location' }).click()
@@ -57,7 +57,7 @@ test.describe('location denied', () => {
     await useLocation.click()
 
     await expect(page.getByText('allow location for this site')).toBeVisible()
-    // Not stuck on a disabled "acquiring" ⌖ — the founding bug.
+    // Not stuck on a disabled "acquiring" ⌖.
     await expect(useLocation).toBeEnabled()
 
     // Entering an address makes the advice stale — it clears with the ⌖

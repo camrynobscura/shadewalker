@@ -5,10 +5,11 @@ of naming._to_m, so the end-to-end path (edge dicts with `coords`, raw
 footprint rows with `the_geom` + `height_roof` in feet) is what runs.
 Geometry keeps >= 3 m clear of every shadow edge: the raster march places
 a shadow's edge only to within a cell plus a hop, and that positional
-error is measured by the Gate 1 instrument, not asserted here.
+error is measured by tools/audit/measure_shadow_feasibility.py, not
+asserted here.
 
 What is pinned:
-  - the physics on one building (9 m shaded, 11 m not, at 45 deg), on BOTH
+  - the physics on one building (9 m shaded, 11 m not, at 45 deg), on both
     engines, and that the engines agree away from shadow edges;
   - direction: a building west of a N-S street shades the near sidewalk
     with the sun in the west and nothing with the sun in the east;
@@ -155,7 +156,7 @@ def test_night_and_no_buildings_are_never_shaded():
 # ── end to end: direction, kinds, exclusion, output ──────────────────────────
 
 def _street_world():
-    """A N-S street. One 10 m building on the WEST side (x in [-14, -4]);
+    """A N-S street. One 10 m building on the west side (x in [-14, -4]);
     the west sidewalk 2 m from its wall at x = -2, the east sidewalk at
     x = +14, both running y in [-30, 30]."""
     west = _edge([(-2, -30), (-2, 30)])
@@ -245,7 +246,7 @@ def test_sweep_path_reaches_beyond_the_raster_march():
     edge, tall = _tall_world(300.0, 120.0)
     _score([edge], [tall], _table(m7h17=(270.0, 20.0)))
     assert _values(edge, 7, 17) == 255
-    # The same footprint just UNDER the cap gets no sweep: unshaded, by design.
+    # The same footprint just under the cap gets no sweep: unshaded, by design.
     edge, short = _tall_world(300.0, 90.0)
     _score([edge], [short], _table(m7h17=(270.0, 20.0)))
     assert _values(edge, 7, 17) == 0

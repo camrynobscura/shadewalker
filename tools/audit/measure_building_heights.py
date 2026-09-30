@@ -2,15 +2,14 @@
 
 WHY THIS EXISTS
 ---------------
-The building-shade layer (PLAN `building-shadows`) stands on one column of
-one dataset that publishes NO accuracy statement for height. Before a
-citywide shadow table is built on it, this measures how far it can be
-trusted, citywide, and where it is known to be wrong. It replaces the
-2026-09-08 scratchpad checks (five areas, n=14,865; Wikidata tall tail,
-185 matched), which found no systematic bias and one real stale-height
-case (425 Park Ave reading the demolished 1957 tower). BUILDING-SHADOWS.md
-section 4.7 holds those numbers; this is the durable rebuild, run on the
-whole fetch.
+The building-shade layer (#108) stands on one column of one dataset that
+publishes no accuracy statement for height. Before a citywide shadow
+table is built on it, this measures how far it can be trusted, citywide,
+and where it is known to be wrong. An earlier one-off check (2026-09-08:
+five areas, n=14,865; Wikidata tall tail, 185 matched) found no
+systematic bias and one real stale-height case (425 Park Ave reading the
+demolished 1957 tower); this is the durable version, run on the whole
+fetch.
 
 Four checks, each independent of the others:
 
@@ -22,15 +21,15 @@ Four checks, each independent of the others:
         matched by point-in-footprint to the tall tail (>= --tall-ft).
         Demolished items (P576) are excluded automatically; proposed
         never-built towers are not machine-detectable, so outliers are
-        LISTED BY NAME for a human to read. Wikidata's P2048 is usually
+        listed by name for a human to read. Wikidata's P2048 is usually
         the architectural height (spire included), so the footprint being
-        close to it is NOT proof it is a roof height -- the second column,
+        close to it is not proof it is a roof height -- the second column,
         feet per Wikidata floor (P1101), is the spire detector: a roof
         height divides to ~12-16 ft/floor, a spire height to more.
   (iii) Stale heights. Footprints whose lot was built or altered (PLUTO
-        yearbuilt / yearalter1 / yearalter2) AFTER the footprint's own
-        last_edited_date. A LOWER BOUND, validated 2026-09-24 against the
-        two known stale tall buildings and catching NEITHER: 425 Park Ave
+        yearbuilt / yearalter1 / yearalter2) after the footprint's own
+        last_edited_date. A lower bound, validated 2026-09-24 against the
+        two known stale tall buildings and catching neither: 425 Park Ave
         (footprint 389 ft = the demolished 1957 tower; PLUTO still says
         built 1957, altered 2015, because the 860 ft rebuild was filed as
         an alteration) and 270 Park Ave (footprint re-initialised
@@ -39,10 +38,10 @@ Four checks, each independent of the others:
         by check (ii) only; this check sees the low-rise churn.
   (iv)  A Street View batch for human floor-counting: --batch-n buildings,
         stratified by borough and floor band, PLUTO's count hidden until
-        the reviewer has their own. The user's eyes are the only real
-        ground truth here.
+        the reviewer has their own. Human eyes are the only real ground
+        truth here.
 
-OSM `height` tags are deliberately NOT a check: NYC's were imported from
+OSM `height` tags are deliberately not a check: NYC's were imported from
 this same dataset (verified 2026-09-08, ratio p50 1.00), so agreement
 would be provenance, not independence.
 
@@ -463,7 +462,7 @@ def build_batch(joined: list[dict], n: int, seed: int, out_path: str, report: li
     report.append("## (iv) Street View floor-count batch\n")
     report.append(f"{len(chosen)} buildings <= 200 ft, {per_b} per borough across floor bands "
                   f"1-3 / 4-7 / 8+, seed {seed}: `{out_path}`. Count floors, then open the "
-                  f"answer table. Verdicts are yours; record them in the session notes.\n")
+                  f"answer table. Verdicts are yours to record.\n")
 
 
 # ── main ────────────────────────────────────────────────────────────────────

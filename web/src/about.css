@@ -7,6 +7,12 @@
    html/body to the viewport). */
 @import './base.css';
 
+/* Prose reads better on the palest ground; the shared header keeps its
+   --panel fill and border above it. about.html's theme-color matches. */
+body {
+  background: var(--paper);
+}
+
 .page {
   /* Prose measure: readable line length, not app-panel width. */
   max-width: 640px;

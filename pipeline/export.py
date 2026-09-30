@@ -3,18 +3,9 @@
 The exported file is the contract between the pipeline and the routing
 server: plain JSON (gzipped), no Python-specific types.
 
-One writer: write_citywide(), which emits ONE file for all five boroughs.
+One writer: write_citywide(), which emits one file for all five boroughs.
 
-The centerline model's per-tile writer, write_tile(), was deleted on
-2026-08-23 along with the tile grid and the committed fixture that were the
-only reasons it was still here. Its per-tile synthetic-node namespacing
-(_node_id_str) went with it: that existed because each tile minted negative
-ids from -1 independently, so the same bare id named a different real place
-in every tile. A single citywide export has one id space and cannot have
-that collision.
-
-Hard-won rule encoded here (this exact bug shipped in the v1 prototype):
-everything written to the file is in lat/lon degrees (EPSG:4326) — the
+Everything written to the file is in lat/lon degrees (EPSG:4326): the
 meter-based geometry is for pipeline math only and must never leak into
 the export, or the frontend would try to draw UTM coordinates on a map.
 Coordinate pairs are [lon, lat] to match the GeoJSON convention.
@@ -41,15 +32,13 @@ CITYWIDE_NAME = "citywide"
 def _write_atomically(out_path, payload: dict) -> float:
     """Write payload as gzipped JSON to out_path. Returns its size in KB.
 
-    Atomic write (FIXES item 8, audit §2.5): write to a temp name in the
-    SAME directory, then os.replace() -- which POSIX guarantees is
-    all-or-nothing -- so no reader (a live server's load(), a
-    mid-refresh restart) can ever see a truncated file, whether from a
-    concurrent read or a crash mid-write. Same directory matters:
-    os.replace() is only atomic within one filesystem, and a temp dir
-    like /tmp can be a different one. The ".tmp" suffix keeps
-    GraphStore.load()'s *.json.gz glob from ever matching a half-written
-    file even before the rename.
+    Atomic write: write to a temp name in the same directory, then
+    os.replace(), which POSIX guarantees is all-or-nothing, so no reader
+    (a live server's load(), a mid-refresh restart) can ever see a
+    truncated file. Same directory matters: os.replace() is only atomic
+    within one filesystem, and a temp dir like /tmp can be a different
+    one. The ".tmp" suffix keeps GraphStore.load()'s *.json.gz glob from
+    ever matching a half-written file even before the rename.
 
     gzip.open in text mode ("wt") lets json.dump write straight into a
     compressed file — no intermediate uncompressed copy.
@@ -91,10 +80,9 @@ def write_citywide(nodes: dict, edges: list[dict], sun_table=None) -> Path:
     actually goes, and would then "verify" a file that isn't the one just
     written.
 
-    Not tiles and not per-borough: borough lines cut streets, which
-    reintroduces the border-dedupe bug class the centerline model was
-    deleted to escape. The client never downloads this -- it loads into
-    server RAM at startup.
+    Not tiles and not per-borough: borough lines cut streets, and every
+    cut is a border to dedupe across. The client never downloads this --
+    it loads into server RAM at startup.
 
     It lands in EXPORT_DIR under a *.json.gz name because that is what
     GraphStore.load() globs -- the server merges every matching file it
@@ -103,9 +91,8 @@ def write_citywide(nodes: dict, edges: list[dict], sun_table=None) -> Path:
 
     Tree fields are written as zeros when the caller has not scored the
     edges. An unscored graph is a legitimate intermediate -- it routes by
-    distance alone, which is exactly what the spine is for -- and the
-    server requires the keys to be present either way
-    (server/graph_store.py:399-401).
+    distance alone -- and the server requires the keys to be present
+    either way (server/graph_store.py).
     """
     node_records = {node_id: [round(lon, 6), round(lat, 6)]
                     for node_id, (lon, lat) in nodes.items()}
@@ -116,31 +103,28 @@ def write_citywide(nodes: dict, edges: list[dict], sun_table=None) -> Path:
             "u": edge["u"],
             "v": edge["v"],
             "key": int(edge["key"]),
-            # COMPASS side of the parent street ("N"/"S"/"E"/"W"), "" when
+            # Compass side of the parent street ("N"/"S"/"E"/"W"), "" when
             # none is honest or the edge has no street (crossings, park
-            # paths). Was CSCL L/R until 2026-08-28 -- see
-            # BlockFaceIndex.compass_side for why that could never survive
-            # a block boundary.
+            # paths). Geometric, not CSCL's L/R: see
+            # BlockFaceIndex.compass_side.
             "side": edge["side"],
             # OSM's own classification ("footway/sidewalk",
-            # "footway/crossing", "steps"...). Exported since 2026-08-28:
-            # direction rendering folds crossings into the street run they
-            # interrupt, which no length heuristic can do (crossings run
-            # 15-31m and wider on avenues).
+            # "footway/crossing", "steps"...). Direction rendering folds
+            # crossings into the street run they interrupt, which no
+            # length heuristic can do (crossings run 15-31m and wider on
+            # avenues).
             "kind": edge.get("kind", ""),
             "length_m": edge["length_m"],
             "name": edge["name"],
             "tree_deciduous": edge.get("tree_deciduous", 0.0),
             "tree_evergreen": edge.get("tree_evergreen", 0.0),
-            # FLOAT, not int. Block-face scoring gives each edge a SHARE of
+            # Float, not int. Block-face scoring gives each edge a share of
             # its block's trees in proportion to its own length, so a face
-            # with 3 trees spread over 10 edges hands each one 0.3 --
-            # int() truncated that to 0 and all three trees vanished from
-            # the export. The cast is still here for the reason it was
-            # added (a numpy int64 is not JSON-serialisable and json.dump
-            # raises TypeError on it), just widened. The user-facing count
-            # stays a whole number: graph_store.py sums the shares along a
-            # route and rounds once at the end.
+            # with 3 trees spread over 10 edges hands each one 0.3, which
+            # int() would truncate to nothing. The cast itself guards
+            # against a numpy int64, which json.dump can't serialise. The
+            # walker-facing count stays a whole number: graph_store.py sums
+            # the shares along a route and rounds once at the end.
             "tree_count": float(edge.get("tree_count", 0)),
             "tree_park_canopy": round(float(edge.get("tree_park_canopy", 0.0)), 3),
             # lat/lon degrees, [lon, lat] order — see the module docstring.
@@ -154,15 +138,11 @@ def write_citywide(nodes: dict, edges: list[dict], sun_table=None) -> Path:
         if fold_names:
             record["fold_names"] = fold_names
         # Building shade: 288 bytes per edge (pipeline/scoring/shadows.py),
-        # month-major, value/255, as base64 -- Gate 2 of PLAN
-        # `building-shadows` (user, 2026-09-25) on the real citywide table
-        # (tools/audit/measure_export_candidates.py): the table is 78%
-        # zeros, so it costs 31 MB gzipped (25.7 -> 57.1 MB) and ~1.4 s of
-        # Mac startup (~8 s on the box); a daylight-only row saved 1.8 MB
-        # and loaded slower; a .npy sidecar loaded 0.8 s faster at 141 MB
-        # more per deploy and a second file to keep in step -- rejected.
-        # Omitted when all-zero, the fold_names rule: 488k edges pay for
-        # every key.
+        # month-major, value/255, as base64. Measured on the citywide table
+        # (tools/audit/measure_export_candidates.py, #109): 78% zeros, so
+        # it costs 31 MB gzipped and ~1.4 s of startup; a .npy sidecar
+        # loaded 0.8 s faster at 141 MB more per deploy and a second file
+        # to keep in step. Omitted when all-zero, the fold_names rule.
         shade = edge.get("building_shade")
         if shade and any(shade):
             record["building_shade"] = base64.b64encode(shade).decode("ascii")

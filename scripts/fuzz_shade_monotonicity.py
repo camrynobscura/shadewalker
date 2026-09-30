@@ -1,7 +1,7 @@
 """Fuzz the shade-priority invariant across the full citywide graph.
 
 Unlike the committed tests (seeded, bounded, CI-safe), this is a standalone
-tool for occasional BROAD sweeps: it draws a different random sample each run,
+tool for occasional broad sweeps: it draws a different random sample each run,
 so over time it exercises far more of the city than any one fixed seed. To
 stay reproducible it prints the seed it used, and on any failure prints the
 exact failing routes -- rerun with --seed <n> to replay a red result.
@@ -48,10 +48,6 @@ def main() -> int:
     months = [int(m) for m in args.months.split(",")]
     print(f"seed={seed}  n={args.n}  months={months}  (replay a red run with --seed {seed})")
 
-    # Was `len(tiles) < 10`, inherited from the tiled pipeline -- a gate the
-    # one-file citywide export could never satisfy, so this tool was silently
-    # dead from the citywide export's arrival until 2026-08-28 (same bug
-    # class as the conftest gate documented in CLAUDE.md's Tests section).
     exports = sorted(config.EXPORT_DIR.glob("*.json.gz"))
     if not exports:
         print(

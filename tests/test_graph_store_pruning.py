@@ -1,16 +1,14 @@
 """Multi-component loading, exercised deterministically.
 
-server/graph_store.py's load() used to prune everything but the largest
-connected component. As of the borough-boundary polygon work it keeps
-every component instead, trusting the pipeline's borough-polygon clip
-(pipeline/graph/pedestrian.py) to have already excluded non-NYC territory
-before data ever reaches data/export/ -- so a real disconnected place (Governors Island,
-eventually Staten Island) is no longer collateral damage. These tests
-fabricate a two-component dataset (a small
-main network plus a genuinely disconnected "island", split over two tile
-files the way a real border tile would be) so it's exercised on every
-run, and its output -- both components present, arrays still aligned,
-routing behaving correctly on and across them -- is checked directly.
+server/graph_store.py's load() keeps every connected component, trusting
+the pipeline's borough-polygon clip (pipeline/graph/pedestrian.py) to have
+already excluded non-NYC territory before data reaches data/export/ -- so
+a real disconnected place (Governors Island, Staten Island) is routable
+within itself. These tests fabricate a two-component dataset (a small
+main network plus a genuinely disconnected "island", split over two
+export files) so it's exercised on every run, and its output -- both
+components present, arrays still aligned, routing behaving correctly on
+and across them -- is checked directly.
 """
 
 import gzip
@@ -37,23 +35,19 @@ ISLAND_NODES = {
 
 # (u, v, name, length_m, tree_count) -- distinct values per edge on purpose,
 # so the alignment tests can prove each attribute stayed with its own edge.
-# The lengths no longer have to clear any bar: they were sized to stay over
-# the hide rule's 5km threshold, which was deleted 2026-08-23 (see
-# test_graph_store_components.py). Left as they are because nothing here
-# depends on them, and rewriting them would churn the alignment fixtures.
 MAIN_EDGES = [
     ("m1", "m2", "Alpha Street", 1700.0, 3),
     ("m2", "m3", "Beta Avenue", 2200.0, 5),
     ("m3", "m4", "Gamma Road", 1300.0, 0),
 ]
-# Stands in for a REAL disconnected place (Governors Island, 49km).
+# Stands in for a real disconnected place (Governors Island).
 ISLAND_EDGES = [("i1", "i2", "Island Path", 6000.0, 9)]
 
 # A tiny, unnamed, disconnected fragment sitting ~7m from m1 -- stands in
-# for a real orphaned pedestrian crossing or plaza-interior path (see
-# PLAN.md): not part of the street grid at all, but close enough to
-# occasionally win a naive "nearest edge, regardless of reachability"
-# comparison over the real street a few meters further out.
+# for a real orphaned pedestrian crossing or plaza-interior path: not part
+# of the street grid at all, but close enough to occasionally win a naive
+# "nearest edge, regardless of reachability" comparison over the real
+# street a few meters further out.
 JUNK_NODES = {
     "j1": [-73.98995, 40.68005],
     "j2": [-73.98985, 40.68005],
@@ -143,7 +137,7 @@ def test_routing_works_within_each_component(multi_component_store):
 
 
 def test_snap_pair_returns_none_between_disconnected_components(multi_component_store):
-    # The other half of relaxed pruning's contract: two real, in-coverage
+    # The other half of keeping every component: two real, in-coverage
     # points that legitimately can't reach each other (mainland <-> a
     # ferry-only island) must get a clean "no route" -- and without ever
     # calling route()'s Dijkstra at all, since no shared component within
@@ -185,12 +179,12 @@ def store_with_a_disconnected_fragment_near_a_real_street(tmp_path, monkeypatch)
 def test_snap_pair_ignores_a_disconnected_fragment_closer_than_the_real_street(
     store_with_a_disconnected_fragment_near_a_real_street,
 ):
-    # The real bug this fixture reproduces (Union Square, a Brooklyn
-    # Bridge landing -- see PLAN.md): a click right on the junk fragment
-    # (j1) is *closer* to it than to the real street (m1-m2, ~7m away).
-    # Naive nearest-edge snapping picked the fragment, which can't reach
-    # anywhere else -- routing to a distant real point (m3) failed even
-    # though a real, reachable street sits a few meters further out.
+    # The case this fixture reproduces (Union Square, a Brooklyn Bridge
+    # landing): a click right on the junk fragment (j1) is *closer* to it
+    # than to the real street (m1-m2, ~7m away). Naive nearest-edge
+    # snapping would pick the fragment, which can't reach anywhere else --
+    # routing to a distant real point (m3) would fail even though a real,
+    # reachable street sits a few meters further out.
     store = store_with_a_disconnected_fragment_near_a_real_street
     lon_junk, lat_junk = JUNK_NODES["j1"]
     lon_m3, lat_m3 = MAIN_NODES["m3"]

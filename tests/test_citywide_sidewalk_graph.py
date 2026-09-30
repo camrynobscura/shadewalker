@@ -6,28 +6,23 @@ clone never have it. Build it with:
 
     uv run python -m pipeline.build
 
-DELIBERATELY NOT USING conftest's citywide_store FIXTURE. These read the
+Deliberately not using conftest's citywide_store fixture. These read the
 export file directly rather than loading it through GraphStore, so they
-check what the PIPELINE wrote rather than what the server made of it --
+check what the pipeline wrote rather than what the server made of it --
 a distinction that matters when the question is whether the export itself
 is right.
 
-(The original reason was different and is now obsolete: citywide_store
-used to require 10+ tile files, a threshold left over from the centerline
-era's 276-tile grid, so it always skipped. That gate was fixed on
-2026-08-23 to skip only when there is no export at all.)
-
 WHAT THESE ARE FOR
 ------------------
-Every one of them pins something that has already gone wrong, or that
-would look like something else when it does:
+Every one of them pins something that would look like something else
+when it goes wrong:
 
-  - a clip failure produces entirely plausible numbers (2026-08-22: an
-    unclipped read reported 37.1% connectivity, which reads as a routing
-    catastrophe and was purely Buffalo being measured beside Brooklyn)
+  - a clip failure produces entirely plausible numbers (an unclipped read
+    reports 37.1% connectivity, which reads as a routing catastrophe and
+    is purely Buffalo being measured beside Brooklyn)
   - a dangling edge endpoint is a KeyError at server startup, not a
     routing oddity
-  - Staten Island being unreachable is CORRECT, and looks like a bug
+  - Staten Island being unreachable is correct, and looks like a bug
 """
 
 import gzip
@@ -43,7 +38,7 @@ from pipeline.graph.boundary import nyc_boundary
 from server.graph_store import GraphStore
 
 # How far past the five-borough bounding box a node may legitimately sit.
-# Not zero, because the clip keeps a border-crossing way WHOLE rather than
+# Not zero, because the clip keeps a border-crossing way whole rather than
 # trimming it -- a bridge into New Jersey drags its far end along with it,
 # which is the intended behaviour (pipeline/graph/pedestrian.py). 0.1
 # degrees is ~11km: comfortably past any real bridge tail, and nowhere
@@ -94,15 +89,12 @@ def sidewalk_store(sidewalk_export) -> GraphStore:
 
 @pytest.mark.citywide
 def test_the_export_covers_only_new_york_city(sidewalk_export):
-    """The pinned extract is Geofabrik's NEW YORK STATE file, so a read
+    """The pinned extract is Geofabrik's New York State file, so a read
     that forgets to clip silently includes Buffalo, Albany and the
-    Adirondacks.
-
-    That is not a hypothetical: it happened on 2026-08-22 and produced a
-    graph of 868,339 nodes whose largest component read 37.1%, a figure
-    that looks exactly like a broken pedestrian network and was entirely
-    an artifact of the missing clip. Nothing about the numbers themselves
-    gave it away -- only their geography did.
+    Adirondacks: a graph of 868,339 nodes whose largest component reads
+    37.1%, a figure that looks exactly like a broken pedestrian network
+    and is entirely an artifact of the missing clip. Nothing about the
+    numbers themselves gives it away -- only their geography does.
     """
     nyc = nyc_boundary(fetch_borough_boundaries())
     min_lon, min_lat, max_lon, max_lat = nyc.bounds
@@ -135,7 +127,7 @@ def test_every_edge_endpoint_resolves_to_an_exported_node(sidewalk_export):
     a bare KeyError at server startup -- before any request, with nothing
     naming the edge that caused it.
 
-    Checked against the FILE rather than a loaded store on purpose: a
+    Checked against the file rather than a loaded store on purpose: a
     loaded store proves nothing here, since load() would already have
     crashed on the way in.
     """
@@ -153,7 +145,7 @@ def test_every_edge_endpoint_resolves_to_an_exported_node(sidewalk_export):
 
 @pytest.mark.citywide
 def test_staten_island_does_not_reach_the_mainland(sidewalk_store):
-    """This is CORRECT behaviour, pinned so it doesn't get "fixed".
+    """This is correct behaviour, pinned so it doesn't get "fixed".
 
     No pedestrian way crosses the Verrazzano. Staten Island's only walking
     links to anywhere are the Bayonne Bridge and Goethals shared-use path,
@@ -163,7 +155,7 @@ def test_staten_island_does_not_reach_the_mainland(sidewalk_store):
 
     Per the governing rule that is the right answer -- OSM says there is
     no crossing, so we don't invent one. snap_pair() returns None and
-    server/app.py:152-154 turns that into a clean 422.
+    server/app.py turns that into a clean 422.
     """
     pair = sidewalk_store.snap_pair(
         STATEN_ISLAND[0], STATEN_ISLAND[1], MAINLAND[0], MAINLAND[1]

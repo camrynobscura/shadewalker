@@ -1,28 +1,26 @@
 """Server-side geocoding proxy — Photon upstream, one hop, cached.
 
-Until 2026-08-30 the browser called public Nominatim directly. That shape
-can't grow: geocoder usage policies bind the APPLICATION in aggregate
-(Nominatim caps the whole app at 1 req/s and forbids autocomplete
-outright), so a thousand browsers are still one quota. One server-side
-chokepoint fixes all of it at once:
+The browser never calls a public geocoder directly. Geocoder usage
+policies bind the application in aggregate (Nominatim, for one, caps the
+whole app at 1 req/s and forbids autocomplete outright), so a thousand
+browsers are still one quota. One server-side chokepoint fixes all of it
+at once:
 
 - the LRU cache absorbs repeat queries — being polite to a fair-use
   upstream is the point of it, not saving milliseconds;
 - the upstream is config (SHADEWALKER_PHOTON_URL): public komoot today,
-  a self-hosted NYC index later (measured 305MB / ~0.5GB RSS,
-  history/geocoding-photon.md), zero frontend change either way;
+  a self-hosted NYC index later (measured at ~0.5 GB RSS), zero frontend
+  change either way;
 - visitors' IPs and search text stop flowing to a third party; requests
   leave from here under an app-identifying User-Agent instead.
 
 Query text and coordinates are location data and are deliberately never
-logged here. uvicorn's access log still sees request paths — that is the
-deploy abuse-and-privacy decision's problem, noted in PLAN.md, not
-solvable in this module.
+logged here. uvicorn's access log would still see request paths, which
+is why production runs with --no-access-log (server/app.py).
 
-Label building lived in web/src/api.ts against Nominatim's response
-shape; it moved here with the proxy so the frontend only ever sees our
-own lean shape ({lat, lon, label}) and a provider swap touches exactly
-one file.
+Label building lives here rather than in the frontend so the frontend
+only ever sees our own lean shape ({lat, lon, label}) and a provider swap
+touches exactly one file.
 """
 
 from functools import lru_cache
@@ -36,8 +34,7 @@ from pipeline import config
 USER_AGENT = "shady-stroll (NYC tree-shade walking-route planner; personal project)"
 
 # Photon bbox format is lon_min,lat_min,lon_max,lat_max — pinned server
-# side so the client cannot ask for anywhere else, mirroring the old
-# viewbox+bounded=1 the frontend sent to Nominatim.
+# side so the client cannot ask for anywhere else.
 _CITY_BBOX = (
     f"{config.CITY_BBOX.lon_min},{config.CITY_BBOX.lat_min},"
     f"{config.CITY_BBOX.lon_max},{config.CITY_BBOX.lat_max}"
@@ -101,19 +98,18 @@ def _in_nyc(props: dict) -> bool:
     """Drop forward-search results outside the five boroughs. The bbox is a
     rectangle around boroughs that aren't one, so it admits Hoboken/Jersey
     City, southern Westchester, and western Nassau — all dead ends here,
-    since /route rejects anything outside coverage anyway (user report
-    2026-09-02: Hoboken addresses in autocomplete; "45 Charles Street"
-    ranking Alden Manor first).
+    since /route rejects anything outside coverage anyway, and without
+    this filter Hoboken addresses show up in autocomplete.
 
     Photon derives `city` from the OSM admin hierarchy, not addr:city, so
-    every five-borough result carries city "New York" — verified live
-    2026-09-02 across addresses, POIs, parks, and bridges in Manhattan,
-    Brooklyn, Queens, and Staten Island (Queens postal cities like Astoria
-    do NOT leak into the field), while Hoboken / Valley Stream /
-    New Rochelle results carry their own city. The state check is belt and
-    braces for any other US "New York" hamlet the bbox might graze.
+    every five-borough result carries city "New York" — verified across
+    addresses, POIs, parks, and bridges in four boroughs (Queens postal
+    cities like Astoria do not leak into the field), while Hoboken /
+    Valley Stream / New Rochelle results carry their own city. The state
+    check is belt and braces for any other US "New York" hamlet the bbox
+    might graze.
 
-    Search only: reverse() stays unfiltered, because a point already IN
+    Search only: reverse() stays unfiltered, because a point already in
     hand (a geolocation fix just outside the city, say) deserves its honest
     nearest name over a silent coordinate fallback.
     """
@@ -150,18 +146,16 @@ def _primary_name(props: dict) -> str | None:
 
 
 def _reverse_label(props: dict) -> str | None:
-    """An address field needs an ADDRESS, never the nearest business's
-    name — reverse is the one direction where `name` must lose.
-
-    This rule shipped 2026-08-24 in web/src/api.ts against Nominatim and
-    moved here verbatim in spirit: reverse-geocoding a point right
-    outside Lucali (a Carroll Gardens restaurant) labeled the start field
-    "Lucali" instead of "575 Henry Street". In Photon's shape the POI's
-    own housenumber/street ride alongside its name, so preferring them
-    IS the fix. A feature with only a name is accepted only when it is a
-    way you physically stand on (osm_key "highway" — a park path, a
-    bridge); a park polygon or shop with no address yields None and the
-    caller's coordinate fallback.
+    """An address field needs an address, never the nearest business's
+    name — reverse is the one direction where `name` must lose:
+    reverse-geocoding a point right outside Lucali (a Carroll Gardens
+    restaurant) would otherwise label the start field "Lucali" instead of
+    "575 Henry Street". In Photon's shape the POI's own housenumber/street
+    ride alongside its name, so preferring them is the fix. A feature
+    with only a name is accepted only when it is a way you physically
+    stand on (osm_key "highway" — a park path, a bridge); a park polygon
+    or shop with no address yields None and the caller's coordinate
+    fallback.
     """
     street = props.get("street")
     if props.get("housenumber") and street:

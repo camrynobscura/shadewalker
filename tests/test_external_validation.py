@@ -1,15 +1,14 @@
-"""The external-engine DISCOVERY harness (FIXES item 5).
+"""The external-engine discovery harness.
 
 Compares fresh random NONE-priority routes against independent engines to
-surface leads -- the technique that found the id-collision, Williamsburg,
-phantom-connector, and Queensboro bugs. Split deliberately in two:
+surface leads -- the technique that finds missing connections and phantom
+welds. Split deliberately in two:
 
-- REGRESSION pins (the objective half) live in test_route_regressions.py's
-  anchor-band section and run in the default citywide tier with no network
-  (resurrected 2026-08-28 with sidewalk-model numbers; the sites and the
-  band reasoning are the v19 batch's).
-- DISCOVERY (this file) hits live third-party servers, so it is opt-in
-  twice over: marked `external` AND skipped unless --run-external is
+- Regression pins (the objective half) live in test_route_regressions.py's
+  anchor-band section and run in the default citywide tier with no
+  network.
+- Discovery (this file) hits live third-party servers, so it is opt-in
+  twice over: marked `external` and skipped unless --run-external is
   passed (see conftest.py) -- a stray `-m` expression can never trigger
   live traffic from CI or a default run.
 
@@ -50,7 +49,7 @@ from external_engines import (
 
 # Same-ish-length pairs: long enough that a detour is unambiguous, short
 # enough that both engines' path-choice variance stays small relative to
-# the flag thresholds. Carried over from the proven ad-hoc batches.
+# the flag thresholds.
 STRAIGHT_LINE_MIN_M = 1500.0
 STRAIGHT_LINE_MAX_M = 6000.0
 
@@ -99,7 +98,7 @@ def test_random_batch_against_external_engines(citywide_store, request):
         if ours is None:
             # Cross-component pairs and far snaps aren't length comparisons;
             # tallied rather than dropped silently -- the cross-component
-            # rate is itself a signal for FIXES item 1's orphaned scraps.
+            # rate is itself a signal for orphaned scraps.
             skips[our_err] = skips.get(our_err, 0) + 1
             continue
 
@@ -121,8 +120,8 @@ def test_random_batch_against_external_engines(citywide_store, request):
         if flag:
             # Ferry short-circuit: OSRM rides ferries and we don't, so an
             # OURS_LONG flag against OSRM is most often just a ferry. Ask
-            # OSRM's OWN route (steps carry mode=ferry) before spending an
-            # arbiter call -- 11 of the 1,000-route campaign's 13 flags were
+            # OSRM's own route (steps carry mode=ferry) before spending an
+            # arbiter call -- 11 of 13 flags in a 1,000-route batch were
             # this. Only meaningful when OSRM was the primary and OSRM read
             # short; a ferry can't explain an OURS_SHORT flag.
             ferry = None
@@ -181,7 +180,7 @@ def test_random_batch_against_external_engines(citywide_store, request):
               f"{lead['arbiter_engine']}={lead['arbiter_m']}m (ratio {lead['ratio']})")
         print(f"  pair: {a[0]},{a[1]} -> {b[0]},{b[1]}")
         print(f"  route: {google_walking_directions_url(a, b)}")
-        print("  triage ritual (see HISTORY 2026-08-15, Queensboro):")
+        print("  triage ritual:")
         print("   1. draw both routes; find WHERE they diverge (the gap, not the detour)")
         print("   2. check what's physically at the gap: real OSM ways/tags, not assumptions")
         print("   3. if a connection looks missing: way-membership audit before any bridge")

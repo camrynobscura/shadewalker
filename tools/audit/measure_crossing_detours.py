@@ -4,13 +4,12 @@ THE RISK THIS TESTS
 -------------------
 A sidewalk-only model routes across a street only where OSM has mapped a
 `footway=crossing`. Where one is missing, the two sides of a street stay
-CONNECTED (so a component-count check sees nothing wrong) but only via a
+connected (so a component-count check sees nothing wrong) but only via a
 crossing hundreds of metres away. The router then walks you to the
 corner, across, and back.
 
-That is the same failure the centerline gap ledger exists to fix, just
-relocated -- so before betting a rewrite on the sidewalk model, measure
-it directly rather than inferring it from connectivity.
+A component count cannot see that, so this measures it directly rather
+than inferring it from connectivity.
 
 METHOD
 ------
@@ -27,9 +26,9 @@ question is "how often and how badly", not "does it ever happen".
 
 Local only. Four boroughs; Staten Island excluded.
 
-PROMOTED TO A TEST 2026-08-28 (PLAN `citywide-guards`):
+ALSO A TEST (#44):
 tests/test_citywide_invariants.py's crossing-detour test runs this method
-against the EXPORT graph (the one that actually routes) on every citywide
+against the export graph (the one that actually routes) on every citywide
 pytest run, re-baselined there because the populations differ (this
 tool's raw-pbf graph read median 12m / 3.1% > 200m; the export reads
 13.5m / 2.13%). This tool stays as the pbf-side instrument: when the test
@@ -61,8 +60,7 @@ from tools.audit.measure_sidewalk_only_coverage import (  # noqa: E402
 
 from pipeline import config  # noqa: E402
 
-# The pinned extract, from the one place that defines it -- this line
-# used to be a copy in each of these scripts.
+# The pinned extract, from the one place that defines it.
 EXTRACT = config.OSM_EXTRACT_PATH
 BOROUGHS = os.path.join(REPO, "data", "raw", "socrata",
                         "borough_boundaries_wh2p-dxnf.geojson")

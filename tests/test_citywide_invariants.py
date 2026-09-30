@@ -6,13 +6,10 @@ drawn length matches its reported length, crossing the street never takes
 a silent multi-hundred-meter detour, and raising Shade_priority never
 lowers the shade a route reports.
 
-The near-coincident-disconnected-nodes sweep lived here until 2026-08-23
-and was removed with the centerline scoring code: its bug signature --
-close in reality, far in the graph -- is just a street in a sidewalk
-model. The crossing-detour distribution test below is its replacement
-(PLAN's `citywide-guards`): it asks the same underlying question ("can
-you get between two nearby points without an absurd walk?") in the one
-form that IS a defect signal on this model.
+"Close in reality, far in the graph" is just a street in a sidewalk
+model, so the crossing-detour distribution test below asks "can you get
+between two nearby points without an absurd walk?" in the one form that
+is a defect signal here.
 
 These run automatically whenever data/export/ holds a built export, and skip
 cleanly otherwise so CI and a fresh clone never fail for lack of the
@@ -31,27 +28,14 @@ import pytest
 from server.graph_store import _local_distance_m, clamp_shade_monotonic
 
 
-# --- Multi-tile merge integrity (FIXES.md, 2026-08-13) ----------------------
-# A synthetic-node id collision (interior sidewalks 1a + park trails 1g number
-# synthetic nodes per-tile from -1, and graph_store.load() merges on id,
-# first-tile-wins) wormholed 94.5k edges into false cross-city shortcuts:
-# plausible length_m, geometry teleporting between boroughs (up to 49km). The
-# invariant that should have caught it existed (test_route_invariants.py's
-# alignment test) but was silently narrowed to the pilot fixture on
-# 2026-07-17 -- one tile, no synthetic nodes, no merge, so the bug could not
-# appear there.
-#
-# The invariants below outlived the centerline model -- they say nothing
-# about HOW the graph was built, only that an edge is never shorter than
-# its own chord, that geometry ends where its nodes are, and that a route's
-# drawn length matches its reported length.
-#
-# They RUN as of 2026-08-23, against the real citywide export. They had been
-# skipping silently for weeks: citywide_store required 10+ tile files, a
-# threshold from the 276-tile centerline grid, and the sidewalk model writes
-# exactly one -- so the gate could never be satisfied and present data
-# yielded zero coverage. Exactly the vacuous pass that let the id collision
-# survive 200+ tests. There is no fast-tier fixture behind them any more, so
+# --- Merge integrity --------------------------------------------------------
+# graph_store.load() merges every export file it finds. These invariants say
+# nothing about how the graph was built, only that an edge is never shorter
+# than its own chord, that geometry ends where its nodes are, and that a
+# route's drawn length matches its reported length -- a merge that remaps
+# an endpoint to another file's node leaves a plausible length_m attached
+# to endpoints kilometres apart, and a route whose geometry teleports
+# between boroughs. There is no fast-tier fixture behind them, so
 # `-m "not citywide"` genuinely skips them; don't read that run as green.
 
 MERGE_STORES = [
@@ -66,11 +50,11 @@ EDGE_LENGTH_SLACK_M = 2.0  # 6dp coord + 0.1m length rounding leaves real
 EDGE_LENGTH_SLACK_RELATIVE = 0.002  # plus 0.2% of length_m: length_m comes
 # from summed UTM-projected segment distances, the chord below from a
 # flat-earth degree approximation, and neither matches a true ellipsoid
-# distance exactly -- on a multi-km DEAD-STRAIGHT edge (real case: 2.7km
-# boardwalk-style synthetic paths, where chord == polyline) those
-# approximations disagree by ~0.15%, tripping a purely absolute slack. A
-# wormhole's length_m is short while its chord is huge, so a fraction OF
-# LENGTH_M adds essentially nothing to what a wormhole is allowed.
+# distance exactly -- on a multi-km dead-straight edge (a 2.7km boardwalk,
+# where chord == polyline) those approximations disagree by ~0.15%,
+# tripping a purely absolute slack. A wormhole's length_m is short while
+# its chord is huge, so a fraction of length_m adds essentially nothing to
+# what a wormhole is allowed.
 
 GEOMETRY_ENDPOINT_TOL_M = 1.0  # metric, not the pilot test's 1e-6 deg: a few
 # hundred citywide edges sit rounding-scale (<=0.2m) off their nodes; 1m
@@ -82,8 +66,8 @@ def test_no_edge_is_shorter_than_the_straight_line_between_its_endpoints(store_f
     """Physical invariant: an edge's stored length_m can never be less than
     the straight-line distance between its own two endpoint nodes -- a path
     is at least its chord. A merge that remaps an endpoint to a different
-    tile's node (the synthetic-id collision) leaves a plausible short
-    length_m attached to endpoints kilometers apart, which this catches
+    file's node leaves a plausible short length_m attached to endpoints
+    kilometers apart, which this catches
     decisively. Independent of geometry storage, so it cross-checks the
     alignment invariant below rather than restating it."""
     store = request.getfixturevalue(store_fixture)
@@ -111,12 +95,9 @@ def test_no_edge_is_shorter_than_the_straight_line_between_its_endpoints(store_f
 
 @pytest.mark.parametrize("store_fixture", MERGE_STORES)
 def test_every_edge_geometry_starts_and_ends_at_its_own_nodes_citywide(store_fixture, request):
-    """Multi-tile sibling of test_route_invariants.py's pilot-scoped alignment
-    test -- the merge coverage that test's own docstring promised ('once
-    Stage 2 adds more tiles it also validates the packing across the
-    multi-tile merge') but never got once fixture isolation pinned it to the
-    single pilot tile. Metric tolerance instead of 1e-6 deg for the same
-    rounding reason as the length invariant above."""
+    """Every edge's packed geometry lands on its own endpoint nodes, over
+    the whole merged graph. Metric tolerance instead of 1e-6 deg for the
+    same rounding reason as the length invariant above."""
     store = request.getfixturevalue(store_fixture)
     misaligned = []
     for edge in range(len(store._length)):
@@ -146,9 +127,9 @@ def test_every_edge_geometry_starts_and_ends_at_its_own_nodes_citywide(store_fix
 @pytest.mark.parametrize("store_fixture", MERGE_STORES)
 def test_route_geometry_length_matches_reported_length(store_fixture, request):
     """A returned route's drawn polyline and its reported length_m must
-    describe the same path. The synthetic-id collision produced routes with
-    a plausible length_m but geometry teleporting across the city -- caught
-    here because the polyline summed from the returned coords then dwarfs
+    describe the same path. A bad merge produces routes with a plausible
+    length_m but geometry teleporting across the city -- caught here
+    because the polyline summed from the returned coords then dwarfs
     length_m. The user-visible half of the invariant, complementing the
     per-edge checks above. Same sampling shape as the shade sweep."""
     store = request.getfixturevalue(store_fixture)
@@ -197,21 +178,21 @@ def test_route_geometry_length_matches_reported_length(store_fixture, request):
 
 
 
-# --- Crossing the street (PLAN `citywide-guards`, 2026-08-28) ----------------
+# --- Crossing the street ----------------------------------------------------
 # A sidewalk-only model routes across a street only where OSM maps a
-# crossing. Where one is missing, the two sides stay CONNECTED (component
+# crossing. Where one is missing, the two sides stay connected (component
 # counts see nothing) but only via a crossing far away -- the walker gets
 # marched to a distant corner and back. tools/audit/measure_crossing_detours.py
 # measured this on the raw pbf (median 12m, 3.1% > 200m, 2026-08-22, four
-# boroughs); this is that method promoted to a test against the EXPORT
-# graph, i.e. the graph that actually routes, re-baselined there because
-# the two populations differ (the export is clipped, deduped, and split).
+# boroughs); this is that method as a test against the export graph, i.e.
+# the graph that actually routes, re-baselined there because the two
+# populations differ (the export is clipped, deduped, and split).
 #
 # Baseline on the export, seed 20260828, 2026-08-28: over 1500 sampled
 # pairs, median 13.5m, p90 34.9m, 2.13% over 200m, worst 1129.8m. The test
 # samples 500 (runtime), where the full-run values are median 13.5m /
 # 2.2% -- deterministic on a fixed export; the bands below are sized for
-# legitimate drift across REBUILDS (a fresh OSM pin is effectively a new
+# legitimate drift across rebuilds (a fresh OSM pin is effectively a new
 # 500-pair draw: binomial sd at 2.13%/500 is ~0.65pt, so the 4.5% ceiling
 # sits ~3.6 sd out, and the pbf-era 3.1% level stays comfortably inside).
 # A real regression -- a pipeline change that drops crossings wholesale --
@@ -286,15 +267,12 @@ def test_crossing_the_street_stays_a_short_walk(citywide_store):
     )
 
 
-# --- Shade monotonicity (restored 2026-08-28, PLAN `citywide-guards`) --------
-# Deleted 2026-08-23 with the centerline scoring code, with an explicit
-# "rebuild when sidewalk scoring produces non-zero shade" note; scoring has
-# been live since `per-side-trees`. Raising Shade_priority must never
-# LOWER the shade a route reports. The invariant holds POST-CLAMP, which
-# is what users see: the frontend always requests the full preset ladder
-# in one call and app.py runs clamp_shade_monotonic over the batch --
-# querying one weight alone skips the clamp (this project's
-# best-documented trap; see server/graph_store.py).
+# --- Shade monotonicity -----------------------------------------------------
+# Raising Shade_priority must never lower the shade a route reports. The
+# invariant holds post-clamp, which is what users see: the frontend always
+# requests the full preset ladder in one call and app.py runs
+# clamp_shade_monotonic over the batch -- querying one weight alone skips
+# the clamp (see server/graph_store.py).
 #
 # Seeded and bounded here; scripts/fuzz_shade_monotonicity.py is the
 # fresh-entropy broad-sweep sibling (500+ routes, any months) for
@@ -351,13 +329,13 @@ def test_raising_shade_priority_never_lowers_reported_shade(citywide_store):
     )
 
 
-# ── building shade can only add (PLAN `building-shadows`, PR 2) ─────────────
+# ── building shade can only add (#109) ──────────────────────────────────────
 #
-# Two forms of the one-way promise, on the REAL export. Per edge: the union
+# Two forms of the one-way promise, on the real export. Per edge: the union
 # rule makes trees + buildings >= trees alone at every moment. Per route at
 # priority NONE: the shortest path never changes, so its reported shade can
 # only rise when buildings join. Both are vacuous on an export whose table
-# is all zero (one built before the shade step), so that case SKIPS and
+# is all zero (one built before the shade step), so that case skips and
 # says so rather than passing quietly -- a zero table is a broken
 # instrument, not a clean pass.
 

@@ -1,14 +1,14 @@
 """The one-run start-edge fold in GraphStore._best_plan must pick exactly
-what the two-run search it replaced picked.
+what a two-run search picks.
 
 THE CLAIM
 ---------
 A snap point sits partway along an edge, so a search can't start there.
-Until 2026-09-09 route() ran Dijkstra from EACH endpoint of the start
-edge and kept the cheaper total. Now it runs once from the nearer
+The obvious search runs Dijkstra from each endpoint of the start edge
+and keeps the cheaper total. The fold runs once from the nearer
 endpoint, with the start edge re-priced at (far lead-in - near lead-in)
 in the request's own cost array: every node then settles at
-min(via near, via far), which is what the two runs computed between
+min(via near, via far), which is what the two runs compute between
 them. This file keeps the two-run search as a reference and checks the
 fold against it plan-for-plan -- entry node, exit node, edge list --
 across a jittered grid, every preset weight, and the snap positions
@@ -112,8 +112,8 @@ def store(tmp_path_factory) -> GraphStore:
 
 
 def _two_run_plan(store, start, end, costs):
-    """The search route() ran before the fold, verbatim in behaviour:
-    Dijkstra from each start endpoint, one-to-many to both end
+    """The reference search: Dijkstra from each start endpoint,
+    one-to-many to both end
     endpoints, strict minimum over the four totals, then the same-edge
     direct hop compared like any other candidate."""
     graph = store._graph

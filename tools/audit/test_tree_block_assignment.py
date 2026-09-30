@@ -14,7 +14,7 @@ tree actually belongs to.
 
 WHAT MAKES THIS MEASURABLE -- ground truth, not a proxy
 -------------------------------------------------------
-NYC publishes a second dataset of the PLANTING SPACES (tree pits), and
+NYC publishes a second dataset of the planting spaces (tree pits), and
 unlike the tree records those carry a street name and a `physicalid` --
 the CSCL segment id our block faces hang off. Every tree names its own
 planting space. So:
@@ -39,10 +39,10 @@ TRAPS, BOTH ALREADY HIT
     unpadded, in the same column. Comparing raw strings scores 39.3%
     instead of 97.7%, which is a deceptive number: not the clean 0% that
     would obviously read as a bug. Normalise with int().
-  - Do not quote an agreement rate without the UNAMBIGUOUS subset beside
+  - Do not quote an agreement rate without the unambiguous subset beside
     it. If trees that are nowhere near a corner also disagree, the
-    instrument is broken and there is no finding. That calibration is the
-    step whose absence produced three false alarms on 2026-08-23.
+    instrument is broken and there is no finding. Skipping that
+    calibration has produced false alarms before.
 
 Read-only. ~10 min, dominated by the per-tree nearest-kerb search.
 """

@@ -5,22 +5,19 @@
 WHY THIS EXISTS
 ---------------
 web/playwright.config.ts boots a real backend against
-tests/fixtures/pilot.json.gz before running any spec. That file was deleted
-on 2026-08-23 with the centerline model, so since then the ENTIRE e2e tier
-has aborted before running a single test -- the config's `cp` step fails and
-uvicorn never starts. Nothing frontend has been verifiable automatically
-since.
+tests/fixtures/pilot.json.gz before running any spec; without that file the
+config's `cp` step fails, uvicorn never starts, and the whole e2e tier
+aborts before running a single test.
 
-pytest does NOT need this file. conftest.py deleted every pilot fixture at
-the same time; tests that need a graph build their own synthetic tile with
-tmp_path. This is for the browser tier alone.
+pytest does not need this file: tests that need a graph build their own
+synthetic export with tmp_path. This is for the browser tier alone.
 
 WHERE IT MUST LAND
 ------------------
-tests/fixtures/, and NEVER data/export/. The server globs *.json.gz in
+tests/fixtures/, and never data/export/. The server globs *.json.gz in
 EXPORT_DIR and loads everything it finds, so a fixture sitting beside real
-data once injected 559 duplicate edges into a citywide graph. The root
-CLAUDE.md carries that rule; this script hard-fails rather than trust it.
+data would inject its edges into the citywide graph. This script hard-fails
+rather than trust the caller to remember.
 
 WHAT THE SPECS REQUIRE OF IT
 ----------------------------
@@ -38,7 +35,7 @@ turns a real regression into a confusing spec failure.
 
 EDGE SELECTION
 --------------
-An edge is kept when BOTH endpoints are inside the bbox, and the node set is
+An edge is kept when both endpoints are inside the bbox, and the node set is
 then exactly the endpoints of the kept edges. Keeping an edge with one
 endpoint outside would leave a dangling node reference, which GraphStore
 would either drop or choke on -- neither of which should be discovered from
@@ -133,13 +130,13 @@ def main() -> int:
         return 1
 
     # A non-empty side means the edge matched a block face and went through
-    # scoring (compass words since 2026-08-28; some scored edges legitimately
-    # read "" on diagonals/curves, so this UNDERCOUNTS a little -- fine for
-    # a sanity statistic that exists to catch "all zeroed").
+    # scoring (some scored edges legitimately read "" on diagonals/curves,
+    # so this undercounts a little -- fine for a sanity statistic that
+    # exists to catch "all zeroed").
     scored = [e for e in kept_edges if e["side"]]
     trees = sum(e["tree_count"] for e in kept_edges)
     logger.info(f"  {len(scored):,} scored pavement edges, "
-                f"{trees:,.0f} trees -- the fixture carries REAL shade, so "
+                f"{trees:,.0f} trees -- the fixture carries real shade, so "
                 f"e2e exercises the shade path rather than a zeroed one")
 
     problems = []

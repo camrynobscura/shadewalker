@@ -4,8 +4,8 @@ import { useLocationFill } from './useLocationFill'
 
 // The accuracy gate and settle timeout are pure timing/threshold logic —
 // exactly what Playwright can't exercise (its mock geolocation grants one
-// fixed position) and what froze a coarse cell-tower fix into the start
-// point on a real phone (field test, 2026-09-02). Same stubbing approach
+// fixed position) and what can freeze a coarse cell-tower fix into the
+// start point on a real phone. Same stubbing approach
 // as useGeolocation.test.ts, one layer up.
 describe('useLocationFill', () => {
   const watchPosition = vi.fn()

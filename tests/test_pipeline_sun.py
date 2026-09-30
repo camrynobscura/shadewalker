@@ -7,7 +7,7 @@ What is pinned, and why:
     ~72.7 deg due south, December 21 ~25.9 deg. Catches a wrong observer,
     a wrong unit, or the naive-datetime trap (a UTC-read noon would peak
     hours late and degrees low).
-  - ONE table serves the city. Measured 2026-09-24 over every daylight
+  - One table serves the city. Measured 2026-09-24 over every daylight
     anchor slot: the four CITY_BBOX corners differ from the observer point
     by at most 0.31 deg elevation / 1.00 deg azimuth. The 0.5 / 1.5 deg
     tolerances are the physical bar, not the measurement: a 1.5 deg

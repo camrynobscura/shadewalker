@@ -1,4 +1,4 @@
-"""The malloc-arena cap (`server-memory`): applied on Linux, a no-op
+"""The malloc-arena cap (#111): applied on Linux, a no-op
 elsewhere, and applied when server/app.py is imported -- before the heavy
 imports and before startup, which a measurement showed is what it takes."""
 import sys
@@ -21,7 +21,7 @@ def test_importing_the_app_already_applied_the_cap():
 
 
 def test_the_cap_sits_above_the_heavy_imports():
-    # The ordering IS the fix (a later cap left a second 47 MB arena), so
+    # The ordering is the fix (a later cap left a second 47 MB arena), so
     # pin it: the cap line must come before fastapi and graph_store load.
     source = open(server_app.__file__).read()
     cap = source.index("MALLOC_ARENAS_CAPPED = limit_malloc_arenas(")

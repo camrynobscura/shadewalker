@@ -1,12 +1,12 @@
 import type { GeocodeResult } from './api'
 
 /** Recently-entered addresses, purely local (localStorage, nothing sent
- * anywhere). Only DELIBERATE entries of a COMPLETED route get recorded —
+ * anywhere). Only deliberate entries of a completed route get recorded —
  * a picked suggestion or resolved typed text, committed the moment a
  * route draws (useAddressField holds the pending entry; Controls
  * commits on route arrival). Map taps and location fills never land
  * here: their reverse-geocoded "nearest thing" labels are noise, not
- * something the user chose to type (user calls 2026-09-03). */
+ * something the user chose to type. */
 
 const STORAGE_KEY = 'sw-recents'
 export const RECENTS_CAP = 5

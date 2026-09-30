@@ -3,11 +3,9 @@ import react from '@vitejs/plugin-react'
 
 // Where the frontend forwards API calls. Defaults to the ordinary dev
 // backend; playwright.config.ts overrides it so the e2e tier can run its own
-// backend on its own port WITHOUT colliding with a dev server you already
-// have up. Before that, the e2e tier reused whatever was listening on 8000 —
-// which meant a running citywide server silently supplied the wrong data and
-// the out-of-coverage spec failed for a reason that had nothing to do with
-// the code. That happened twice in one session on 2026-08-24.
+// backend on its own port without colliding with a dev server you already
+// have up (a tier that reuses whatever is listening on 8000 silently tests
+// against a citywide server's data instead of the pilot fixture).
 const API_TARGET = process.env.SHADEWALKER_API_URL ?? 'http://localhost:8000'
 
 // https://vite.dev/config/
@@ -15,8 +13,8 @@ export default defineConfig({
   plugins: [react()],
   build: {
     rollupOptions: {
-      // Two entries: the app, and the static About page (plain HTML, no
-      // React) -- served by the same static mount in production.
+      // Two entries: the app, and the About page (its own React entry) --
+      // served by the same static mount in production.
       input: { main: 'index.html', about: 'about.html' },
     },
   },

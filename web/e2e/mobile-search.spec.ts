@@ -2,12 +2,12 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { mockGeocode } from './fixtures'
 
-// The full-screen search mode (2026-09-02): on the mobile layout a focused
-// address field expands to a fixed full-screen layer with the input at the
-// TOP of the screen. That geometry IS the iOS keyboard fix — Safari
-// scrolled the window to lift a mid-screen input above the keyboard,
-// exposing bare canvas below the one-screen-tall app (the "green box");
-// a top-of-screen input gives it nothing to scroll for. Playwright can't
+// The full-screen search mode: on the mobile layout a focused address
+// field expands to a fixed full-screen layer with the input at the top
+// of the screen. That geometry is the iOS keyboard fix — Safari scrolls
+// the window to lift a mid-screen input above the keyboard, exposing
+// bare canvas below the one-screen-tall app; a top-of-screen input gives
+// it nothing to scroll for. Playwright can't
 // raise a real iOS keyboard, so these specs pin the geometry and the
 // expand/collapse lifecycle — the parts a desktop regression would break
 // silently.
@@ -55,7 +55,7 @@ test('CANCEL collapses the overlay and keeps the typed text', async ({ page }) =
   await expect(start).toHaveValue('court')
   // Focus parks on the field's own box (the nearest script-focusable
   // ancestor), not <body>: the next Tab / VoiceOver swipe continues from
-  // the field just edited (2026-09-23). Never the input — that would
+  // the field just edited. Never the input — that would
   // reopen the keyboard and the overlay with it.
   await expect(start.locator('xpath=ancestor::*[@tabindex="-1"][1]')).toBeFocused()
   await expect(start).not.toBeFocused()

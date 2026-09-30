@@ -316,8 +316,4 @@ describe('useRouteQuery', () => {
     act(() => result.current.setWalkTime({ ...sunday }))
     expect(fetchRoute).toHaveBeenCalledTimes(1)
   })
-
-  // clear() was removed with the CLEAR_ROUTE button (2026-09-02): fields
-  // clear individually via each field's ✕, and the wordmark's home link
-  // is the full reset.
 })

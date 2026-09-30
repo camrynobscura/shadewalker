@@ -3,16 +3,16 @@
 No network: get_with_retry is monkeypatched, the same approach
 test_pipeline_fetch_socrata.py takes with its own retry tests.
 
-What is worth pinning here, and why each one bit at some point:
+What is worth pinning here, and why:
 
   - `$order=:id`. Pavement Edge has no `objectid` column, so ordering on
     that returns 400 and the fetch dies. The param is easy to "tidy" into
     something more conventional years later.
   - A short page ends paging. Getting this wrong either truncates a layer
     or loops forever.
-  - The cache is GZIPPED and round-trips. These layers are 182MB gzipped;
+  - The cache is gzipped and round-trips. These layers are 182MB gzipped;
     a change to plain .json would quietly cost a gigabyte of disk.
-  - The write is ATOMIC and leaves no .tmp behind when it fails. A
+  - The write is atomic and leaves no .tmp behind when it fails. A
     half-written 182MB cache read back as JSON is a confusing failure a
     long way from its cause.
   - An unknown layer name raises rather than silently fetching nothing.

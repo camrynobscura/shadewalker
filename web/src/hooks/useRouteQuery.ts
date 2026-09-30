@@ -7,10 +7,10 @@ import { sameWalkTime, type WalkTime } from '../walkTime'
 const TREE_WEIGHTS = TREE_PRESETS.map((preset) => preset.value)
 
 /** How long one route request may take before the client gives up. The
- * slowest live route measured after the 2026-09-09 fold was ~1s for
- * 13km, and the box has one worker, so anything past 10s is a stuck
- * worker or a queue of visitors, not a long walk (user call
- * 2026-09-09). Without this, a hung server showed the vine forever. */
+ * slowest live route measured was ~1s for 13km (2026-09-09), and the box
+ * has one worker, so anything past 10s is a stuck worker or a queue of
+ * visitors, not a long walk. Without this, a hung server shows the vine
+ * forever. */
 export const ROUTE_TIMEOUT_MS = 10_000
 
 /** The trip a route was asked for: a snapshot of the fields at FIND_ROUTE,
@@ -78,15 +78,14 @@ export interface UseRouteQueryResult {
  * points the server returns alongside a route.
  *
  * On a phone (`auto` false) routes are fetched on FIND_ROUTE
- * (`findRoute`), not whenever both points exist (user, 2026-09-27): the
- * phone panel is two screens, and the button is the checkpoint where a
- * wrong address gets caught before the app moves on. Points given at
- * mount (a shared link's) count as already found. Editing a field keeps
- * the drawn route until the next FIND_ROUTE; emptying one clears it,
- * since there's no trip left. On desktop (`auto` true) there's no second
- * screen to move to, so no button either: the fields' trip is routed the
- * moment it's complete, and again whenever it changes (user,
- * 2026-09-27 -- the behaviour from before FIND_ROUTE). Deliberately doesn't touch
+ * (`findRoute`), not whenever both points exist: the phone panel is two
+ * screens, and the button is the checkpoint where a wrong address gets
+ * caught before the app moves on. Points given at mount (a shared
+ * link's) count as already found. Editing a field keeps the drawn route
+ * until the next FIND_ROUTE; emptying one clears it, since there's no
+ * trip left. On desktop (`auto` true) there's no second screen to move
+ * to, so no button either: the fields' trip is routed the moment it's
+ * complete, and again whenever it changes. Deliberately doesn't touch
  * the URL — App.tsx mirrors the returned start/end/treeWeight to the query
  * string itself, a separate concern that doesn't need to know how the
  * fetch works.
@@ -125,15 +124,15 @@ export function useRouteQuery(
   // The request whose fetch last finished, answered or failed (a
   // superseded one never finishes). Loading is worked out from it rather
   // than stored, so a trip replaced or emptied mid-fetch can't leave it on
-  // -- emptying a field once left the vine running with no trip at all.
+  // -- otherwise emptying a field leaves the vine running with no trip at
+  // all.
   const [settled, setSettled] = useState<RouteRequest | null>(null)
   const loading = request !== null && settled !== request
 
-  // Desktop: the complete trip in the fields IS the request. Adjusted
+  // Desktop: the complete trip in the fields is the request. Adjusted
   // while rendering (React's pattern for state that follows other state)
   // rather than in an effect, so the fetch can't lag a render behind. A
-  // failed trip isn't retried until something in it changes -- the same
-  // as before FIND_ROUTE existed.
+  // failed trip isn't retried until something in it changes.
   if (auto && start && end) {
     const fields = { start, end, walkTime, layers }
     if (!sameRequest(request, fields)) {
@@ -182,7 +181,7 @@ export function useRouteQuery(
     setError(null)
   }
 
-  // Fetch whenever a new trip is requested -- deliberately NOT on
+  // Fetch whenever a new trip is requested -- deliberately not on
   // treeWeight, see this hook's own doc comment above. The
   // AbortController in the cleanup cancels the in-flight request each
   // time a newer one supersedes it (e.g. FIND_ROUTE again before the
@@ -213,10 +212,9 @@ export function useRouteQuery(
         // (e.g. outside coverage) — show that. A timeout gets its own
         // line. Anything else (no network, a dropped request, a 5xx from
         // the proxy) gets the generic fallback instead of a raw fetch
-        // error. Worded for the person on a phone, not the developer —
-        // "is the server running?" shipped to a real user's screen via a
-        // flaky tunnel (2026-09-02). Controls' error slot prefixes
-        // "// ERROR:", so these read as its sentence body.
+        // error. Worded for the person on a phone, not the developer.
+        // Controls' error slot prefixes "// ERROR:", so these read as its
+        // sentence body.
         if (err instanceof DOMException && err.name === 'TimeoutError') {
           setError('the server took too long — try again')
         } else {

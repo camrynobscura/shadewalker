@@ -3,18 +3,17 @@
 WHAT THIS IS
 ------------
 The instrument that falsified two shade fixes and verified the third
-during `park-canopy` (history/park-canopy.md): draw N seeded random
+during `park-canopy` (#39): draw N seeded random
 walk-length pairs citywide, route each at every Shade_priority weight
-THROUGH THE FULL BATCH (clamp_shade_monotonic needs the whole ladder --
+through the full batch (clamp_shade_monotonic needs the whole ladder --
 querying one weight alone silently skips the clamp, this project's
 best-documented trap), and record length / shade / sunny metres per
 route. Two result files from two exports diff into a verdict.
 
-The original lived in the session scratchpad and was wiped; this rebuild
-uses the same seed (20260825) but the pair recipe was re-derived, so
-numbers are comparable BETWEEN RUNS OF THIS TOOL, not against the
-figures quoted in history/park-canopy.md. An A/B needs both runs from
-this same script -- which is the only use it has.
+An earlier one-off script did that work; this version uses the same seed
+(20260825) but a re-derived pair recipe, so numbers are comparable
+between runs of this tool only. An A/B needs both runs from this same
+script -- which is the only use it has.
 
 USAGE
 -----
@@ -54,17 +53,16 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("harness")
 
 DEFAULT_SEED = 20260825
-# 800, not the original 400: THIS recipe draws uniformly over CITY_BBOX,
-# which includes water and out-of-city corners, and yields ~23% routable
-# (measured 2026-08-27: 93/400). 800 draws restores roughly the ~188
-# routable pairs the original harness worked with.
+# 800 draws: this recipe draws uniformly over CITY_BBOX, which includes
+# water and out-of-city corners, and yields ~23% routable (measured
+# 2026-08-27: 93/400), so 800 gives roughly 188 routable pairs.
 DEFAULT_PAIRS = 800
 DEFAULT_WEIGHTS = [0.0, 5.0, 15.0, 40.0]
 DEFAULT_MONTH = 7
 # A realistic walk request, not a commute: the same band the external
 # validation harness settled on. Draws outside it are discarded BEFORE
 # any routing, and the discard count is recorded -- "say what you
-# divided by" (CLAUDE.md).
+# divided by".
 MIN_PAIR_M, MAX_PAIR_M = 500.0, 5000.0
 
 

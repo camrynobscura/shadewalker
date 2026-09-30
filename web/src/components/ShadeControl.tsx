@@ -8,8 +8,8 @@ interface ShadeControlProps {
   onChange: (layers: ShadeLayers) => void
 }
 
-/** The shade pill, beside the time pill (PLAN `time-and-layers`, user
- * 2026-09-28/29): All shade, Tree shade or Building shade -- which kinds
+/** The shade pill, beside the time pill (#121): All shade, Tree shade or
+ * Building shade -- which kinds
  * of shade the routes are scored by, and the route rows count. It opens
  * the same small white menu as the time pill; a pick applies and closes
  * it. The caller decides what a change does, as for the time pill: the

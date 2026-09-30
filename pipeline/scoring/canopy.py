@@ -19,20 +19,19 @@ Selection is by KIND, never by geometry:
                            HIERARCHY, not a blend: every edge is scored by
                            exactly one instrument, so neighbouring blocks
                            stay comparable.
-    crossings + islands    zero by user decision (2026-08-24); a crossing
-                           runs ACROSS a roadway. Never touched by either
-                           function here.
+    crossings + islands    zero by design; a crossing runs across a
+                           roadway. Never touched by either function
+                           here.
     everything else        score_park_paths. "What fraction of this
                            pavement is under canopy" is already a fraction
                            at any length, so there is no denominator to
                            build and none of the block-face machinery
                            applies.
 
-WHERE FORESTRY HAS NO ANSWER (score_sidewalk_fallback, 2026-08-27)
-------------------------------------------------------------------
+WHERE FORESTRY HAS NO ANSWER (score_sidewalk_fallback)
+------------------------------------------------------
 Two sidewalk populations read 0% while the satellite saw real canopy
-overhead (all numbers measured 2026-08-27; the instrument reproduced the
-build tally exactly before its new numbers were trusted):
+overhead (measured 2026-08-27):
 
   no_face        2,325 edges / 66.5 km: sidewalk-tagged pavement with no
                  kerb within BLOCK_FACE_MAX_M -- boardwalks, esplanades,
@@ -57,20 +56,18 @@ ways: a street mislabeled park gets the raster, which reads bare as bare;
 park pavement mislabeled street keeps today's zero. The original
 no-mixing fear does not apply to fallback: for a no-answer edge the
 alternative is not Forestry's number, it is a hard zero, the least
-comparable score pavement can have. Deliberately NOT falling back:
-ordinary treeless streets (their leafy tail is unrecorded PRIVATE canopy,
-the raster blend the user declined 2026-08-26), and the state/federal
-parks the city list omits (39 km measuring ~10% mean canopy -- near-bare,
-not worth dragging an OSM area pass into the build).
+comparable score pavement can have. Deliberately not falling back:
+ordinary treeless streets (their leafy tail is unrecorded private canopy),
+and the state/federal parks the city list omits (39 km measuring ~10% mean
+canopy -- near-bare, not worth dragging an OSM area pass into the build).
 
 NOT A THIRD INSTRUMENT: BUILDING SHADE
 --------------------------------------
-pipeline/scoring/shadows.py (`building-shadows`, 2026-09) scores the
-shadows buildings cast on every edge, per month and hour. That is a
-second physical LAYER over the same pavement, not another canopy
-instrument: it never enters the hierarchy above, and the server combines
-it with the tree fraction by union at request time
-(server/graph_store.py, _edge_density). Nothing here changes because of it.
+pipeline/scoring/shadows.py scores the shadows buildings cast on every
+edge, per month and hour. That is a second physical layer over the same
+pavement, not another canopy instrument: it never enters the hierarchy
+above, and the server combines it with the tree fraction by union at
+request time (server/graph_store.py, _edge_density).
 
 THE SCORE
 ---------
@@ -80,14 +77,13 @@ DENSITY_AT_FULL_COVERAGE is the measured leaf-cover exchange rate (see its
 comment in pipeline/config.py), so a fully covered path scores exactly the
 density at which the server calls pavement fully shaded, and can never
 out-bid a real street. All of it lands in `tree_deciduous`: the raster has
-no species information, and treating park canopy as leaf-dropping (user
-decision, 2026-08-26) is honest for NYC, where parks genuinely go bare in
-winter. `tree_park_canopy` records the same value so the frontend knows
-the credit is area-based rather than counted trees.
+no species information, and treating park canopy as leaf-dropping is
+honest for NYC, where parks genuinely go bare in winter.
+`tree_park_canopy` records the same value so the frontend knows the
+credit is area-based rather than counted trees.
 
 A missing raster is a clean skip, not an error -- pilot/CI builds run
-without the 1.7GB file on purpose, and park paths then keep zero shade
-exactly as they did before this module existed.
+without the 1.7GB file on purpose, and park paths then keep zero shade.
 """
 
 import logging
@@ -106,9 +102,9 @@ from pipeline.scoring.blocks import SHADED_KINDS
 
 logger = logging.getLogger(__name__)
 
-# Pavement that runs ACROSS a roadway scores zero by user decision
-# (2026-08-24) -- a crossing with no trees and a bare sidewalk are the
-# same thing, unshaded pavement -- and traffic islands ride with them.
+# Pavement that runs across a roadway scores zero -- a crossing with no
+# trees and a bare sidewalk are the same thing, unshaded pavement -- and
+# traffic islands ride with them.
 CROSSING_KINDS = frozenset({
     "footway/crossing", "footway/traffic_island",
     "path/crossing", "cycleway/crossing",
@@ -152,9 +148,9 @@ def leaf_fraction(src, coords, to_raster) -> float | None:
 def score_park_paths(edges: list[dict]) -> dict:
     """Fill canopy shade on every kerb-less, non-crossing edge.
 
-    Runs AFTER blocks.score_edges() and mutates `edges` in place the same
-    way it does. Sidewalks and crossings are never touched BY THIS
-    FUNCTION -- sidewalk edges Forestry could not answer get their raster
+    Runs after blocks.score_edges() and mutates `edges` in place the same
+    way it does. Sidewalks and crossings are never touched by this
+    function -- sidewalk edges Forestry could not answer get their raster
     shade from score_sidewalk_fallback below, under its own narrow rules
     -- so this cannot double-count against the tree data and cannot
     change a street.
@@ -201,8 +197,8 @@ def _fraction_of_line_in_parks(coords, length_m: float, park_prep) -> float:
     """Fraction of probes along the WHOLE line inside the park union.
 
     One probe per ~10m (min 3), the same sampling rule as
-    naming._probe_points -- never a midpoint, the extent trap this
-    project has hit four times. The probes interpolate the lon/lat line
+    naming._probe_points -- never a midpoint, which says nothing about
+    where the rest of the line is. The probes interpolate the lon/lat line
     directly: spacing comes from the edge's own metric length, and
     point-in-polygon needs no metric geometry (nothing is buffered or
     measured in degrees).
@@ -222,11 +218,11 @@ def _fraction_of_line_in_parks(coords, length_m: float, park_prep) -> float:
 def score_sidewalk_fallback(edges: list[dict], park_shape=None) -> dict:
     """Raster shade for the sidewalk edges Forestry could not answer.
 
-    Runs AFTER score_park_paths and consumes the `face_outcome` marker
+    Runs after score_park_paths and consumes the `face_outcome` marker
     blocks.score_edges records (only sidewalk-kind edges ever carry it,
     so crossings and park paths cannot reach this). Two cases fall back;
     everything else is untouched -- see WHERE FORESTRY HAS NO ANSWER in
-    the module docstring for the populations and their measurements:
+    the module docstring for the populations:
 
       no_face        -> raster, unconditionally
       treeless_face  -> raster ONLY when the edge is majority-inside the

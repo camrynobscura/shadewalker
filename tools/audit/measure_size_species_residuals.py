@@ -1,11 +1,11 @@
 """Do big trees or particular species carry more real shade than we credit?
 
-THE QUESTION (user, 2026-09-07, canopy-derivation)
---------------------------------------------------
+THE QUESTION
+------------
 The per-tree formula is deliberately crude: value is linear in trunk
-diameter capped at 30in, identical across species. The user's street
-experience -- a massive tree shading far more than its share -- asks
-whether that crudeness UNDERCOUNTS big trees. Aggregate calibration
+diameter capped at 30in, identical across species. Street experience --
+a massive tree shading far more than its share -- asks whether that
+crudeness undercounts big trees. Aggregate calibration
 (fit_exchange_rate.py) cannot answer this: a fitted scale absorbs
 uniform bias but not tree-to-tree scatter.
 
@@ -245,19 +245,17 @@ def main() -> int:
                     dominant = genus
             # Mid-edge point, for Street View spot-check batches built
             # from the dump (never an endpoint -- corners corrupt
-            # verdicts, build_street_view_batch.py's lesson). GEOMETRIC
+            # verdicts, build_street_view_batch.py's lesson). Geometric
             # middle, not the middle vertex: a straight two-point edge's
-            # middle vertex IS its endpoint -- a corner (hit for real,
-            # 2026-09-07 batch, spot 1 landed on a crosswalk).
+            # middle vertex is its endpoint, a corner.
             mid_lon, mid_lat = geometric_mid(rec["coords"])
             rows.append({"residual": residual, "predicted": predicted,
                          "fraction": fraction, "mean_dbh": mean_dbh,
                          "max_dbh": max_dbh, "dominant": dominant,
                          "lat": mid_lat, "lon": mid_lon,
                          "length_m": rec["length_m"],
-                         # A spot-check on a per-side model must NAME the
-                         # side or the question is unanswerable (CLAUDE.md
-                         # trap; hit for real on the 2026-09-07 batch).
+                         # A spot-check on a per-side model must name the
+                         # side or the question is unanswerable.
                          "name": rec.get("name", ""),
                          "side": rec.get("side", "")})
     logger.info(f"[residuals] {len(rows):,} usable ({no_profile:,} no "

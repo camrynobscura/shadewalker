@@ -12,8 +12,8 @@ import {
 
 // axe-core catches markup-detectable WCAG issues (missing labels, contrast,
 // ARIA misuse) across the app's real, distinct states — not a replacement
-// for the manual VoiceOver/Lighthouse passes CLAUDE.md already calls for,
-// but a regression net between them.
+// for manual VoiceOver/Lighthouse passes, but a regression net between
+// them.
 
 test('initial load has no violations', async ({ page }) => {
   await page.goto('/')
@@ -24,8 +24,9 @@ test('initial load has no violations', async ({ page }) => {
 })
 
 test('a drawn route has no violations', async ({ page }) => {
-  // routeUrl() lands with start/end already set, which now reverse-geocodes
-  // into the address fields on load -- mock it or this hits live Nominatim.
+  // routeUrl() lands with start/end already set, which reverse-geocodes
+  // into the address fields on load -- mock it or this hits the live
+  // geocoder.
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
   await expect(routeDrawn(page)).toBeVisible()
@@ -35,8 +36,8 @@ test('a drawn route has no violations', async ({ page }) => {
 })
 
 test('a route after dark has no violations', async ({ page }) => {
-  // One line replaces the Shade_priority box's two after dark (PLAN
-  // `night-shade`) -- a state no other scan here reaches.
+  // One line replaces the Shade_priority box's two after dark (#112) --
+  // a state no other scan here reaches.
   await mockGeocode(page)
   await atNight(page)
   await page.goto(routeUrl(POINT_A, POINT_B))
@@ -105,8 +106,8 @@ test('an open recents listbox has no violations', async ({ page }) => {
 })
 
 test('the About page has no violations and links back', async ({ page }) => {
-  // A static second page (no React) served from the same build -- easy
-  // for regressions to hide on since no component test ever renders it.
+  // A second page served from the same build -- easy for regressions to
+  // hide on since no component test ever renders it.
   await page.goto('/about.html')
   await expect(page.getByRole('heading', { name: 'About Shade Walker' })).toBeVisible()
 
@@ -121,7 +122,7 @@ test('address search with no match has no violations', async ({ page }) => {
   await mockGeocode(page)
   await page.goto('/')
   await page.getByLabel('Start point').fill('Nowhere, USA')
-  // Enter resolves the typed text — the FIND_ROUTE button is gone (2026-09-02).
+  // Enter resolves the typed text (desktop has no FIND_ROUTE button).
   await page.keyboard.press('Enter')
   await expect(page.getByText('NOT_FOUND', { exact: false })).toBeVisible()
 
@@ -132,11 +133,11 @@ test('address search with no match has no violations', async ({ page }) => {
 // axe-core cannot evaluate contrast for text it can't isolate a solid
 // background behind (it files the node as "incomplete"/bgOverlap and
 // moves on) -- and every check above only asserts `results.violations`,
-// which never includes that bucket. The header tagline shipped through
-// exactly this gap on 2026-07-15: a color/opacity change dropped it to
-// 2.61:1 against its actual background while every a11y check here
-// stayed green. Compute the real rendered contrast for the two elements
-// that regressed that way, instead of trusting axe to catch it for them.
+// which never includes that bucket. The header tagline can slip through
+// exactly this gap: a color/opacity change that drops it to 2.61:1
+// against its actual background leaves every a11y check here green.
+// Compute the real rendered contrast for the two elements that would
+// regress that way, instead of trusting axe to catch it for them.
 test('header tagline and instructions meet AA text contrast', async ({ page }) => {
   await page.goto('/')
 
@@ -162,7 +163,7 @@ test('header tagline and instructions meet AA text contrast', async ({ page }) =
     })
 
     // Composite the element's own `opacity` onto that background -- this
-    // is exactly the mechanism the original bug used (magenta @ 80%
+    // is exactly the mechanism that hides a failure (magenta @ 80%
     // opacity reads fine in isolation but fails once blended).
     const composite = (fg: number, bgChannel: number) => opacity * fg + (1 - opacity) * bgChannel
     const fg: [number, number, number] = [composite(r, bgR), composite(g, bgG), composite(b, bgB)]
@@ -193,9 +194,9 @@ test('header tagline and instructions meet AA text contrast', async ({ page }) =
 })
 
 // Windows High Contrast (forced-colors) strips every author background,
-// which used to leave the checked Shade_priority segment (a row since
-// 2026-09-27) marked by font weight alone (audit 2026-09-09). Chromium is the only engine that
-// emulates the media feature, and it's the one project here.
+// which would leave the checked Shade_priority row marked by font weight
+// alone. Chromium is the only engine that emulates the media feature,
+// and it's the one project here.
 test.describe('forced colors', () => {
   test.use({ forcedColors: 'active' })
   test('the checked preset keeps a fill distinct from the canvas', async ({ page }) => {
@@ -218,11 +219,10 @@ test.describe('reduced motion', () => {
     // Never fulfilled: the pending state stays up for the whole check.
     await page.route('**/route?*', () => {})
     await page.goto(routeUrl(POINT_A, POINT_B))
-    // The regression this pins (2026-09-23): base.css cancels every
-    // animation under reduced motion, and the block used to START at
-    // opacity 0 and rely on one to appear — so these users saw nothing
-    // for the whole wait. The vine (a still squiggle, once frozen) is
-    // swapped for text; the spoken sentence is unchanged.
+    // base.css cancels every animation under reduced motion, so a block
+    // that starts at opacity 0 and relies on one to appear shows these
+    // users nothing for the whole wait. The vine (a still squiggle, once
+    // frozen) is swapped for text; the spoken sentence is unchanged.
     await expect(page.getByText('> finding your route…')).toBeVisible()
     await expect(page.locator('[class*="vineStage"]')).toBeHidden()
     await expect(page.getByText('Finding your route…', { exact: true })).toBeAttached()
@@ -231,13 +231,11 @@ test.describe('reduced motion', () => {
 
 test('out-of-coverage rejection has no violations', async ({ page }) => {
   // Same reason as the "a drawn route" test above -- start/end from
-  // routeUrl() now reverse-geocodes on load regardless of coverage.
+  // routeUrl() reverse-geocodes on load regardless of coverage.
   await mockGeocode(page)
   await page.goto(routeUrl(POINT_A, POINT_OUTSIDE_COVERAGE))
-  // role="alert" is unique to RouteStats' error message, so it's both a
+  // role="alert" is unique to the panel's error message, so it's both a
   // specific locator and the one that proves the right state loaded.
-  // (It also outlived the legend's "coverage area" row, which used to
-  // make plain getByText('coverage') ambiguous — row deleted 2026-09-03.)
   await expect(page.getByRole('alert')).toContainText('coverage', { ignoreCase: true })
 
   const results = await new AxeBuilder({ page }).analyze()

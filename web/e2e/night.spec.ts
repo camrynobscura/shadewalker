@@ -1,17 +1,16 @@
 import { expect, test, type Page } from '@playwright/test'
 import { atNight, mockGeocode, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
 
-// After dark (PLAN `night-shade`): with no sun every street is shade, so
-// the server hands all four presets the same fastest route at 100% and the
+// After dark (#112): with no sun every street is shade, so the server
+// hands all four presets the same fastest route at 100% and the
 // Shade_priority box trades its mode hint for one line.
 
-// The VISIBLE line: its spoken twin shares the words ("After dark. The whole
+// The visible line: its spoken twin shares the words ("After dark. The whole
 // city is in shade, so...") but not the "//", so this matches one element.
 const NIGHT_LINE = 'after dark // the whole city is in shade'
 
 /** A route row's spoken numbers ("12 minutes, 0.4 miles, 100 percent
- * shaded"), minus its preset name: the rows replaced the stats box whose
- * labels this used to read (2026-09-27). */
+ * shaded"), minus its preset name. */
 async function rowNumbers(page: Page, preset: string): Promise<string> {
   const radio = page.getByRole('radio', { name: new RegExp(`^${preset}:`) })
   await expect(radio).toBeVisible()

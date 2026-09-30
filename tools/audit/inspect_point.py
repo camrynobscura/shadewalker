@@ -24,8 +24,7 @@ sys.path.insert(0, REPO)
 
 from pipeline import config  # noqa: E402
 
-# The pinned extract, from the one place that defines it -- this line
-# used to be a copy in each of these scripts.
+# The pinned extract, from the one place that defines it.
 EXTRACT = config.OSM_EXTRACT_PATH
 TRANSFORM = Transformer.from_crs("EPSG:4326", "EPSG:32618", always_xy=True)
 

@@ -2,17 +2,15 @@ import { useEffect } from 'react'
 import { Header } from './Header.tsx'
 import shared from '../shared.module.css'
 
-/* The About page: a second React entry (decided 2026-09-01, reversing
-   2026-08-30's plain-HTML call) so its header is the SAME component the
-   map page renders — the two hand-kept headers had already drifted, and
-   every header redesign would have had to land twice. Still an MPA: no
+/* The About page: a second React entry so its header is the same
+   component the map page renders — two hand-kept headers would drift,
+   and every header redesign would have to land twice. Still an MPA: no
    router; vite.config.ts builds about.html as its own entry, the React
    vendor chunk is shared (cached from the map page). Cost accepted
-   knowingly: the prose now needs JS to render; it was static HTML.
-   RouteStats' caution link targets #caution here — keep that id.
-   (Own file rather than inline in the about.tsx entry so the
-   react-refresh only-export-components rule stays satisfied — the
-   same split main.tsx/App.tsx use.) */
+   knowingly: the prose needs JS to render. RouteStats' caution link
+   targets #caution here — keep that id. (Own file rather than inline in
+   the about.tsx entry so the react-refresh only-export-components rule
+   stays satisfied — the same split main.tsx/App.tsx use.) */
 export function AboutPage() {
   // Being a React entry breaks native fragment navigation: the browser
   // retries scrolling to location.hash only until the document's load

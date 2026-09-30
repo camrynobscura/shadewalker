@@ -6,9 +6,9 @@ import { POINT_A, POINT_B, routeUrl } from './fixtures'
  * top-level prop on the react-leaflet component -- inside pathOptions it
  * is applied by setStyle() after the element exists and silently does
  * nothing. React's StrictMode double mount hides that in dev, and this
- * suite runs the PRODUCTION build, which is exactly where it broke
- * (2026-09-23: live routes rendered in Leaflet's default blue). So the
- * assertion is on the COMPUTED stroke, not on the class name. */
+ * suite runs the production build, which is exactly where it shows
+ * (routes render in Leaflet's default blue). So the assertion is on the
+ * computed stroke, not on the class name. */
 test('the selected and baseline routes draw in their token colours, not Leaflet blue', async ({ page }) => {
   await page.goto(routeUrl(POINT_A, POINT_B, 15))
   const paths = page.locator('path.leaflet-interactive')

@@ -22,8 +22,8 @@ const MODES = [
 ] as const satisfies readonly { value: Mode; label: string }[]
 
 /** How long a date or time field waits after its last change before it
- * re-routes (user, 2026-09-28): a time input changes value on every
- * keystroke, so typing 13:00 passes through 01:00 on the way. */
+ * re-routes: a time input changes value on every keystroke, so typing
+ * 13:00 passes through 01:00 on the way. */
 const TYPING_PAUSE_MS = 500
 
 function modeOf(t: WalkTime | null): Mode {
@@ -46,16 +46,16 @@ interface TimeControlProps {
   onChange: (time: WalkTime | null) => void
 }
 
-/** The walk's time as a small pill (PLAN `time-and-layers`, user
- * 2026-09-28: most walks are right now, so it shouldn't weigh as much as
- * the addresses). It reads "Leave now", or the set time ("Arrive 1:00
- * PM") -- the words alone say a shared link isn't for now.
+/** The walk's time as a small pill (#118; most walks are right now, so
+ * it shouldn't weigh as much as the addresses). It reads "Leave now", or
+ * the set time ("Arrive 1:00 PM") -- the words alone say a shared link
+ * isn't for now.
  *
  * Tapping it opens its menu (PillMenu): Leave now, Depart at or Arrive
  * by, the last two with the device's own date and time inputs. Every
  * change applies as it's made -- a pick at once, a typed date or time
- * after a short pause -- on a phone too (user, 2026-09-29: no full-screen
- * picker, no DONE). Tapping Leave now closes the menu; Depart at and
+ * after a short pause -- on a phone too (no full-screen picker, no
+ * DONE). Tapping Leave now closes the menu; Depart at and
  * Arrive by keep it open for the date and time.
  *
  * The caller places it (a pill row) and decides what a change does:
@@ -84,8 +84,8 @@ export function TimeControl({ walkTime, onChange }: TimeControlProps) {
     if (run) waiting.apply()
   }
 
-  // A pick re-routes at once, for the time the fields show (user,
-  // 2026-09-28). Coming from Leave now -- or from a field left empty --
+  // A pick re-routes at once, for the time the fields show. Coming from
+  // Leave now -- or from a field left empty --
   // they start again at New York's now; between Depart at and Arrive by
   // they keep their time.
   function pickMode(next: Mode) {
@@ -143,7 +143,7 @@ interface WhenFieldsProps {
   onFields: (fields: Fields) => void
 }
 
-/** Date and time side by side (user, 2026-09-28). The time's label says
+/** Date and time side by side. The time's label says
  * whose clock: the shade is New York's, whatever zone the device is in
  * ("NYC", not "EST", which is wrong from March to November). */
 function WhenFields({ fields, onFields }: WhenFieldsProps) {

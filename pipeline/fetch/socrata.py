@@ -20,12 +20,8 @@ logger = logging.getLogger(__name__)
 
 CACHE_DIR = config.RAW_DIR / "socrata"
 
-# Real case (Queens, tile 145/154, after Brooklyn+Manhattan+144 Queens
-# tiles had already fetched cleanly): a single transient 503 from Socrata
-# killed the whole borough run, with 144 tiles' worth of progress sitting
-# safely cached on disk but the run itself dead. Mirrors streets.py's own
-# MAX_FETCH_RETRIES/FETCH_RETRY_BACKOFF_S -- same shape, applied to
-# Socrata's transient-failure pattern instead of Overpass's.
+# A single transient 503 from Socrata must not kill a run whose earlier
+# pages are already safely cached on disk.
 MAX_FETCH_RETRIES = 3
 FETCH_RETRY_BACKOFF_S = 5
 
@@ -45,17 +41,14 @@ def auth_headers() -> dict[str, str]:
 def get_with_retry(url: str, params: dict | None = None,
                    headers: dict | None = None) -> requests.Response:
     """One GET, retrying on transient failures -- a 5xx status or a
-    network-level ConnectionError/Timeout, the same kind of one-off
-    server hiccup streets.py's own retry logic exists for. A 4xx status
-    (a malformed query, a rejected app token) means retrying would just
-    fail again identically, so those propagate immediately instead of
-    burning through the retry budget.
+    network-level ConnectionError/Timeout. A 4xx status (a malformed
+    query, a rejected app token) means retrying would just fail again
+    identically, so those propagate immediately instead of burning
+    through the retry budget.
 
-    Public (FIXES item 10): parks.py and boundaries.py fetch whole files
-    rather than paginated rows, so they don't go through fetch_all_rows()
-    -- but a bare requests.get() there meant one network blip killed a
-    whole pipeline run while every other fetcher retried. One helper, one
-    retry standard."""
+    Public: parks.py and boundaries.py fetch whole files rather than
+    paginated rows, so they don't go through fetch_all_rows(), but they
+    want the same retry standard. One helper, one standard."""
     for attempt in range(1, MAX_FETCH_RETRIES + 1):
         try:
             response = requests.get(url, params=params, headers=headers, timeout=120)
@@ -93,7 +86,6 @@ def fetch_all_rows(
     cache_path = CACHE_DIR / f"{cache_name}.json"
 
     if cache_path.exists() and not refresh:
-        # Cache hit: read_text + json.loads ≈ JSON.parse(fs.readFileSync(...))
         rows = json.loads(cache_path.read_text())
         logger.info(f"  [socrata] {cache_name}: {len(rows)} rows (cached)")
         return rows
@@ -124,7 +116,6 @@ def fetch_all_rows(
             break
         offset += config.SOCRATA_PAGE_SIZE
 
-    # mkdir -p equivalent; then write the cache file for next time.
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(rows))
     logger.info(f"  [socrata] {cache_name}: {len(rows)} rows (downloaded + cached)")

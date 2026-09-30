@@ -1,6 +1,6 @@
 """OSM's pedestrian ways → the routing graph.
 
-Replaces the centerline model. There is no fetch step: the pinned extract
+There is no fetch step: the pinned extract
 (`data/oracle/new-york-latest.osm.pbf`) is read straight off disk, in one
 pass, for the whole city. No Overpass, no tiles, no cache versioning.
 
@@ -9,46 +9,39 @@ THE GOVERNING RULE
 If OSM says a way is a pedestrian way, it is in the graph. `is_pedestrian`
 below is the *whole* rule — there are no zone exclusions, no gap ledger, no
 derived connectors, and no location-specific exceptions. Coverage gaps stay
-gaps. Read `history/sidewalk-model-decision.md` before changing the filter:
-the coverage figures quoted in CLAUDE.md were measured with exactly this
-predicate, so a change here silently invalidates them.
+gaps. The coverage figures the model was chosen on were measured with
+exactly this predicate, so a change here silently invalidates them.
 
 THE EXTRACT IS THE WHOLE STATE
 ------------------------------
-`new-york-latest.osm.pbf` is Geofabrik's NEW YORK STATE extract — measured
+`new-york-latest.osm.pbf` is Geofabrik's New York State extract — the
 extent of its pedestrian ways alone is -79.738,40.496 .. -71.856,45.035,
-and only 46.2% of them touch the five boroughs. So every read MUST be
+and only 46.2% of them touch the five boroughs. So every read must be
 clipped to NYC's real boundary, which is why `build()` requires a shape
-rather than defaulting to one.
-
-Skipping the clip is not a cosmetic error. Unclipped, the graph is
-868,339 nodes instead of 386,651, and its largest connected component
-reads 37.1% instead of 81.9% — a number that looks exactly like a routing
-catastrophe and is purely an artifact of measuring Buffalo alongside
-Brooklyn. This was measured on 2026-08-22, after the omission produced
-precisely that false alarm.
-
-The centerline model had a separate step for this (`boundary.clip_to_nyc`,
-deleted 2026-08-28 after sitting orphaned for a week). This module clips way by way inside read_ways(), against a prepared
-boundary, before a graph exists at all.
+rather than defaulting to one. Unclipped, the graph is 868,339 nodes
+instead of 386,651, and its largest connected component reads 37.1%
+instead of 81.9% — a number that looks exactly like a routing catastrophe
+and is purely an artifact of measuring Buffalo alongside Brooklyn. The
+clip happens way by way inside read_ways(), against a prepared boundary,
+before a graph exists at all.
 
 WHAT AN EDGE IS
 ---------------
 An OSM way is not a graph edge. Mappers split ways for their own reasons (a
 surface change, a bridge, an editing session), so one way can span many
 junctions and one junction can sit mid-way. So ways are re-split at
-JUNCTIONS — nodes shared by two or more ways, plus every way's own
+junctions — nodes shared by two or more ways, plus every way's own
 endpoints — and the chain of shape points between two junctions becomes one
 edge carrying its full geometry. This is the same topology osmnx's
-`simplify_graph()` produced for the centerline model, computed directly.
+`simplify_graph()` produces, computed directly.
 
 COORDINATES
 -----------
 Everything here is EPSG:4326 (lon/lat degrees) because that is what the
-export and the frontend draw with. Lengths are NOT computed in degrees:
+export and the frontend draw with. Lengths are not computed in degrees:
 they come from `pyproj.Geod`, which measures on the WGS84 ellipsoid and so
-needs no projected CRS at all. Any later step that BUFFERS or MEASURES
-AREA still has to reproject (see `config.METRIC_CRS`) — buffering in
+needs no projected CRS at all. Any later step that buffers or measures
+area still has to reproject (see `config.METRIC_CRS`) — buffering in
 degrees is this project's #1 bug class.
 """
 
@@ -65,15 +58,15 @@ from shapely.prepared import prep
 
 logger = logging.getLogger(__name__)
 
-# The `highway` values that ARE dedicated pedestrian infrastructure.
-# Street centerlines are deliberately absent -- that is the whole point of
-# the model. `footway` covers both sidewalks (`footway=sidewalk`) and
+# The `highway` values that are dedicated pedestrian infrastructure.
+# Streets themselves are deliberately absent: people walk on sidewalks,
+# not roadways. `footway` covers both sidewalks (`footway=sidewalk`) and
 # crossings (`footway=crossing`); crossings are what join sidewalks to each
 # other, so a "sidewalks only" graph is disconnected by construction.
 PED_HIGHWAY = frozenset({"footway", "path", "steps", "pedestrian"})
 
-# Street centerlines. NOT part of the routing graph -- they are read only
-# so a nameless sidewalk can borrow the name of the street it runs along
+# Streets. Not part of the routing graph -- they are read only so a
+# nameless sidewalk can borrow the name of the street it runs along
 # (pipeline/graph/naming.py). Same set the coverage audit uses to decide
 # "is this somewhere a person would plausibly walk".
 STREET_HIGHWAY = frozenset({
@@ -95,11 +88,9 @@ class Way(NamedTuple):
     lats: list[float]
     # OSM's own `highway`, plus `/<footway>` when it has one, e.g.
     # "footway/sidewalk", "footway/crossing", "steps". Shade scoring needs
-    # this: a crossing runs ACROSS a roadway, so it has no block face and
+    # this: a crossing runs across a roadway, so it has no block face and
     # scores no shade, and it must not be counted into a block's pavement
     # length either or it would dilute that block's density.
-    # Defaulted so the three existing keyword-only call sites (this module,
-    # tools/audit/measure_sidewalk_kerb_match.py, tests) keep working.
     kind: str = ""
 
 
@@ -133,7 +124,7 @@ def is_pedestrian(tags: dict) -> bool:
 
 
 def is_named_street(tags: dict) -> bool:
-    """A street centerline carrying a name, for the naming derivation only.
+    """A street carrying a name, for the naming derivation only.
 
     Nameless streets are useless as a parent (they can't lend a name), so
     they're filtered here rather than downstream. Service roads that are
@@ -165,7 +156,7 @@ def read_ways(pbf_path, nyc_shape: BaseGeometry) -> tuple[list[Way], list[Way]]:
     extract itself cut off) are dropped; a way left with fewer than two
     points carries no length and is skipped entirely.
 
-    A way is KEPT WHOLE if ANY of its points is inside NYC, rather than
+    A way is kept whole if any of its points is inside NYC, rather than
     having its outside-NYC points removed. Bridges are the reason: the
     Verrazzano and the GWB approaches cross the boundary, and dropping
     the far points would leave a span ending in mid-air. The out-of-city
@@ -325,25 +316,23 @@ def build_graph(ways: list[Way]) -> tuple[dict, list[dict]]:
     """Turn pedestrian ways into (nodes, edges) for the export.
 
     Takes ways rather than a path so the caller can read pedestrian ways
-    and named streets in ONE pass (`read_ways`) and hand the naming step
+    and named streets in one pass (`read_ways`) and hand the naming step
     the second list. Get the ways with:
 
         from pipeline.fetch.boundaries import fetch_borough_boundaries
         from pipeline.graph.boundary import nyc_boundary
         ped, streets = read_ways(path, nyc_boundary(fetch_borough_boundaries()))
 
-    That boundary is deliberately the water-INCLUDED dataset: a bridge's
-    midspan sits over water, and excluding it once severed every
-    inter-borough crossing (pipeline/fetch/boundaries.py's docstring
-    carries that history).
+    That boundary is deliberately the water-included dataset: a bridge's
+    midspan sits over water, and excluding it severs every inter-borough
+    crossing (pipeline/fetch/boundaries.py).
 
     nodes: {"<osm node id>": [lon, lat]} -- only the junction nodes that
            are actually an edge endpoint. Shape points live inside an
-           edge's own `coords` and are not routable, exactly as the
-           centerline model treated them.
+           edge's own `coords` and are not routable.
     edges: one dict per edge, in the export's own vocabulary. Tree fields
            are absent -- scoring is a later step and owns them. `name` is
-           the way's OWN name where OSM gave it one and "" otherwise;
+           the way's own name where OSM gave it one and "" otherwise;
            pipeline/graph/naming.py fills the blanks in afterwards.
     """
     junctions = find_junctions(ways)
@@ -376,7 +365,7 @@ def build_graph(ways: list[Way]) -> tuple[dict, list[dict]]:
             "u": u,
             "v": v,
             "key": key,
-            # Placeholder; the block-face scoring step fills in the COMPASS
+            # Placeholder; the block-face scoring step fills in the compass
             # side of the parent street ("N"/"S"/"E"/"W") for sidewalks
             # with a face. Everything else -- crossings, park paths -- has
             # no street side and stays "".

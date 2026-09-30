@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 import { atNight, mockGeocode, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
 
-// The shade pill (PLAN `time-and-layers` 2b): beside the time pill, it
+// The shade pill (#121): beside the time pill, it
 // reads "All shade" until set, then "Tree shade" or "Building shade", and
 // opens the same small white menu (PillMenu). A pick applies and closes
 // it. A set pick rides every /route request as `layers` and sits in the
@@ -109,8 +109,8 @@ test.describe('on desktop', () => {
   })
 
   test('after dark, Tree shade is full shade too: one line, every preset 100%', async ({ page }) => {
-    // The real backend at 02:00 (atNight adds the time): #112 had let the
-    // trees-alone view keep its own night; night now beats the layer.
+    // The real backend at 02:00 (atNight adds the time): night beats the
+    // layer (#121).
     await mockGeocode(page)
     await atNight(page)
     await page.goto(`${routeUrl(POINT_A, POINT_B)}&layers=trees`)
@@ -160,7 +160,7 @@ test.describe('on a phone', () => {
     await expect(routeDrawn(page)).toBeVisible()
     await page.getByRole('button', { name: /^Change trip:/ }).tap()
     // Both screens have a shade pill: wait for the plan screen, or the tap
-    // can land on the route screen's as it hides (web/CLAUDE.md traps).
+    // can land on the route screen's as it hides.
     await expect(page.getByRole('button', { name: 'Find route' })).toBeVisible()
 
     const routes: string[] = []

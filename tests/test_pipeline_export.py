@@ -1,17 +1,10 @@
 """Tests for pipeline/export.py -- the contract between the pipeline and
 the routing server.
 
-One writer: write_citywide(), the sidewalk model's single-file export.
+One writer: write_citywide(), the single-file export.
 
-The centerline model's write_tile() and its four tests were deleted on
-2026-08-23 with the tile grid. Two of those tests (clean-write leaves no
-temp file, crash mid-write leaves no partial file) covered the shared
-_write_atomically() helper; both have direct write_citywide() equivalents
-below, so deleting the tile writer cost no coverage of live code.
-
-The module's own docstring flags a hard-won rule: everything written must
-be lat/lon degrees (EPSG:4326), never meter-based geometry -- that exact
-bug shipped once in the v1 prototype.
+Everything written must be lat/lon degrees (EPSG:4326), never
+meter-based geometry.
 """
 
 import gzip
@@ -22,17 +15,17 @@ import pytest
 from pipeline import config, export
 
 
-# ── write_citywide(): the sidewalk model's single-file export ────────────
+# ── write_citywide(): the single-file export ─────────────────────────────
 #
-# This is the file server/graph_store.py:301 globs and loads. Nothing else
-# stands between pipeline output and the routing server, so its shape IS
+# This is the file server/graph_store.py globs and loads. Nothing else
+# stands between pipeline output and the routing server, so its shape is
 # the contract.
 
 
 def _minimal_citywide():
     """The smallest nodes/edges pair write_citywide() accepts, in the
     vocabulary pipeline/graph/pedestrian.py's build() emits -- note it
-    carries NO tree fields, because scoring is a later step."""
+    carries no tree fields, because scoring is a later step."""
     nodes = {
         "10135442390": (-74.0027881, 40.6805974),
         "10135442393": (-74.0013902, 40.6802051),
@@ -59,9 +52,8 @@ def _read_back(tmp_path):
 
 @pytest.fixture
 def citywide_dir(tmp_path, monkeypatch):
-    # REPO_ROOT alongside EXPORT_DIR for the same reason write_tile's tests
-    # patch it: the log line does relative_to(REPO_ROOT), which raises for a
-    # tmp_path outside the repo.
+    # REPO_ROOT alongside EXPORT_DIR: the log line does
+    # relative_to(REPO_ROOT), which raises for a tmp_path outside the repo.
     monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(config, "EXPORT_DIR", tmp_path / "export")
     return tmp_path
@@ -100,7 +92,7 @@ def test_fold_names_are_written_only_when_present(citywide_dir):
 
 
 def test_write_citywide_lands_where_graph_store_globs_for_it(citywide_dir):
-    """server/graph_store.py:301 does EXPORT_DIR.glob("*.json.gz"). A file
+    """server/graph_store.py does EXPORT_DIR.glob("*.json.gz"). A file
     written anywhere else, or under any other suffix, is invisible to the
     server no matter how correct its contents are."""
     nodes, edges = _minimal_citywide()
@@ -110,7 +102,7 @@ def test_write_citywide_lands_where_graph_store_globs_for_it(citywide_dir):
 
 
 def test_write_citywide_defaults_every_tree_field_to_zero(citywide_dir):
-    """The spine exports an UNSCORED graph. graph_store.py:399-401 reads
+    """An unscored graph is a legitimate export. graph_store.py reads
     tree_deciduous/tree_evergreen/tree_count with bracket access, so a
     missing key is a KeyError at server startup, not a soft failure."""
     nodes, edges = _minimal_citywide()
@@ -124,8 +116,8 @@ def test_write_citywide_defaults_every_tree_field_to_zero(citywide_dir):
 
 
 def test_write_citywide_keeps_real_tree_scores_when_they_exist(citywide_dir):
-    """The defaults above must not clobber a scored graph -- this is the
-    same writer once the scoring step lands."""
+    """The defaults above must not clobber a scored graph -- scoring is a
+    later step over the same writer."""
     nodes, edges = _minimal_citywide()
     edges[0].update(tree_deciduous=3.5, tree_evergreen=1.25,
                     tree_count=7, tree_park_canopy=0.5)
@@ -164,8 +156,7 @@ def test_write_citywide_meta_counts_match_the_real_contents(citywide_dir):
 def test_write_citywide_coerces_numpy_integers(citywide_dir):
     """build() computes `key` in Python but lengths come back from numpy,
     and a numpy int64 is not JSON-serialisable -- json.dump raises
-    TypeError on it. write_tile hit exactly this via iterrows(); the int()
-    calls here are what keep it from recurring."""
+    TypeError on it. The int() calls are what prevent that."""
     np = pytest.importorskip("numpy")
     nodes, edges = _minimal_citywide()
     edges[0]["key"] = np.int64(3)
@@ -178,11 +169,10 @@ def test_write_citywide_coerces_numpy_integers(citywide_dir):
 
 
 def test_write_citywide_keeps_a_fractional_tree_count(citywide_dir):
-    """Block-face scoring hands an edge a SHARE of its block's trees, in
+    """Block-face scoring hands an edge a share of its block's trees, in
     proportion to its own length, so fractional counts are the normal case
-    rather than an oddity. This field used to be cast with int(), which
-    truncated: a face with 3 trees spread over 10 edges gave each 0.3, and
-    all three trees vanished from the export.
+    rather than an oddity. An int() cast would truncate a face's 3 trees
+    spread over 10 edges (0.3 each) to nothing.
 
     The whole-number count the walker sees is produced later --
     graph_store.py sums these shares along a route and rounds once at the
@@ -205,8 +195,8 @@ def test_write_citywide_leaves_no_temp_file_after_a_clean_write(citywide_dir):
 
 
 def test_write_citywide_crash_mid_write_leaves_no_partial_file(citywide_dir):
-    """The atomic-write guarantee (FIXES item 8) applied to the citywide
-    writer: a crash must leave either the complete previous version or
+    """The atomic-write guarantee: a crash must leave either the complete
+    previous version or
     nothing -- never a truncated file that GraphStore.load()'s glob would
     happily pick up."""
     nodes, edges = _minimal_citywide()
@@ -239,7 +229,7 @@ def test_write_citywide_overwrites_a_previous_export_in_place(citywide_dir):
     assert _read_back(citywide_dir)["edges"][0]["name"] == "Union Street"
 
 
-# ── building shade (PLAN `building-shadows`, interim base64 packing) ────
+# ── building shade (#109) ───────────────────────────────────────────────
 
 def _shaded_edges():
     nodes, edges = _minimal_citywide()

@@ -2,7 +2,7 @@
 
     uv run uvicorn server.app:app --port 8000
 
-Production adds two flags (decided 2026-08-30, `abuse-and-privacy`):
+Production adds two flags:
 
     uvicorn server.app:app --port 8000 --no-access-log --no-server-header
 
@@ -11,12 +11,6 @@ searched text (/geocode?q=...) and exact route coordinates — location
 data that must not accumulate in a file by default; --no-server-header
 to stop advertising the stack. App-level logs (startup, warnings) stay.
 
-FastAPI ≈ Express for Python: routes are functions, decorated with their
-path. Two extras Express doesn't give you for free: every query parameter
-is parsed + validated from the type hints (bad input → automatic 422 with
-a clear message, no manual checks), and interactive API docs are generated
-at /docs.
-
 Endpoints:
     GET /health
     GET /route?from_lat=..&from_lon=..&to_lat=..&to_lon=..[&tree_weights=..&tree_weights=..]
@@ -24,25 +18,20 @@ Endpoints:
     GET /geocode?q=..[&limit=..]
     GET /geocode/reverse?lat=..&lon=..
 
-/route computes a route for EVERY requested tree_weight in one call, not
+/route computes a route for every requested tree_weight in one call, not
 just one — the frontend's Shade_priority control has four fixed presets
-(NONE/LOW/MED/MAX), and a walker comparing them by flipping back and forth
-was firing a fresh network request on every click. Each extra Dijkstra run
-costs microseconds on this in-memory graph, so computing all four up front
-and letting the frontend cache + switch between them locally is strictly
-better than re-fetching per click.
+(NONE/LOW/MED/MAX), and a walker comparing them flips back and forth.
+Each extra Dijkstra run costs milliseconds on this in-memory graph, so
+computing all four up front and letting the frontend switch between them
+locally beats a network request per click.
 
-Data refresh = restart, by design (FIXES item 8, decided 2026-08-17):
-tiles load once at startup and there is deliberately NO live-reload
-path. The refresh cadence is monthly (a tree re-score; the source
-dataset only updates biweekly), so the refresh story is: re-run the
-pipeline (exports are atomic, tmp+rename — a running server can never
-read a half-written tile), then restart the server (load measured 5.9s
-on the laptop, 2026-09-03 — down from ~15s once the coverage-ring
-compute was deleted with the map's coverage outline). Building a safe in-flight reload
-mechanism costs real threading care and buys nothing at that cadence;
-revisit only if the hosting platform's restart story turns out to be
-painful or the refresh cadence tightens dramatically.
+Data refresh = restart, by design: the export loads once at startup and
+there is deliberately no live-reload path. The refresh cadence is
+monthly, so the refresh story is: re-run the pipeline (exports are
+atomic, tmp+rename — a running server can never read a half-written
+file), then restart the server, which reloads in seconds. A safe
+in-flight reload mechanism would cost real threading care and buy
+nothing at that cadence.
 """
 
 import logging
@@ -54,14 +43,12 @@ import calendar
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-# FIRST, before the heavy imports below: cap glibc's malloc arenas
+# First, before the heavy imports below: cap glibc's malloc arenas
 # (server/malloc_arenas.py). The cap only limits arenas created after it,
 # and glibc hands a finished thread's arena to later threads even past the
-# cap. Measured 2026-09-26 (Linux container, 4 requests at a time): capping
-# at the start of lifespan left a second arena from a short-lived thread
-# earlier in startup, and one worker filled it to 47 MB (+46 MB over 1,000
-# requests); capping here, under uvicorn's command line as on the box,
-# kept memory flat (607 -> 601 / 612 MB, two runs).
+# cap. Capping at the start of lifespan instead left a second arena from a
+# short-lived startup thread, which one worker then filled to 47 MB;
+# capping here kept memory flat (measured 2026-09-26 in a Linux container).
 from pipeline import config  # noqa: E402 -- light (os + pathlib), needed for the value
 from server.malloc_arenas import limit_malloc_arenas  # noqa: E402
 
@@ -103,20 +90,20 @@ def parse_pinned_now(raw: str | None) -> datetime | None:
     return moment.astimezone(NYC_TZ)
 
 
-# TEST-ONLY. The Playwright tier (web/playwright.config.ts) pins "now" so
-# the suite checks the same thing whatever the wall clock says: since
-# `night-shade` a run after dark gets four identical routes at 100%
-# shade, and the shade specs would pass there without testing anything.
-# A request's own month/day/hour/minute still win over it. NEVER set in
-# production -- the live site's time is the real one.
+# Test-only. The Playwright tier (web/playwright.config.ts) pins "now" so
+# the suite checks the same thing whatever the wall clock says: a run
+# after dark gets four identical routes at 100% shade, and the shade
+# specs would pass there without testing anything. A request's own
+# month/day/hour/minute still win over it. Never set in production -- the
+# live site's time is the real one.
 PINNED_NOW = parse_pinned_now(os.environ.get("SHADEWALKER_NOW"))
 
 # Route graph_store's loggers somewhere visible under uvicorn, which
-# configures its own loggers but leaves the root logger bare (FIXES item
-# 9) -- without this, load()'s startup summary and the dead-gap-entry
-# WARNING would silently vanish. basicConfig is a no-op if some outer
-# process (tests, a managed host) already configured handlers, so this
-# never overrides a real deployment's logging setup.
+# configures its own loggers but leaves the root logger bare -- without
+# this, load()'s startup summary and its warnings would silently vanish.
+# basicConfig is a no-op if some outer process (tests, a managed host)
+# already configured handlers, so this never overrides a real
+# deployment's logging setup.
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
     datefmt="%H:%M:%S",
@@ -125,9 +112,9 @@ logging.basicConfig(
 store = GraphStore()
 
 
-# lifespan = FastAPI's startup/shutdown hook (the modern replacement for
-# @app.on_event). Everything before `yield` runs once before the first
-# request — here, the one-time load of all tiles into memory.
+# lifespan = FastAPI's startup/shutdown hook. Everything before `yield`
+# runs once before the first request — here, the one-time load of the
+# export into memory.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # The cap itself ran at import (top of this file); say so once here.
@@ -144,19 +131,17 @@ async def lifespan(app: FastAPI):
 # docs_url/redoc_url/openapi_url=None: the API has exactly one intended
 # client (our own frontend), so public interactive docs have no audience
 # -- and they'd advertise /geocode, a relay to a fair-use upstream, as a
-# documented try-it-out endpoint. Don't volunteer that (decided
-# 2026-08-30, same spirit as --no-server-header). We never use /docs in
-# dev either -- curl is the house tool; re-enabling is this one line.
+# documented try-it-out endpoint. Re-enabling is this one line.
 app = FastAPI(title="Shade Walker", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
-# Per-client rate limiting (slowapi, app-level; decided 2026-08-31,
-# `hosting`). App-level rather than at the Caddy edge because the edge
-# plugin needs a custom Caddy binary with no clean update path -- and a
-# 429 here still short-circuits BEFORE the view body runs (no Dijkstra, no
-# upstream hop), so it protects the single worker just the same, while
-# being testable in-process. Keyed by the real client IP: Caddy passes it
+# Per-client rate limiting (slowapi, app-level). App-level rather than at
+# the Caddy edge because the edge plugin needs a custom Caddy binary with
+# no clean update path -- and a 429 here still short-circuits before the
+# view body runs (no Dijkstra, no upstream hop), so it protects the single
+# worker just the same, while being testable in-process. Keyed by the
+# real client IP: Caddy passes it
 # as X-Real-IP (header_up, so a client can't spoof it); with no proxy in
 # front (dev) we fall back to the socket peer. Limits live as decorators on
 # the endpoints below -- /health and the static mount stay unlimited,
@@ -169,8 +154,7 @@ def _client_ip(request: Request) -> str:
 # each response, which requires the endpoint to return a Response object
 # (ours return plain dicts) -- and a private API with one client has no use
 # for advertising its remaining quota. It also gates slowapi's Retry-After
-# on the 429 (its _inject_headers is a no-op without it -- this comment
-# used to claim the opposite, disproved by test 2026-09-09), which is why
+# on the 429 (its _inject_headers is a no-op without it), which is why
 # the handler below sets that one header itself.
 limiter = Limiter(key_func=_client_ip)
 app.state.limiter = limiter
@@ -179,8 +163,7 @@ app.state.limiter = limiter
 def _rate_limited(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     """slowapi's stock handler answers {"error": ...}; every other error
     this server sends is FastAPI's {"detail": ...}, and the frontend reads
-    only that key (web/src/api.ts) -- the stock shape surfaced as a bare
-    "Routing failed (429)" (2026-09-09). One shape, one client contract.
+    only that key (web/src/api.ts). One shape, one client contract.
     The wording is the sentence body after the frontend's "// ERROR:"
     prefix. Retry-After comes from the same window stats slowapi's own
     injector would read -- (reset epoch seconds, remaining) -- floored at
@@ -199,22 +182,21 @@ app.add_exception_handler(RateLimitExceeded, _rate_limited)
 # The Playwright tier (web/playwright.config.ts) drives many /route calls
 # from a single localhost IP in seconds, which would trip the production
 # limit and make the suite flaky. It sets this env var to turn limiting off,
-# the same isolation the pytest conftest does. NEVER set in production.
+# the same isolation the pytest conftest does. Never set in production.
 if os.environ.get("SHADEWALKER_DISABLE_RATE_LIMIT"):
     limiter.enabled = False
 
 
 # Applies to every response, static files included (middleware wraps the
-# mount too). Only the two headers that belong to the APP no matter where
+# mount too). Only the two headers that belong to the app no matter where
 # it runs: Referrer-Policy (strict-origin-when-cross-origin) because route
 # URLs carry coordinates in the query string -- this keeps the path+query
 # off every outbound Referer (only the bare origin is ever sent), while
 # still letting the CARTO basemap key be locked to our domain, which needs
-# SOME referer to verify against (decided 2026-08-31, `hosting`); nosniff
-# because we serve user-adjacent JSON and static
-# files from one origin. The rest of the header story (CSP, HSTS) is
-# deliberately NOT here -- it depends on final asset origins and TLS, so
-# it lives in the Caddy layer at hosting time (PLAN.md, `hosting`).
+# a referer to verify against; nosniff because we serve user-adjacent
+# JSON and static files from one origin. The rest of the header story
+# (CSP, HSTS) depends on final asset origins and TLS, so it lives in the
+# Caddy layer (deploy/Caddyfile).
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
@@ -245,7 +227,7 @@ def geocode_search(
     try:
         results = geocoder.search(q, limit)
     except geocoder.UpstreamError:
-        # Deliberately does NOT echo q back: query text is location data
+        # Deliberately does not echo q back: query text is location data
         # and this detail string is the only thing we'd ever emit it in.
         raise HTTPException(status_code=502, detail="Geocoding is temporarily unavailable")
     return {"results": list(results)}
@@ -282,7 +264,7 @@ def route(
     hour: int | None = None,
     minute: int | None = None,     # (hour given, minute not: 0 -- the anchor)
     layers: str = "both",          # "trees" | "buildings" | "both": which shade the cost sees
-    arrive: bool = False,          # the time given is when the walk ENDS (arrive by), not when it starts
+    arrive: bool = False,          # the time given is when the walk ends (arrive by), not when it starts
 ) -> dict:
     # Arriving "now" means nothing: an arrival needs its time.
     if arrive and hour is None:
@@ -301,7 +283,7 @@ def route(
         minute = 0
     if not 1 <= month <= 12:
         raise HTTPException(status_code=400, detail="month must be 1-12")
-    # Checked against a LEAP year, not this one: the shade table has no
+    # Checked against a leap year, not this one: the shade table has no
     # year (every month is the anchor year's), so Feb 29 is always a real
     # day to ask about -- a date picked in a leap year, or a shared link
     # opened in the next one. _month_blend lands it half-way to March.
@@ -316,12 +298,10 @@ def route(
         raise HTTPException(status_code=400, detail=f"layers must be one of {', '.join(SHADE_LAYERS)}")
     if not tree_weights:
         raise HTTPException(status_code=400, detail="tree_weights must include at least one value")
-    # Each weight costs one real Dijkstra run on a worker thread (two
-    # until 2026-09-09, when the start edge's second endpoint was folded
-    # into the first run -- graph_store._best_plan); the frontend sends
-    # 4. Uncapped, one request with hundreds of weights blocks a worker
-    # for seconds (FIXES item 7 / audit §2.1) — see pipeline/config.py's
-    # note on the cap for the per-route-length numbers.
+    # Each weight costs one real Dijkstra run on a worker thread; the
+    # frontend sends 4. Uncapped, one request with hundreds of weights
+    # blocks a worker for seconds — see pipeline/config.py's note on the
+    # cap for the per-route-length numbers.
     if len(tree_weights) > config.MAX_TREE_WEIGHTS_PER_REQUEST:
         raise HTTPException(
             status_code=400,
@@ -336,8 +316,8 @@ def route(
 
     # Snapping alone can't tell "outside our data" from "a real address" —
     # it always returns the nearest node, however far away. Without this,
-    # a destination beyond the pilot tile's edge silently snapped to the
-    # tile boundary instead of reaching where the user actually asked for.
+    # a destination beyond the data's edge would silently snap to the
+    # boundary instead of reaching where the user actually asked for.
     if not store.in_coverage(from_lat, from_lon):
         raise HTTPException(
             status_code=422,
@@ -354,10 +334,10 @@ def route(
         raise HTTPException(status_code=422, detail="No path between these points")
     start, end = pair
 
-    # Arrive by (PLAN `time-and-layers`): the fastest route prices an edge
-    # by its length alone (weight 0 in graph_store.edge_costs), so its
-    # minutes are the same at any hour. Leave that many minutes before the
-    # arrival, and score EVERY weight for that one moment: a shadier route
+    # Arrive by (#119): the fastest route prices an edge by its length
+    # alone (weight 0 in graph_store.edge_costs), so its minutes are the
+    # same at any hour. Leave that many minutes before the arrival, and
+    # score every weight for that one moment: a shadier route
     # really leaves a minute or two earlier still, but one moment keeps the
     # batch comparable -- clamp_shade_monotonic compares the weights'
     # shade against each other. The frontend shows each route's own leave
@@ -371,11 +351,10 @@ def route(
 
     # After dark every edge is fully shaded (graph_store.is_night), so every
     # tree_weight prices an edge by its length alone and would find the
-    # plain shortest path. Route it ONCE, at weight 0, and hand that route
+    # plain shortest path. Route it once, at weight 0, and hand that route
     # to every weight: one Dijkstra instead of four, and the presets cannot
-    # split on a floating-point tie (PLAN `night-shade`). In every layer:
-    # the dark is the sun's, so "Tree shade" after dark is full shade too
-    # (PLAN `time-and-layers`, user 2026-09-26; #112 had exempted it).
+    # split on a floating-point tie (#112). In every layer: the dark is the
+    # sun's, so "Tree shade" after dark is full shade too (#121).
     night = store.is_night(month, day, hour, minute)
     results = []
     if night:
@@ -429,7 +408,7 @@ def route(
         # All routes share the same street-by-street shape whenever there's
         # no real path to describe (start == end) -- doesn't matter which
         # one this is built from in that case, so the first is as good as
-        # any. When there IS a real path, the frontend builds directions
+        # any. When there is a real path, the frontend builds directions
         # from whichever route.properties.segments is actually selected,
         # not from this string -- see RouteStats.tsx.
         "description": _describe(routes[0]["properties"]["segments"]),
@@ -500,17 +479,15 @@ def _describe(segments: list[dict]) -> str:
 def _mirror_head_on_get(app: FastAPI) -> None:
     """Answer HEAD on every GET endpoint — restoring what plain Starlette
     does by default (its Route.__init__ auto-adds HEAD to any GET route)
-    and FastAPI's APIRoute drops. Without this, HEAD to any API endpoint
-    missed the router entirely and fell through to the static mount as a
-    404 — found live by UptimeRobot's HEAD probes (2026-09-01). No body
-    handling needed here: the handler runs and uvicorn drops the body at
-    the protocol layer for a HEAD request (h11_impl:
-    `data = b"" if method == "HEAD" else body`), so the response carries
-    GET's exact headers, Content-Length included, per RFC 9110. A HEAD
-    therefore costs the same work as its GET (rate-limited identically);
-    fine — the monitors use keyword GETs anyway, this is HTTP
-    correctness. The static mount needs no help: StaticFiles answers
-    HEAD natively. Must run after every endpoint above is declared."""
+    and FastAPI's APIRoute drops. Without this, a HEAD to any API endpoint
+    misses the router entirely and falls through to the static mount as a
+    404, which is what an uptime monitor's probe sends. No body handling
+    needed here: the handler runs and uvicorn drops the body at the
+    protocol layer for a HEAD request, so the response carries GET's
+    exact headers, Content-Length included, per RFC 9110. A HEAD
+    therefore costs the same work as its GET (rate-limited identically).
+    The static mount needs no help: StaticFiles answers HEAD natively.
+    Must run after every endpoint above is declared."""
     for route in app.router.routes:
         if isinstance(route, APIRoute) and "GET" in route.methods:
             route.methods.add("HEAD")
@@ -518,16 +495,16 @@ def _mirror_head_on_get(app: FastAPI) -> None:
 
 def _mount_frontend(app: FastAPI) -> None:
     """Serve the built frontend (web/dist) from the same process as the
-    API — the serving shape decided 2026-08-30: `uvicorn server.app:app`
-    IS the whole application, deployable anywhere that runs one process,
-    with the Caddy layer at hosting time purely additive in front.
+    API: `uvicorn server.app:app` is the whole application, deployable
+    anywhere that runs one process, with the Caddy layer purely additive
+    in front.
 
-    Mounted at "/" AFTER every route above, so /route, /geocode etc.
+    Mounted at "/" after every route above, so /route, /geocode etc.
     always win and everything else falls through to static files
     (html=True serves index.html for "/"). Conditional on the build
     existing: dev serves the frontend from vite, CI and fresh checkouts
-    have no dist/ — in those the server is simply API-only, same as it
-    always was, and says so once at startup instead of failing.
+    have no dist/ — in those the server is simply API-only, and says so
+    once at startup instead of failing.
 
     StaticFiles sends ETag/Last-Modified; long-lived Cache-Control for
     the content-hashed /assets bundle is Caddy-layer polish, not done

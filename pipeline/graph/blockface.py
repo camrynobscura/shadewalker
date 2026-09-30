@@ -8,7 +8,7 @@ length: they are chopped at arbitrary points, so half of them are under 5m
 sits in pieces longer than a block. The same tree reads one density on a
 2.6m stub and another on the 51.9m run beside it.
 
-The fix is to group pavement by BLOCK FACE -- one side of one block -- and
+The fix is to group pavement by block face -- one side of one block -- and
 score per face. NYC supplies the key: every kerb line carries a `blockf_id`
 conflated to a CSCL block face, and CSCL turns that into a side, a street
 name and a segment id.
@@ -17,34 +17,30 @@ This module answers one question, for a point or for a line: which face?
 
 IS THIS AN OSM OVERRIDE?
 ------------------------
-No. It produces a LABEL and a GROUPING. It adds no way, removes none, and
+No. It produces a label and a grouping. It adds no way, removes none, and
 connects nothing -- the pedestrian graph is untouched, and with the shade
 weight at zero the router's costs are unchanged (see server/graph_store.py's
 edge_costs: `length / (1 + tree_weight * density)` is exactly `length` when
 the weight is 0). Same category as pipeline/graph/naming.py, which draws
-this line in its own docstring. The user confirmed on 2026-08-24 that the
-follow-OSM rule governs ROUTING; shade-side labels are fine.
+this line in its own docstring. The follow-OSM rule governs routing;
+shade-side labels are fine.
 
 THE RULES HERE ARE MEASURED, NOT CHOSEN
 ---------------------------------------
-  - NEAREST KERB, not nearest centerline. A centerline sits mid-roadway so
-    its distance to a sidewalk is half the road width, which is a property
-    of the road rather than of the relationship. Kerb gap grows +0.0036
-    m/ft of street width; centerline gap +0.0618. Verified over 143,591
-    sidewalks and, for trees, by blind human review of 12 conflicts (12/12).
-  - MEDIAN PROBE DISTANCE for a line, never the minimum. A cross street is
-    close at one END of a sidewalk and far along the rest, so a
-    minimum-distance rule calls almost every sidewalk ambiguous -- the
-    first version of the parent-street audit reported 16.1% instead of
-    94.0% exactly this way.
-  - `conflated` REQUIRED. It is NYC's own flag for whether the kerb ->
+  - Nearest kerb, not nearest street centerline. A centerline sits
+    mid-roadway so its distance to a sidewalk is half the road width, a
+    property of the road rather than of the relationship. Kerb gap grows
+    +0.0036 m/ft of street width; centerline gap +0.0618 (over 143,591
+    sidewalks; for trees, blind human review of 12 conflicts agreed 12/12).
+  - Median probe distance for a line, never the minimum. A cross street is
+    close at one end of a sidewalk and far along the rest, so a
+    minimum-distance rule calls almost every sidewalk ambiguous.
+  - `conflated` required. It is NYC's own flag for whether the kerb ->
     block-face link succeeded (91.9% do). Without it we score links the
     source itself disowns.
-  - CSCL ATTRIBUTES ONLY. Side, street, segment id. Never its geometry as a
-    ruler: a centerline segment can be far shorter than the run of kerb
-    conflated to it, and measuring block length that way produced a false
-    "13% of the city is mis-assigned" on 2026-08-23. Full account in
-    pipeline/fetch/planimetrics.py.
+  - CSCL attributes only: side, street, segment id. Never its geometry as
+    a ruler, because a centerline segment can be far shorter than the run
+    of kerb conflated to it (pipeline/fetch/planimetrics.py).
 """
 
 import logging
@@ -67,7 +63,7 @@ def _angular_distance(a: float, b: float) -> float:
 
 
 class Face:
-    """One side of one block, with the CSCL attributes for THAT side."""
+    """One side of one block, with the CSCL attributes for that side."""
 
     __slots__ = ("face_id", "segment_id", "side", "street", "boro", "width_ft")
 
@@ -87,12 +83,12 @@ class Face:
 class Match:
     """A resolved face, with what it beat.
 
-    `runner_up_m` is the distance to the nearest kerb of a DIFFERENT CSCL
-    SEGMENT -- i.e. a different street, not merely the other side of the
+    `runner_up_m` is the distance to the nearest kerb of a different CSCL
+    segment -- i.e. a different street, not merely the other side of the
     same one. It is exposed rather than turned into an accept/reject rule
     here: only 0.52% of sidewalk length is genuinely contested at 2m slack,
-    so no caller has needed a rule yet, and inventing one now would be a
-    threshold nobody measured.
+    so no caller needs a rule, and inventing one would be a threshold
+    nobody measured.
     """
 
     __slots__ = ("face", "distance_m", "runner_up_m")
@@ -128,13 +124,10 @@ def build_kerb_index(pave_rows):
 
     Geometry is in the flat metre approximation naming.py uses, kept
     deliberately identical so distances here are comparable with every
-    measurement taken during the evaluation.
+    measurement the audit tools take.
 
-    ROAD EDGES ONLY. Pavement Edge also carries alleys (feat_code 2270) and
-    airport runways (2230). Neither has a sidewalk beside it, and including
-    them was a silent error until it was audited on 2026-08-24: alleys made
-    up 1,649 of the block faces reported as having no sidewalk, which is why
-    ALLEY topped that list and why it was never a real finding. See
+    Road edges only. Pavement Edge also carries alleys (feat_code 2270) and
+    airport runways (2230), and neither has a sidewalk beside it; see
     config.ROAD_EDGE_FEAT_CODE.
     """
     lines, face_ids, conflated = [], [], []
@@ -197,26 +190,24 @@ class BlockFaceIndex:
         """Which compass side of its street this pavement is on -- "N",
         "S", "E" or "W" -- or "" when no single plain word is honest.
 
-        WHY GEOMETRY AND NOT CSCL's L/R: the L/R is relative to each
-        segment's arbitrary digitization direction, and it does not
-        survive a block boundary -- measured 2026-08-28, same-name
-        sidewalk pairs continuing across a side street disagree 53.3% of
-        the time (a coin flip), so a direction keyed on it would announce
-        phantom "cross to the other side" steps. The kerb, by contrast,
-        physically separates this pavement from its roadway: the
-        direction from the pavement TO its kerb points at the street, so
-        its opposite names the side the pavement is on. Kerb-referenced,
-        no centerline geometry -- the module rule holds.
+        Geometry, not CSCL's L/R: the L/R is relative to each segment's
+        arbitrary digitization direction and does not survive a block
+        boundary -- same-name sidewalk pairs continuing across a side
+        street disagree 53.3% of the time (a coin flip; measured
+        2026-08-28), so a direction keyed on it would announce phantom
+        "cross to the other side" steps. The kerb, by contrast, physically
+        separates this pavement from its roadway: the direction from the
+        pavement to its kerb points at the street, so its opposite names
+        the side the pavement is on.
 
-        FOUR PLAIN WORDS ONLY (user, 2026-08-28): generous 90-degree
-        bins match how the city talks -- Manhattan's grid is ~29 degrees
-        off true and everyone still says "the north side of 23rd
-        Street". Where the mean side direction sits within
-        config.SIDE_DECLINE_MARGIN_DEG of a bin boundary (a true
-        diagonal), or wanders along the edge (a curve -- resultant below
-        config.SIDE_MIN_RESULTANT), the answer is "" and directions
-        simply omit the side, the same philosophy as naming: no word
-        beats a confusing word.
+        Four plain words only: generous 90-degree bins match how the city
+        talks -- Manhattan's grid is ~29 degrees off true and everyone
+        still says "the north side of 23rd Street". Where the mean side
+        direction sits within config.SIDE_DECLINE_MARGIN_DEG of a bin
+        boundary (a true diagonal), or wanders along the edge (a curve --
+        resultant below config.SIDE_MIN_RESULTANT), the answer is "" and
+        directions simply omit the side, the same philosophy as naming:
+        no word beats a confusing word.
         """
         positions = self._kerb_positions_of_face.get(str(face_id))
         if not positions:
@@ -249,14 +240,14 @@ class BlockFaceIndex:
         x_sum, y_sum, resultant = mean_of(vectors)
         if resultant < config.SIDE_MIN_RESULTANT:
             # A kerb line wraps its block's corner, so a probe near the
-            # edge's end can attach to the wrapped RETURN and read the
+            # edge's end can attach to the wrapped return and read the
             # roadway direction backwards -- one flipped probe in three
-            # collapses the resultant to ~0.33 (measured as a spike at
-            # exactly that value, 17% of a 20k sample, 2026-08-28). Drop
-            # the minority pointing >90 degrees from the first-pass mean
-            # and retry once. A genuine curve (an L wrapping a corner)
-            # spreads smoothly instead, keeps its majority, and still
-            # fails the resultant test below.
+            # collapses the resultant to ~0.33 (17% of a 20k sample sat
+            # at exactly that value). Drop the minority pointing >90
+            # degrees from the first-pass mean and retry once. A genuine
+            # curve (an L wrapping a corner) spreads smoothly instead,
+            # keeps its majority, and still fails the resultant test
+            # below.
             mean_bearing = math.degrees(math.atan2(x_sum, y_sum)) % 360.0
             kept = [v for v in vectors
                     if _angular_distance(
@@ -308,9 +299,9 @@ class BlockFaceIndex:
                     max_m: float = None) -> Match | None:
         """The face a single point sits on.
 
-        The default cap is the LINE cap (BLOCK_FACE_MAX_M). Tree scoring
-        passes config.TREE_ATTACH_MAX_M explicitly -- trees earned a wider
-        cap (8m) by direct evidence on 2026-08-27, and the two caps are
+        The default cap is the line cap (BLOCK_FACE_MAX_M). Tree scoring
+        passes config.TREE_ATTACH_MAX_M explicitly: a crown reaches over
+        pavement in a way a kerb line cannot, and the two caps are
         deliberately separate constants; see their comments in config.py.
         """
         max_m = config.BLOCK_FACE_MAX_M if max_m is None else max_m
@@ -318,18 +309,17 @@ class BlockFaceIndex:
         return self._resolve(point.buffer(max_m), point.distance, max_m)
 
     def match_line(self, coords, max_m: float = None) -> Match | None:
-        """The face a line runs along -- ONE answer for the whole line.
+        """The face a line runs along -- one answer for the whole line.
 
-        MEDIAN distance over points sampled along the whole line, not the
+        Median distance over points sampled along the whole line, not the
         minimum. See the module docstring: the minimum makes a cross street
         look like a parent.
 
-        NOT FOR SCORING -- use match_line_profile. One answer per edge is
+        Not for scoring -- use match_line_profile. One answer per edge is
         fine for a question about the edge as a whole ("which street is this
-        sidewalk part of"), and WRONG for apportioning shade, because an
+        sidewalk part of"), and wrong for apportioning shade, because an
         edge longer than a block has no single right answer and this returns
-        None for it rather than the several right ones. That stranded 28.3%
-        of the city's sidewalk length. Full account on match_line_profile.
+        None for it rather than the several right ones.
         """
         max_m = config.BLOCK_FACE_MAX_M if max_m is None else max_m
         line = LineString([_to_m(lon, lat) for lon, lat in coords])
@@ -349,25 +339,21 @@ class BlockFaceIndex:
 
         WHY THIS EXISTS, AND WHY match_line CANNOT BE USED FOR SCORING
         --------------------------------------------------------------
-        match_line gives ONE answer for a whole edge, from the median
+        match_line gives one answer for a whole edge, from the median
         distance over its probes. That is right for naming a sidewalk after
         a street, and wrong for scoring it, because OSM often draws a
         sidewalk as a single unbroken way running past many blocks. Beside
         any one block such a line is ~2m from the kerb, but its median over
         the whole length is far larger, so it exceeds BLOCK_FACE_MAX_M and
-        matches NOTHING.
-
-        Measured consequence, face 1922610905 ("14 ST", side R): 13 trees,
-        221.0m of kerb, and 782.8m of OSM sidewalk physically present -- of
-        which the median rule assigned 1.6m. The face kept its trees and
-        lost its pavement, so its density read 280x the citywide median.
-        Citywide, 28.3% of sidewalk length sits in pieces over 200m, so this
-        was the common case and not an oddity.
+        matches nothing: the face keeps its trees and loses its pavement
+        (one 14th Street face read 280x the citywide median density that
+        way). 28.3% of the city's sidewalk length sits in pieces over 200m,
+        so this is the common case.
 
         Sampling asks the question once per step instead, so each part of a
         long edge is credited to the block it is actually beside.
 
-        NOTHING IS CUT. This returns a length profile, not a split: no edge
+        Nothing is cut. This returns a length profile, not a split: no edge
         is divided, no node is added, and the routing graph is untouched.
         It does not need to be -- pipeline/graph/pedestrian.py already cuts
         every way at every junction (find_junctions / _split_way), so an
@@ -375,12 +361,9 @@ class BlockFaceIndex:
         connects to along its length. There is no corner to turn at inside
         it, so there is no routing decision a split could enable.
 
-        NOT THE MIDPOINT TRAP. Each sample sits at the CENTRE OF ITS OWN
-        SLICE, and the slices tile the whole line -- this measures along the
-        entire edge. The trap this project has hit four times is deriving an
-        EXTENT from one midpoint per feature, which understates ground
-        covered by about one piece. Sampling densely is the documented fix
-        for it (see naming.py:_probe_points), not an instance of it.
+        Each sample sits at the centre of its own slice, and the slices tile
+        the whole line, so this measures along the entire edge rather than
+        deriving an extent from one midpoint per feature.
 
         Returns {} when no part of the line is within max_m of a conflated
         road-edge kerb. The profile's values sum to at most the line's
@@ -394,7 +377,7 @@ class BlockFaceIndex:
         if line.length < 1e-9:
             return {}
 
-        # One STRtree query for the WHOLE line, then plain distance maths per
+        # One STRtree query for the whole line, then plain distance maths per
         # sample against the handful of kerbs it returned. Querying per sample
         # would repeat the same spatial lookup up to hundreds of times for one
         # long edge, and the citywide pass makes ~7.1M samples.

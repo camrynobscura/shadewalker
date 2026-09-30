@@ -21,10 +21,11 @@ describe('displayShade', () => {
   })
 
   // The two pinned exemplar routes from the 2026-08-27 derivation
-  // (history/display-curve.md, month=8): the Mall's measured 76.7% must
-  // display 82.6%, and the Brooklyn Bridge Park Greenway counter-case's
-  // 20.7% must stay LOW at 24.3% -- if either pin moves, the exponent
-  // changed and the derivation needs re-running, not the pin.
+  // (tools/audit/derive_display_curve_k.py, month=8): the Mall's measured
+  // 76.7% must display 82.6%, and the Brooklyn Bridge Park Greenway
+  // counter-case's 20.7% must stay low at 24.3% -- if either pin moves,
+  // the exponent changed and the derivation needs re-running, not the
+  // pin.
   it('reproduces the derivation exemplars at k = 1.2', () => {
     expect(displayShade(0.767)).toBeCloseTo(0.826, 3)
     expect(displayShade(0.207)).toBeCloseTo(0.243, 3)

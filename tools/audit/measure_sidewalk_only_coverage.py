@@ -1,11 +1,10 @@
-"""Where does OSM's pedestrian network fail, if we use ONLY it?
+"""Where does OSM's pedestrian network fail, if we use only it?
 
 THE PROPOSED MODEL
 ------------------
 Route on OSM's dedicated pedestrian infrastructure alone -- sidewalks,
 crossings, footways, steps, pedestrian streets, foot-permitted cycleways
--- with NO street centerlines, NO fallback layer, and NO hand-made gap
-repairs. Four boroughs; Staten Island excluded.
+-- with no streets, no fallback layer, and no hand-made gap repairs. Four boroughs; Staten Island excluded.
 
 WHY THIS MEASUREMENT AND NOT A RATIO
 ------------------------------------
@@ -51,8 +50,7 @@ sys.path.insert(0, REPO)
 
 from pipeline import config  # noqa: E402
 
-# The pinned extract, from the one place that defines it -- this line
-# used to be a copy in each of these scripts.
+# The pinned extract, from the one place that defines it.
 EXTRACT = config.OSM_EXTRACT_PATH
 BOROUGHS = os.path.join(REPO, "data", "raw", "socrata",
                         "borough_boundaries_wh2p-dxnf.geojson")
@@ -61,10 +59,10 @@ KEEP_BOROUGHS = {"manhattan", "brooklyn", "queens", "bronx"}
 K = 111320.0 * math.cos(math.radians(40.7))
 LAT_M = 110540.0
 
-# Dedicated pedestrian infrastructure -- the proposed model. Street
-# centerlines are deliberately absent.
+# Dedicated pedestrian infrastructure -- the proposed model. Streets
+# themselves are deliberately absent.
 PED_HIGHWAY = {"footway", "path", "steps", "pedestrian"}
-# Street centerlines, kept ONLY to decide whether a cell is somewhere a
+# Street ways, kept only to decide whether a cell is somewhere a
 # person would plausibly need to walk.
 STREET_HIGHWAY = {
     "primary", "primary_link", "secondary", "secondary_link", "tertiary",

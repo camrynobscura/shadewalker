@@ -1,5 +1,5 @@
-/** Which shade the routes are scored by: the shade pill's pick (PLAN
- * `time-and-layers`, user 2026-09-28/29) and /route's `layers`. All shade
+/** Which shade the routes are scored by: the shade pill's pick (#121)
+ * and /route's `layers`. All shade
  * -- trees and buildings -- is the default; the other two are for
  * curiosity, comparing paths by where their shade comes from, and
  * choosing tree shade on purpose. The route rows then count only the

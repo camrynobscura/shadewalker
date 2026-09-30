@@ -1,21 +1,12 @@
 """Shared fixtures for the test suite.
 
-Only one fixture survives here: `citywide_store`, which loads the real
-production tiles for the opt-in citywide sweep.
+Only one fixture lives here: `citywide_store`, which loads the real
+production export for the opt-in citywide sweep.
 
-The pilot-tile fixtures (`PILOT_FIXTURE`, `_pilot_only_export_dir`,
-`client`, `graph_store`, `self_loop_store`) were deleted on 2026-08-23
-along with `tests/fixtures/pilot.json.gz` itself. That fixture was
-centerline data, and every test routing against it was pinned to
-measurements of a graph the project no longer builds. Route-level testing
-comes back once, against real citywide data, when sidewalk scoring has
-settled -- rather than being ported piecemeal onto a fixture that kept
-mixing the two models together.
-
-Tests that need a graph now build their own tiny synthetic tile with
+Tests that need a graph build their own tiny synthetic export with
 `tmp_path` (see test_graph_store_pruning.py, test_graph_store_components.py
-and test_pipeline_export.py for the pattern), which
-keeps each one's assumptions visible in the test itself.
+and test_pipeline_export.py for the pattern), which keeps each one's
+assumptions visible in the test itself.
 """
 
 import os
@@ -56,7 +47,7 @@ def pytest_addoption(parser):
 
 
 def pytest_collection_modifyitems(config, items):
-    """`external` tests are opt-in via an explicit flag, NOT just the marker:
+    """`external` tests are opt-in via an explicit flag, not just the marker:
     marker expressions compose badly with addopts (a routine
     `-m "not citywide"` would otherwise silently re-enable live third-party
     traffic), so the gate is a flag no invocation passes by accident."""
@@ -72,7 +63,7 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(scope="session")
 def citywide_store() -> GraphStore:
-    """A GraphStore loaded against the REAL production export
+    """A GraphStore loaded against the real production export
     (data/export/), for the opt-in-by-default citywide sweep (see the
     `citywide` marker).
 
@@ -84,10 +75,6 @@ def citywide_store() -> GraphStore:
     (i.e. the citywide test wasn't deselected)."""
     production_export = Path(os.environ.get("SHADEWALKER_EXPORT_DIR", config.DATA_DIR / "export"))
     exports = sorted(production_export.glob("*.json.gz"))
-    # Was `< 10`, from the tiled centerline pipeline that emitted one file
-    # per tile. The sidewalk pipeline emits exactly ONE citywide export, so
-    # that condition could never be satisfied and every citywide test
-    # skipped permanently -- present data, zero coverage, green suite.
     if not exports:
         pytest.skip(
             f"no citywide export in {production_export} "

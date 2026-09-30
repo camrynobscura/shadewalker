@@ -17,8 +17,8 @@ After=network-online.target
 Wants=network-online.target
 
 # Give up rather than loop: with Restart=always, a start that keeps dying
-# (e.g. OOM-killed) would otherwise retry forever — that loop is what kept
-# the droplet frozen on 2026-09-01. Three tries in 10 minutes, then the
+# (e.g. OOM-killed) would otherwise retry forever and can freeze the
+# whole droplet. Three tries in 10 minutes, then the
 # unit parks itself failed and `systemctl status shadewalker` says why.
 StartLimitIntervalSec=600
 StartLimitBurst=3
@@ -30,8 +30,8 @@ Group=shadewalker
 WorkingDirectory=/opt/shadewalker
 
 # --no-access-log: uvicorn's access log ties a visitor's IP to their
-#   searched text (/geocode?q=) and route coordinates — privacy, decided
-#   2026-08-30. App-level logs (startup, warnings) still go to journald.
+#   searched text (/geocode?q=) and route coordinates — privacy.
+#   App-level logs (startup, warnings) still go to journald.
 # --no-server-header: don't advertise the stack.
 # Bind to localhost only — Caddy is the sole public entry point.
 ExecStart=/opt/shadewalker/.venv/bin/uvicorn server.app:app \
@@ -42,10 +42,8 @@ Restart=always
 RestartSec=3
 
 # Memory guard — the box has 2GB total and no swap. A normal start peaks
-# ~0.73GB since `server-memory` (measured on the box 2026-09-26; 1.33GB
-# with building shade before it, ~1.1GB before that); a
-# cold-cache start peaked >1.77GB, which on
-# 2026-09-01 thrashed the whole droplet unresponsive for 8+ minutes before
+# ~0.73GB (measured on the box 2026-09-26); a runaway start once passed
+# 1.77GB and thrashed the whole droplet unresponsive for 8+ minutes before
 # the kernel OOM killer fired. The cap converts any such runaway into a
 # clean kill of THIS unit the moment it crosses 1.7GB; MemoryHigh starts
 # reclaiming/throttling it before that. Raise both only with a bigger box.
@@ -56,9 +54,8 @@ MemoryMax=1700M
 # the public komoot instance) — nothing else moves:
 # Environment=SHADEWALKER_PHOTON_URL=http://127.0.0.1:2322
 
-# Hardening. The service only READS its own tree — it writes nothing
-# (the one write it ever had, the coverage cache, died with the map's
-# coverage outline on 2026-09-03), so no ReadWritePaths at all:
+# Hardening. The service only reads its own tree — it writes nothing,
+# so no ReadWritePaths at all:
 # ProtectSystem=strict leaves the whole filesystem read-only to it.
 NoNewPrivileges=true
 PrivateTmp=true

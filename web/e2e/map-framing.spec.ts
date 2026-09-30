@@ -8,7 +8,7 @@ import { mockGeocode, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
  * emulates reduced motion so camera moves apply instantly instead of
  * animating under the assertions.
  *
- * The camera signal is the START MARKER's on-screen bounding box, not
+ * The camera signal is the start marker's on-screen bounding box, not
  * Leaflet's pane transform: the marker's position is the user-visible
  * truth, and a pane transform can survive some camera changes (Leaflet
  * resets its pixel origin on zoom). */
@@ -117,9 +117,9 @@ async function tileZooms(page: Page) {
 
 // A lone point -- A or B with the other still empty. RouteFraming ignores
 // one on purpose (a map tap lands where you're looking), but an address
-// typed or picked in a field is usually somewhere else: its marker landed
-// off-screen and the pick looked like it did nothing (user, 2026-09-29).
-// Now the map pans to it, keeping the zoom.
+// typed or picked in a field is usually somewhere else: otherwise its
+// marker lands off-screen and the pick looks like it did nothing. The
+// map pans to it, keeping the zoom.
 test.describe('a lone address', () => {
   test.beforeEach(async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -208,8 +208,8 @@ test.describe('a lone address', () => {
 
 test.describe('on a short phone map', () => {
   // An iPhone SE's Safari: a 375x220 map (40svh). The desktop padding's
-  // 60px top + 100px bottom left the pair 60px of it -- this trip framed at
-  // zoom 9, its markers 37px apart (user, 2026-09-29).
+  // 60px top + 100px bottom would leave the pair 60px of it -- this trip
+  // framed at zoom 9, its markers 37px apart.
   test.use({ viewport: { width: 375, height: 550 }, hasTouch: true })
 
   test('a Brooklyn-Manhattan pair frames a zoom step closer than the desktop padding allows', async ({
@@ -261,10 +261,9 @@ test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
 
   test('two tapped points frame in the middle of the map, not its right side', async ({ page }) => {
-    // The fit's left padding was 190px "for the legend" (2026-09-29): half
-    // a phone's map, so a tapped pair framed into its right side and
-    // zoomed out -- midpoint at x=260 of 390. The legend is already kept
-    // clear by the bottom padding.
+    // A wide left padding "for the legend" would be half a phone's map,
+    // framing a tapped pair into its right side and zoomed out. The
+    // legend is kept clear by the bottom padding instead.
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.goto('/')
     const map = (await page.locator('.leaflet-container').boundingBox())!

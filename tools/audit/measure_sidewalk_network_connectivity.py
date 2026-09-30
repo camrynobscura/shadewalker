@@ -1,31 +1,27 @@
-"""Is OSM's NYC sidewalk network actually disconnected, or did we measure
-a subset that could not possibly be connected?
+"""Is OSM's NYC sidewalk network actually disconnected, or does a naive
+read measure a subset that could not possibly be connected?
 
 WHY
 ---
-A standing project claim (CLAUDE.md) says OSM's sidewalk layer "splits
+Read as `footway=sidewalk` and nothing else, OSM's sidewalk layer splits
 into 43,294 disconnected components, the largest holding 0.2% of its
-nodes ... so it cannot be routed on as-is", and that claim is the stated
-justification for building on street centerlines instead.
+nodes -- which looks like proof it cannot be routed on as-is.
 
-But that number came from the `any_sidewalks_*.graphml` cache, which is
-ANY_SIDEWALK_FILTER's output -- `["footway"="sidewalk"]` and nothing
-else. Sidewalks do not join to each other directly; they join THROUGH
+But sidewalks do not join to each other directly; they join through
 crossings. Measuring sidewalks with the crossings removed guarantees one
 fragment per block face no matter how well OSM is mapped, so the figure
-may be an artifact of the subset rather than a fact about OSM.
+is an artifact of the subset rather than a fact about OSM.
 
 This settles it by building three graphs from the pinned extract and
 comparing:
 
-  A  footway=sidewalk only            (reproduces the standing claim)
+  A  footway=sidewalk only            (reproduces the naive figure)
   B  sidewalk + footway=crossing      (adds what actually joins them)
-  C  every pedestrian-usable way      (sidewalks, crossings, centerlines,
+  C  every pedestrian-usable way      (sidewalks, crossings, streets,
                                        paths, steps -- the real network)
 
-If B and C are well connected, the justification for discarding the
-sidewalk layer does not hold as stated, and the 81% of ledger repairs
-that exist to patch our own exclusion have no underlying cause.
+If B and C are well connected, the sidewalk layer is routable as OSM
+draws it.
 
 Local only -- no network, no OSRM.
 """
@@ -43,14 +39,13 @@ sys.path.insert(0, REPO)
 
 from pipeline import config  # noqa: E402
 
-# The pinned extract, from the one place that defines it -- this line
-# used to be a copy in each of these scripts.
+# The pinned extract, from the one place that defines it.
 EXTRACT = config.OSM_EXTRACT_PATH
 
-# Every highway value a pedestrian can use. Kept deliberately BROADER than
+# Every highway value a pedestrian can use. Kept deliberately broader than
 # the sidewalk-only model's own filter: this script's whole job is to
 # compare progressively wider slices of OSM, so its widest slice has to
-# include street centerlines too.
+# include the streets themselves too.
 WALKABLE_HIGHWAY = {
     "primary", "primary_link", "secondary", "secondary_link",
     "tertiary", "tertiary_link", "unclassified", "residential",
@@ -63,10 +58,8 @@ def is_reality(tags):
     """Any mapped way a pedestrian can actually walk, sidewalks and
     crossings included.
 
-    Inlined rather than imported: the module this used to come from
-    (`verify_connections_against_osm.py`) audited the retired gap ledger
-    and is not committed, so importing it would leave this script broken
-    on a fresh checkout.
+    Inlined rather than imported from the pipeline, so this instrument's
+    definition of "walkable" is independent of the code it checks.
     """
     hw = tags.get("highway")
     if hw == "cycleway":
