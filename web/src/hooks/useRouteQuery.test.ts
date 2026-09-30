@@ -2,6 +2,7 @@ import { cleanup, renderHook, waitFor } from '@testing-library/react'
 import { act } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RouteError, type RouteFeature, type RouteResponse } from '../api'
+import { rejectOnAbort } from '../test/rejectOnAbort'
 import { ROUTE_TIMEOUT_MS, useRouteQuery } from './useRouteQuery'
 
 const { fetchRoute } = vi.hoisted(() => ({ fetchRoute: vi.fn() }))
@@ -114,10 +115,7 @@ describe('useRouteQuery', () => {
     try {
       // A hung server: the promise settles only when the signal aborts,
       // and then with the abort reason -- exactly what fetch() does.
-      fetchRoute.mockImplementation(
-        (_from, _to, _weights, signal: AbortSignal) =>
-          new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason))),
-      )
+      fetchRoute.mockImplementation((_from, _to, _weights, signal: AbortSignal) => rejectOnAbort(signal))
       const { result } = renderHook(() => useRouteQuery(START, END, 15))
       expect(result.current.loading).toBe(true)
 
@@ -137,19 +135,25 @@ describe('useRouteQuery', () => {
     }
   })
 
-  it('a superseded request (cleanup abort) stays silent -- no error, no timeout later', async () => {
+  it('a request superseded mid-fetch (FIND_ROUTE again) stays silent -- no error, no timeout later', async () => {
     vi.useFakeTimers()
     try {
-      fetchRoute.mockImplementation(
-        (_from, _to, _weights, signal: AbortSignal) =>
-          new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason))),
-      )
-      const { result, unmount } = renderHook(() => useRouteQuery(START, END, 15))
-      unmount()
+      fetchRoute.mockImplementation((_from, _to, _weights, signal: AbortSignal) => rejectOnAbort(signal))
+      const { result } = renderHook(() => useRouteQuery(START, END, 15))
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(ROUTE_TIMEOUT_MS + 1)
+        await vi.advanceTimersByTimeAsync(ROUTE_TIMEOUT_MS / 2)
+      })
+
+      act(() => result.current.setEnd({ lat: 40.69, lon: -73.98 }))
+      act(() => result.current.findRoute()) // cancels the first request
+      expect(fetchRoute).toHaveBeenCalledTimes(2)
+
+      // Past the first request's deadline, short of the second's.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ROUTE_TIMEOUT_MS / 2 + 1)
       })
       expect(result.current.error).toBeNull()
+      expect(result.current.loading).toBe(true) // the second is still on its way
     } finally {
       vi.useRealTimers()
     }
@@ -249,16 +253,7 @@ describe('useRouteQuery', () => {
   })
 
   it('emptying a field while a route loads stops loading: no trip, nothing to wait for', async () => {
-    // A browser's fetch rejects a cancel with a DOMException named
-    // AbortError, which the hook treats as "superseded, say nothing". This
-    // test environment's own abort reason isn't a DOMException the hook
-    // recognises (it would read as a network failure), so reject with one.
-    fetchRoute.mockImplementation(
-      (_from, _to, _weights, signal: AbortSignal) =>
-        new Promise((_, reject) =>
-          signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
-        ),
-    )
+    fetchRoute.mockImplementation((_from, _to, _weights, signal: AbortSignal) => rejectOnAbort(signal))
     const { result } = renderHook(() => useRouteQuery(START, END, 15))
     expect(result.current.loading).toBe(true)
 

@@ -2,6 +2,7 @@ import { cleanup, renderHook } from '@testing-library/react'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GeocodeResult } from '../api'
+import { rejectOnAbort } from '../test/rejectOnAbort'
 import { SUGGEST_DEBOUNCE_MS, useGeocodeSuggestions } from './useGeocodeSuggestions'
 
 // Mock the network boundary, not fetch itself -- suggest() is api.ts's
@@ -76,6 +77,22 @@ describe('useGeocodeSuggestions', () => {
     await elapse(SUGGEST_DEBOUNCE_MS * 2)
     expect(result.current).toEqual([])
     expect(suggest).toHaveBeenCalledTimes(1)
+  })
+
+  it('a lookup superseded mid-flight is cancelled quietly: the list stays until the new answer', async () => {
+    const { result, rerender } = render({ query: 'court st', enabled: true })
+    await elapse(SUGGEST_DEBOUNCE_MS)
+    expect(result.current).toEqual(RESULTS)
+
+    suggest.mockImplementation((_query: string, signal: AbortSignal) => rejectOnAbort(signal))
+    rerender({ query: 'court str', enabled: true })
+    await elapse(SUGGEST_DEBOUNCE_MS) // this lookup is now in flight
+    expect(suggest).toHaveBeenCalledTimes(2)
+
+    rerender({ query: 'court stre', enabled: true }) // the next keystroke cancels it
+    await elapse(0)
+    // A failure would empty the list; a cancel leaves the current one.
+    expect(result.current).toEqual(RESULTS)
   })
 
   it('a failed lookup clears rather than keeping a stale list', async () => {
