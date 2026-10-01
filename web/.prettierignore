@@ -5,5 +5,5 @@ test-results
 blob-report
 # Static assets, never hand-formatted.
 public
-# Personal working notes (gitignored); prose wrapping there is deliberate.
-CLAUDE.md
+# Markdown is prose; its line wrapping is deliberate.
+*.md
