@@ -233,6 +233,30 @@ test.describe('on a phone', () => {
     await expect(page.getByRole('button', { name: 'Find route' })).toBeVisible()
   })
 
+  test('two long addresses share the trip line: neither pushes the other off', async ({ page }) => {
+    await mockGeocode(page)
+    const from = 'Whole Foods Market, 250 7th Avenue, Manhattan'
+    const to = "Trader Joe's, 130 Court Street, Brooklyn"
+    await page.goto(
+      `${routeUrl(POINT_A, POINT_B)}&fromq=${encodeURIComponent(from)}&toq=${encodeURIComponent(to)}`,
+    )
+    await expect(tripBox(page)).toBeVisible()
+    // Read out in full, whatever is cut off on screen.
+    await expect(tripBox(page)).toHaveAccessibleName(`Change trip: ${from} to ${to}`)
+    const widths = await tripBox(page).evaluate(
+      (box, texts) => {
+        const places = [...box.querySelectorAll('span')].filter((el) => texts.includes(el.textContent ?? ''))
+        return places.map((el) => Math.round(el.getBoundingClientRect().width))
+      },
+      [from, to],
+    )
+    expect(widths).toHaveLength(2)
+    // Both cut to the same width, and both inside the screen.
+    expect(Math.abs(widths[0] - widths[1])).toBeLessThanOrEqual(1)
+    expect(widths[0]).toBeGreaterThan(100)
+    expect(widths[0] + widths[1]).toBeLessThan(390)
+  })
+
   test('the route screen has no accessibility violations', async ({ page }) => {
     await mockGeocode(page)
     await page.goto(routeUrl(POINT_A, POINT_B))

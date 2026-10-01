@@ -334,12 +334,12 @@ export function Controls({
           <BackIcon />
           <span className={styles.tripWhere}>
             <span className={styles.visuallyHidden}>Change trip: </span>
-            {start.query}
+            <span className={styles.tripPlace}>{start.query}</span>
             <span className={styles.tripArrow} aria-hidden="true">
               →
             </span>
             <span className={styles.visuallyHidden}> to </span>
-            {end.query}
+            <span className={styles.tripPlace}>{end.query}</span>
           </span>
         </button>
         {/* Phone only (CSS): the same pills under the trip line, so the

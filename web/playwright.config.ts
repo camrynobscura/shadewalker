@@ -62,9 +62,10 @@ export default defineConfig({
   ],
   use: {
     baseURL: `http://localhost:${WEB_PORT}`,
-    // CI keeps the trace of every failed test (uploaded by ci.yml): no
-    // retries there, so 'on-first-retry' would never record one.
-    trace: process.env.CI ? 'retain-on-failure' : 'on-first-retry',
+    // Every failed test keeps its trace, locally and in CI (ci.yml uploads
+    // them): the results folder is emptied by the next run, and with no
+    // retries 'on-first-retry' would never record one.
+    trace: 'retain-on-failure',
   },
   projects: [
     {
