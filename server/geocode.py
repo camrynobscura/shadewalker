@@ -23,6 +23,7 @@ only ever sees our own lean shape ({lat, lon, label}) and a provider swap
 touches exactly one file.
 """
 
+import logging
 from functools import lru_cache
 
 import requests
@@ -43,6 +44,8 @@ _CITY_BBOX = (
 _session = requests.Session()
 _session.headers["User-Agent"] = USER_AGENT
 
+logger = logging.getLogger(__name__)
+
 
 class UpstreamError(Exception):
     """Photon unreachable, timed out, or non-200 — app.py maps this to 502.
@@ -59,8 +62,14 @@ def _get(path: str, params: dict) -> dict:
             timeout=config.PHOTON_TIMEOUT_S,
         )
     except requests.RequestException as exc:
+        # The kind of failure only: the exception's own text holds the
+        # request URL, and with it what someone searched for.
+        logger.warning("[geocode] Photon unreachable: %s", type(exc).__name__)
         raise UpstreamError(str(exc)) from exc
     if resp.status_code != 200:
+        # The one record of the fair-use upstream refusing us (a 429 is a
+        # throttle). The status alone, never the searched text.
+        logger.warning("[geocode] Photon answered %s", resp.status_code)
         raise UpstreamError(f"Photon answered {resp.status_code}")
     return resp.json()
 

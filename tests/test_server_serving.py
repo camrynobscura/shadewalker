@@ -70,17 +70,17 @@ def test_missing_build_serves_api_only(tmp_path, monkeypatch):
 def test_security_headers_on_every_response():
     # On the real app: the middleware wraps API routes and the mount
     # alike. /health is dist-independent, so this asserts safely on any
-    # machine. Referrer-Policy strict-origin-when-cross-origin: route URLs
-    # carry coordinates in the query string, so only the bare origin ever
-    # rides an outbound Referer -- never the path+query (which still lets
-    # the CARTO key be domain-locked, since that needs some referer).
+    # machine. Referrer-Policy strict-origin: the page's link carries
+    # coordinates and typed addresses in the query string, so only the
+    # bare origin ever rides a Referer -- to other sites or back to this
+    # server -- never the path+query.
     client = TestClient(server_app.app)
     resp = client.get("/health")
-    assert resp.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+    assert resp.headers["Referrer-Policy"] == "strict-origin"
     assert resp.headers["X-Content-Type-Options"] == "nosniff"
     # 404s carry them too -- error responses leak referers just as well.
     missing = client.get("/no-such-path-anywhere")
-    assert missing.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+    assert missing.headers["Referrer-Policy"] == "strict-origin"
 
 
 def test_head_mirrors_get_on_every_api_route():

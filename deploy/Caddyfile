@@ -54,7 +54,7 @@ shadewalker.nyc {
 		Content-Security-Policy "default-src 'self'; img-src 'self' data: https://*.basemaps.cartocdn.com; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://cloudflareinsights.com; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
 
 		# Defense in depth — the app sets these too, but so does the edge.
-		Referrer-Policy "strict-origin-when-cross-origin"
+		Referrer-Policy "strict-origin"
 		X-Content-Type-Options "nosniff"
 
 		# Lock down browser features: the app uses geolocation ("use my
@@ -62,8 +62,10 @@ shadewalker.nyc {
 		# nothing on the page can ever reach camera/mic/payment/USB.
 		Permissions-Policy "geolocation=(self), camera=(), microphone=(), payment=(), usb=()"
 
-		# Don't advertise the server software/version.
+		# Don't advertise the server software/version, or the proxy's
+		# name (reverse_proxy adds Via to every proxied response).
 		-Server
+		-Via
 	}
 
 	# Content-hashed bundles never change under a given name -> cache hard.
@@ -76,9 +78,11 @@ shadewalker.nyc {
 
 	# Access log with the sensitive query params stripped: /route carries
 	# coordinates and /geocode carries searched text, neither of which may
-	# ever land in a log file, nor the time a walk is planned for. These
-	# keys ARE the Query() params in server/app.py — keep this list in sync
-	# if an endpoint gains one.
+	# ever land in a log file, nor the time a walk is planned for. The
+	# keys are the Query() params in server/app.py plus the page's own
+	# link params (web/src/App.tsx: from, to, fromq, toq, w, at) — keep
+	# the list in sync if either gains one. The Referer header goes too:
+	# a browser sends the page's full link with every request it makes.
 	# (uvicorn's own access log is already off via --no-access-log; this is
 	# the edge log, kept for ops with the location data scrubbed out.)
 	log {
@@ -88,6 +92,7 @@ shadewalker.nyc {
 		}
 		format filter {
 			fields {
+				request>headers>Referer delete
 				request>uri query {
 					delete from_lat
 					delete from_lon
@@ -104,6 +109,12 @@ shadewalker.nyc {
 					delete lat
 					delete lon
 					delete limit
+					delete from
+					delete to
+					delete fromq
+					delete toq
+					delete w
+					delete at
 				}
 			}
 		}

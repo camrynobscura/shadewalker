@@ -240,6 +240,29 @@ def test_network_failure_raises_upstream_error(monkeypatch):
 
 # --- the cache -----------------------------------------------------------
 
+def test_a_refusal_is_logged_by_status_without_the_searched_text(monkeypatch, caplog):
+    # A throttle from the fair-use upstream must leave a trace; what was
+    # searched for must not.
+    patch_upstream(monkeypatch, photon_body(), status_code=429)
+    with caplog.at_level("WARNING", logger="server.geocode"):
+        with pytest.raises(geocode.UpstreamError):
+            geocode.search("250 court st", 5)
+    assert "Photon answered 429" in caplog.text
+    assert "court" not in caplog.text
+
+
+def test_a_network_failure_is_logged_by_kind_without_the_url(monkeypatch, caplog):
+    def boom(url, params=None, timeout=None):
+        raise requests.ConnectTimeout("timed out: https://photon.example/api?q=250+court+st")
+
+    monkeypatch.setattr(geocode._session, "get", boom)
+    with caplog.at_level("WARNING", logger="server.geocode"):
+        with pytest.raises(geocode.UpstreamError):
+            geocode.search("250 court st", 5)
+    assert "Photon unreachable: ConnectTimeout" in caplog.text
+    assert "court" not in caplog.text
+
+
 def test_repeat_search_hits_cache_not_upstream(monkeypatch):
     calls = patch_upstream(monkeypatch, photon_body(
         feature({"name": "Court Street", "city": "New York", "state": "New York"})))

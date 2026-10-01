@@ -405,6 +405,18 @@ def test_route_takes_feb_29_in_a_common_year(client, monkeypatch):
     assert response.json()["day"] == 29
 
 
+def test_route_takes_the_presets_and_no_more(client):
+    """Each weight is a full route search on the one worker, so the cap is
+    what the frontend sends."""
+    cap = config.MAX_TREE_WEIGHTS_PER_REQUEST
+    at_cap = _get(client, month=7, hour=12, tree_weights=[1.0] * cap)
+    assert at_cap.status_code == 200
+    assert len(at_cap.json()["routes"]) == cap
+    over = _get(client, month=7, hour=12, tree_weights=[1.0] * (cap + 1))
+    assert over.status_code == 400
+    assert over.json() == {"detail": f"tree_weights accepts at most {cap} values"}
+
+
 def test_route_uses_the_hour_it_is_given(client):
     morning = _get(client, month=7, hour=9, tree_weights=[15.0]).json()["routes"][0]["properties"]
     noon = _get(client, month=7, hour=12, tree_weights=[15.0]).json()["routes"][0]["properties"]
