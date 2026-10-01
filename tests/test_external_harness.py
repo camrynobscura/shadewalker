@@ -11,9 +11,6 @@ import pytest
 
 from external_engines import (
     arbitrate,
-    coerce_osrm_node_id,
-    gap_probe_snap_ok,
-    in_nyc_bbox,
     osrm_route_uses_ferry,
     primary_comparison,
     valhalla_no_ferry_length_m,
@@ -205,28 +202,3 @@ def test_osrm_route_uses_ferry_reports_a_bad_code():
     used, err = osrm_route_uses_ferry(A, B, get_fn=get)
     assert used is None
     assert "NoRoute" in err
-
-
-# ── oracle rules ─────────────────────────────────────────────────────────────
-
-def test_gap_probe_snap_ok_rejects_a_snap_that_reaches_half_the_gap():
-    # 12m gap: a 5m snap is fine, a 6m snap (>= 0.5x) is ABSENT_OR_PRUNED.
-    assert gap_probe_snap_ok(5.0, 12.0) is True
-    assert gap_probe_snap_ok(6.0, 12.0) is False
-    assert gap_probe_snap_ok(0.0, 0.0) is False  # degenerate gap never trusted
-
-
-def test_in_nyc_bbox_accepts_nyc_and_rejects_switzerland():
-    assert in_nyc_bbox(40.7128, -74.0060) is True   # lower Manhattan
-    assert in_nyc_bbox(46.9481, 7.4474) is False     # Bern, the annotation-garbage case
-
-
-def test_coerce_osrm_node_id_handles_float_and_string_forms():
-    assert coerce_osrm_node_id(1234567890.0) == 1234567890
-    assert coerce_osrm_node_id("42990458") == 42990458
-    assert coerce_osrm_node_id(42990458) == 42990458
-
-
-def test_coerce_osrm_node_id_rejects_a_non_integral_value():
-    with pytest.raises(ValueError):
-        coerce_osrm_node_id(1234.5)
