@@ -6,7 +6,7 @@ import { useAddressField } from '../hooks/useAddressField'
 import { AddressField } from './AddressField'
 import { CrosshairIcon } from './icons'
 import { TREE_PRESETS } from '../presets'
-import { CANOPY_SHARE_HIDES_TREE_COUNT, displayShade, LOW_SHADE_FRACTION } from '../shade'
+import { CANOPY_SHARE_HIDES_TREE_COUNT, LOW_SHADE_FRACTION } from '../shade'
 import type { ShadeLayers } from '../shadeLayers'
 import { describeClock, leaveTime, type WalkTime } from '../walkTime'
 import { ShadeControl } from './ShadeControl'
@@ -285,7 +285,7 @@ export function Controls({
                 ? null
                 : (routes?.find((r) => r.properties.tree_weight === preset.value) ?? null)
               const numbers = feature?.properties ?? null
-              const shadePct = numbers ? Math.round(displayShade(numbers.shade_fraction) * 100) : 0
+              const shadePct = numbers ? Math.round(numbers.shade_fraction * 100) : 0
               // Arrive by: each route's own leave time, first in its row
               // (bare: the time pill already says Arrive).
               const leave =
@@ -406,7 +406,7 @@ export function Controls({
                   <span aria-hidden="true">// LOW_SHADE:</span>
                   <span className={styles.visuallyHidden}>LOW SHADE:</span>
                 </strong>{' '}
-                {Math.round(displayShade(shown.properties.shade_fraction) * 100)}% shaded over{' '}
+                {Math.round(shown.properties.shade_fraction * 100)}% shaded over{' '}
                 {formatDistance(shown.properties.length_m)} — expect mostly direct sun
               </>
             )}

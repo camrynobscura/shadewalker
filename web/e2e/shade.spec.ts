@@ -76,3 +76,20 @@ test('the shade stat carries real data rather than failing closed', async ({ pag
   expect(shade, 'every preset reading 0% means the shade path is failing closed').toBeGreaterThan(0)
   expect(shade).toBeLessThanOrEqual(100)
 })
+
+/** The number on a row is the server's measured shade for that route,
+ * rounded to a whole percent -- nothing lifts or reshapes it on the way
+ * to the screen. */
+test('each preset shows the measured shade the server sent, rounded', async ({ page }) => {
+  await mockGeocode(page)
+  for (const weight of PRESETS) {
+    const answered = page.waitForResponse((r) => r.url().includes('/route?') && r.ok())
+    await page.goto(routeUrl(POINT_A, POINT_B, weight))
+    const body = (await (await answered).json()) as {
+      routes: { properties: { tree_weight: number; shade_fraction: number } }[]
+    }
+    const sent = body.routes.find((r) => r.properties.tree_weight === weight)
+    expect(sent, `no route for weight ${weight} in the response`).toBeDefined()
+    expect(await readShadePercent(page)).toBe(Math.round(sent!.properties.shade_fraction * 100))
+  }
+})
