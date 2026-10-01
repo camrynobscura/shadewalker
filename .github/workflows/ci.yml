@@ -13,6 +13,7 @@ jobs:
   server-tests:
     name: Server tests (pytest)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
@@ -24,6 +25,7 @@ jobs:
   frontend-checks:
     name: Frontend lint, build, unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
@@ -42,6 +44,7 @@ jobs:
   frontend-e2e:
     name: Frontend e2e (Playwright)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # Playwright's webServer boots `uv run uvicorn` itself (see
@@ -81,21 +84,20 @@ jobs:
   # without holding the merge, as long as it is not listed as a required
   # check in the repo's branch-protection settings. --only-changed diffs
   # against the base branch's tip and counts a comment-only edit as a
-  # change, so a sweep over every spec pays full price.
+  # change, so a sweep over every spec pays full price. A shard with no
+  # changed test stops after listing them.
   frontend-e2e-burn-in:
     name: Frontend e2e burn-in (shard ${{ matrix.shard }} of 4)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # A sweep over every spec is about 8 minutes a shard, plus the install.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          enable-cache: true
-      - run: uv sync
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: lts/*
@@ -103,13 +105,35 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - working-directory: web
         run: npm ci
-      - working-directory: web
-        run: npx playwright install --with-deps chromium webkit
       # The checkout is shallow, so fetch the base branch's tip to diff against.
       - run: git fetch --no-tags --depth=1 origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
         env:
           BASE_REF: ${{ github.base_ref }}
-      - working-directory: web
+      # Count this shard's changed tests before paying for browsers and
+      # their system packages: listing needs neither, and most PRs touch
+      # no spec at all. A listing that fails, or prints no total, fails
+      # the step rather than reading as "nothing to run".
+      - id: changed
+        working-directory: web
+        run: |
+          listing=$(npx playwright test --only-changed="origin/$BASE_REF" --shard=${{ matrix.shard }}/4 --list --pass-with-no-tests)
+          echo "$listing" | tail -1
+          count=$(echo "$listing" | sed -n 's/^Total: \([0-9][0-9]*\) tests\{0,1\} in .*/\1/p')
+          test -n "$count"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+      - if: steps.changed.outputs.count != '0'
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+      - if: steps.changed.outputs.count != '0'
+        run: uv sync
+      - if: steps.changed.outputs.count != '0'
+        working-directory: web
+        run: npx playwright install --with-deps chromium webkit
+      - if: steps.changed.outputs.count != '0'
+        working-directory: web
         run: npx playwright test --only-changed="origin/$BASE_REF" --repeat-each=10 --shard=${{ matrix.shard }}/4 --pass-with-no-tests
         env:
           BASE_REF: ${{ github.base_ref }}
