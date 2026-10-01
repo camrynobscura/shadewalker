@@ -1,43 +1,3 @@
-/** The display shade curve: measured canopy coverage -> estimated
- * experienced shade. Display-only -- routing, clamp_shade_monotonic and
- * the API's shade_fraction are untouched; this maps the number at the
- * last moment before a person reads it.
- *
- * Why: plan-view coverage understates what a walk feels like. The
- * measured mechanism is lane choice -- a walker drifts to the shadiest
- * line the pavement offers, so experienced shade tracks the best lane,
- * while shade_fraction is calibrated to the strip average. Derived
- * 2026-08-27 by tools/audit/derive_display_curve_k.py: over 4,000
- * seeded-random sidewalk edges (425.5 km), best 1m walking lane vs the
- * production 2m-strip average gives k = 1.19-1.23, two estimators
- * agreeing within 0.03, and the implied k is near-constant across
- * coverage deciles, which validates the form, not just the value.
- *
- * Why the floor and not more: perceptual calibration points at 1.2-1.4,
- * but judgment on real streets is contaminated by building shade, which
- * has its own layer -- an exponent tuned to street-level feel would
- * double-count it. The same estimator on building samples gives k
- * 1.13-1.87 at July noon (hard-edged wall bands reward lane choice) and
- * 1.04-1.64 at other slots; 1.2 stays because this is display-only and a
- * per-layer exponent would need per-layer fractions in the response.
- * Wide park paths are knowingly under-served (lane choice grows with
- * width: path-kind measures k 1.46-1.72), and inflating the whole city
- * to chase them isn't worth it.
- *
- * The map is strictly monotone with fixed points at 0 and 1: a bare
- * route stays bare, full coverage stays full, and a shadier route
- * always displays higher than a less shady one -- which is why the
- * Shade_priority monotonicity guarantee survives untouched. Anything
- * that compares displayed values (the stat, the LOW_SHADE warning
- * text) must go through displayShade; anything that reasons about
- * measured coverage (thresholds derived on that scale) stays raw. */
-export const DISPLAY_SHADE_EXPONENT = 1.2
-
-/** Measured coverage fraction (0-1) -> displayed shade fraction (0-1). */
-export function displayShade(fraction: number): number {
-  return 1 - (1 - fraction) ** DISPLAY_SHADE_EXPONENT
-}
-
 /** Below this shade_fraction, the route is objectively exposed — say so
  * instead of overselling. Reads the same continuous stat displayed as
  * "% shaded" right above it, so the warning and the number can never
@@ -52,14 +12,7 @@ export function displayShade(fraction: number): number {
  * user has already said shade is not a priority. Seasonal variation is
  * deliberate, not drift: April really is less shaded than July
  * (CANOPY_BY_MONTH), so the same bar firing more in spring is the honest
- * geography.
- *
- * The display curve does not move this bar: the comparison stays on the
- * raw measured fraction, and because displayShade is strictly monotone,
- * exactly the same routes fire. Only the printed numbers go through the
- * curve (both of them, stat and warning, so they can never disagree); at
- * this bar the warning shows itself at ~18% displayed rather than 15%
- * measured, and its words stay true either way. */
+ * geography. */
 export const LOW_SHADE_FRACTION = 0.15
 
 /** When at least this share of the route's tree score is park-canopy area

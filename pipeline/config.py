@@ -440,10 +440,8 @@ BUILDING_EXCLUDED_FEATURE_CODES = frozenset({"1003"})
 # (the blockface.py rule: never a midpoint). 2 m costs 2.4x the build time.
 SHADOW_SAMPLE_STEP_M = 5.0
 
-# Across each slice, three points: the line itself and +/- half the tree
-# layer's walker strip, so both layers are measured over the same 2 m band
-# and the display curve's lane-choice credit applies once. A slice reads
-# 0, 1/3, 2/3 or 1.
+# Across each slice, three points: the line itself and 1 m either side, the
+# 2 m band a walker occupies. A slice reads 0, 1/3, 2/3 or 1.
 SHADOW_STRIP_OFFSETS_M = (-CANOPY_SAMPLE_STRIP_M / 2, 0.0, CANOPY_SAMPLE_STRIP_M / 2)
 
 # The obstacle-height raster the march runs on (named for what it holds,
