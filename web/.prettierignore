@@ -5,5 +5,5 @@ test-results
 blob-report
 # Static assets, never hand-formatted.
 public
-# Markdown is prose; its line wrapping is deliberate.
+# Markdown is prose, wrapped by hand.
 *.md
