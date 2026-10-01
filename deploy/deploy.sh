@@ -55,6 +55,6 @@ done
 # then restart. --no-default-groups = the server packages only, never
 # the build stack. (Needs uv on the box's PATH and a sudoers rule letting
 # this user restart just this unit — see deploy/README.md.)
-ssh "$HOST" "cd '$DEST' && uv sync --no-default-groups && sudo systemctl restart shadewalker"
+ssh "$HOST" "cd '$DEST' && uv sync --locked --no-default-groups && sudo systemctl restart shadewalker"
 
 echo "deployed to $HOST:$DEST — check https://shadewalker.nyc/health"

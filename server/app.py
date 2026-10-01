@@ -189,18 +189,18 @@ if os.environ.get("SHADEWALKER_DISABLE_RATE_LIMIT"):
 
 # Applies to every response, static files included (middleware wraps the
 # mount too). Only the two headers that belong to the app no matter where
-# it runs: Referrer-Policy (strict-origin-when-cross-origin) because route
-# URLs carry coordinates in the query string -- this keeps the path+query
-# off every outbound Referer (only the bare origin is ever sent), while
-# still letting the CARTO basemap key be locked to our domain, which needs
-# a referer to verify against; nosniff because we serve user-adjacent
-# JSON and static files from one origin. The rest of the header story
-# (CSP, HSTS) depends on final asset origins and TLS, so it lives in the
-# Caddy layer (deploy/Caddyfile).
+# it runs: Referrer-Policy (strict-origin) because the page's link carries
+# coordinates and typed addresses in its query string -- only the bare
+# origin is ever sent as a Referer, to other sites and to this server
+# alike, so the link never reaches a request log; the CARTO basemap still
+# sees which site is asking. nosniff because we serve user-adjacent JSON
+# and static files from one origin. The rest of the header story (CSP,
+# HSTS) depends on final asset origins and TLS, so it lives in the Caddy
+# layer (deploy/Caddyfile).
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Referrer-Policy"] = "strict-origin"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 

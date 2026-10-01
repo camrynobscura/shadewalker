@@ -48,7 +48,7 @@ asset=$(curl -sf "${BASE}/" | grep -oE '/assets/[^"]+\.js' | head -1)
 curl -sfI "${BASE}${asset}" >/dev/null \
   && ok "hashed asset serves (${asset})" || bad "asset ${asset}"
 
-curl -sfI "${BASE}/" | grep -qi "referrer-policy: strict-origin-when-cross-origin" \
+curl -sfI "${BASE}/" | grep -qiE 'referrer-policy: strict-origin[[:space:]]*$' \
   && ok "Referrer-Policy header on static response" || bad "Referrer-Policy header"
 
 curl -sfI "${BASE}/" | grep -qi "x-content-type-options: nosniff" \

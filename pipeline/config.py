@@ -183,13 +183,13 @@ MAX_TREE_WEIGHT = 40.0
 
 # How many tree_weights one /route request may ask for. Each weight is a
 # synchronous Dijkstra run that blocks a worker thread, so an uncapped list
-# is a denial-of-service hole. 8 is double the frontend's four presets:
-# room to experiment from a script without being a meaningful load. Per
-# weight, in-process on a dev Mac (measured 2026-09-09): ~14 ms for a 1 km
-# route, ~95 ms for 20 km, and the production box runs ~4x slower per core,
-# so 8 cross-borough weights still hold the single worker for seconds.
-# Don't raise it without re-measuring the tail.
-MAX_TREE_WEIGHTS_PER_REQUEST = 8
+# is a denial-of-service hole. 4 is exactly the frontend's four presets:
+# nothing real asks for more, and every extra weight is work only a
+# hand-written request could demand. Per weight, in-process on a dev Mac
+# (measured 2026-09-09): ~14 ms for a 1 km route, ~95 ms for 20 km, and
+# the production box runs ~4x slower per core. A fifth preset means
+# raising this with it.
+MAX_TREE_WEIGHTS_PER_REQUEST = 4
 
 # glibc malloc arenas for the server process (server/malloc_arenas.py, #111).
 # By default glibc gives each allocating thread its own arena and an arena
