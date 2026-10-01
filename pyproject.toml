@@ -30,7 +30,7 @@ pipeline = [
     "osmium>=4.3.1",
     # Geodesic lengths and the metric reprojections (pipeline/graph/pedestrian.py,
     # pipeline/scoring/canopy.py); the server does none of that.
-    "pyproj>=3.7.2",
+    "pyproj>=3.8.0",
     "rasterio>=1.5.1",
 ]
 dev = [
