@@ -122,7 +122,7 @@ test('address search with no match has no violations', async ({ page }) => {
   await mockGeocode(page)
   await page.goto('/')
   await page.getByLabel('Start point').fill('Nowhere, USA')
-  // Enter resolves the typed text (desktop has no FIND_ROUTE button).
+  // Enter resolves the typed text.
   await page.keyboard.press('Enter')
   await expect(page.getByText('NOT_FOUND', { exact: false })).toBeVisible()
 

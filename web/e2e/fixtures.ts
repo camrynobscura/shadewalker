@@ -3,9 +3,7 @@ import type { Page } from '@playwright/test'
 /** Builds the query string App.tsx's URL-state effect reads on load
  * (`from`/`to`/`w`) — drives the app straight to a given state without
  * simulating pointer clicks on the Leaflet map, which is brittle in a
- * headless browser. A link with both points is a trip already chosen:
- * it routes at once, no FIND_ROUTE needed (and opens a phone on the
- * route screen). */
+ * headless browser. A link with both points routes at once. */
 export function routeUrl(from: string, to: string, w = 15): string {
   return `/?from=${from}&to=${to}&w=${w}`
 }
@@ -107,11 +105,4 @@ export async function pauseClockAt(page: Page, at: Date): Promise<void> {
  * once a route has arrived, so it's the "a route drew" signal. */
 export function routeDrawn(page: Page) {
   return page.getByRole('heading', { name: 'Directions' })
-}
-
-/** FIND_ROUTE (spoken "Find route"), phones only: there typed addresses
- * and map taps only set points, and the route waits for this. Desktop
- * has no button and routes by itself. */
-export async function findRoute(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Find route' }).click()
 }

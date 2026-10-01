@@ -217,8 +217,8 @@ test.describe('on a short phone map', () => {
   }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await mockGeocode(page)
-    // Outside the pilot fixture, so this stops before FIND_ROUTE: the pair
-    // frames the moment B lands.
+    // Outside the pilot fixture, so no route draws: the pair frames the
+    // moment B lands.
     const places: Record<string, { lat: number; lon: number }> = {
       court: { lat: 40.68, lon: -73.998 },
       times: { lat: 40.758, lon: -73.9855 },

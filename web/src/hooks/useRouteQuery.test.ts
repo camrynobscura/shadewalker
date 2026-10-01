@@ -107,7 +107,7 @@ describe('useRouteQuery', () => {
     const { result } = renderHook(() => useRouteQuery(START, END, 15))
 
     await waitFor(() => expect(result.current.error).not.toBeNull())
-    expect(result.current.error).toBe("couldn't load the route — check your connection and try again")
+    expect(result.current.error).toBe("couldn't load the route — check your connection or refresh the page")
   })
 
   it('gives up on a request that never answers after ROUTE_TIMEOUT_MS, with its own message', async () => {
@@ -129,13 +129,13 @@ describe('useRouteQuery', () => {
         await vi.advanceTimersByTimeAsync(1)
       })
       expect(result.current.loading).toBe(false)
-      expect(result.current.error).toBe('the server took too long — try again')
+      expect(result.current.error).toBe('the server took too long — refresh the page')
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('a request superseded mid-fetch (FIND_ROUTE again) stays silent -- no error, no timeout later', async () => {
+  it('a request superseded mid-fetch (the trip changed) stays silent -- no error, no timeout later', async () => {
     vi.useFakeTimers()
     try {
       fetchRoute.mockImplementation((_from, _to, _weights, signal: AbortSignal) => rejectOnAbort(signal))
@@ -144,8 +144,7 @@ describe('useRouteQuery', () => {
         await vi.advanceTimersByTimeAsync(ROUTE_TIMEOUT_MS / 2)
       })
 
-      act(() => result.current.setEnd({ lat: 40.69, lon: -73.98 }))
-      act(() => result.current.findRoute()) // cancels the first request
+      act(() => result.current.setEnd({ lat: 40.69, lon: -73.98 })) // cancels the first request
       expect(fetchRoute).toHaveBeenCalledTimes(2)
 
       // Past the first request's deadline, short of the second's.
@@ -169,7 +168,7 @@ describe('useRouteQuery', () => {
     expect(result.current.snappedStart).toBeNull()
   })
 
-  it('sends the set walk time; a new time waits for FIND_ROUTE', async () => {
+  it('sends the set walk time, and a new time routes at once', async () => {
     fetchRoute.mockResolvedValue(fakeResponse())
     const sunday = { year: 2026, month: 9, day: 27, hour: 9, minute: 0, arrive: false }
     const { result } = renderHook(() => useRouteQuery(START, END, 15, sunday))
@@ -178,68 +177,35 @@ describe('useRouteQuery', () => {
     expect(fetchRoute.mock.calls[0][4]).toEqual(sunday)
 
     act(() => result.current.setWalkTime(null))
-    expect(fetchRoute).toHaveBeenCalledTimes(1) // editing alone never routes
-
-    act(() => result.current.findRoute())
     await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(2))
     expect(fetchRoute.mock.calls[1][4]).toBeNull()
   })
 
-  it('sends the shade pick; a new pick waits for FIND_ROUTE', async () => {
+  it('sends the shade pick; a new pick routes at once, the same pick again does not', async () => {
     fetchRoute.mockResolvedValue(fakeResponse())
-    const { result } = renderHook(() => useRouteQuery(START, END, 15, null, false, 'trees'))
-    await waitFor(() => expect(result.current.route).not.toBeNull())
-    expect(fetchRoute).toHaveBeenCalledTimes(1)
+    const { result } = renderHook(() => useRouteQuery(START, END, 15, null, 'trees'))
+    await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(1))
     expect(fetchRoute.mock.calls[0][5]).toBe('trees')
 
     act(() => result.current.setLayers('buildings'))
     expect(result.current.layers).toBe('buildings')
-    expect(fetchRoute).toHaveBeenCalledTimes(1) // picking alone never routes
-
-    act(() => result.current.findRoute())
     await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(2))
     expect(fetchRoute.mock.calls[1][5]).toBe('buildings')
-  })
-
-  it('auto (desktop): a new shade pick routes at once; the same pick again does not', async () => {
-    fetchRoute.mockResolvedValue(fakeResponse())
-    const { result } = renderHook(() => useRouteQuery(START, END, 15, null, true))
-    await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(1))
-    expect(fetchRoute.mock.calls[0][5]).toBe('both')
-
-    act(() => result.current.setLayers('trees'))
-    await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(2))
-    expect(fetchRoute.mock.calls[1][5]).toBe('trees')
-    act(() => result.current.setLayers('trees'))
+    act(() => result.current.setLayers('buildings'))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(fetchRoute).toHaveBeenCalledTimes(2)
   })
 
-  it('without points at mount, routes only on FIND_ROUTE', async () => {
-    fetchRoute.mockResolvedValue(fakeResponse())
-    const { result } = renderHook(() => useRouteQuery(null, null, 15))
-    act(() => result.current.setStart(START))
-    act(() => result.current.setEnd(END))
-    expect(fetchRoute).not.toHaveBeenCalled()
-
-    act(() => result.current.findRoute())
-    await waitFor(() => expect(result.current.route).not.toBeNull())
-    expect(fetchRoute).toHaveBeenCalledTimes(1)
-  })
-
-  it('editing a point keeps the drawn route until FIND_ROUTE; the same trip again is not re-fetched', async () => {
+  it('the same point set again is not re-fetched; a changed one is', async () => {
     fetchRoute.mockResolvedValue(fakeResponse())
     const { result } = renderHook(() => useRouteQuery(START, END, 15))
     await waitFor(() => expect(result.current.route).not.toBeNull())
 
-    act(() => result.current.findRoute()) // back, then FIND_ROUTE on the same trip
+    act(() => result.current.setEnd({ ...END }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
     expect(fetchRoute).toHaveBeenCalledTimes(1)
 
     act(() => result.current.setEnd({ lat: 40.69, lon: -73.98 }))
-    expect(result.current.route).not.toBeNull()
-    expect(fetchRoute).toHaveBeenCalledTimes(1)
-
-    act(() => result.current.findRoute())
     await waitFor(() => expect(fetchRoute).toHaveBeenCalledTimes(2))
   })
 
@@ -263,9 +229,9 @@ describe('useRouteQuery', () => {
     expect(result.current.route).toBeNull()
   })
 
-  it('auto (desktop): routes as soon as both points are set, and again on every change', async () => {
+  it('routes as soon as both points are set, and again on every change', async () => {
     fetchRoute.mockResolvedValue(fakeResponse())
-    const { result } = renderHook(() => useRouteQuery(null, null, 15, null, true))
+    const { result } = renderHook(() => useRouteQuery(null, null, 15))
     act(() => result.current.setStart(START))
     expect(fetchRoute).not.toHaveBeenCalled()
     act(() => result.current.setEnd(END))
@@ -283,21 +249,26 @@ describe('useRouteQuery', () => {
     expect(fetchRoute).toHaveBeenCalledTimes(2)
   })
 
-  it('FIND_ROUTE retries the same trip after it failed', async () => {
+  it('a failed trip is not retried until something in it changes', async () => {
     fetchRoute.mockRejectedValueOnce(new Error('network down'))
     const { result } = renderHook(() => useRouteQuery(START, END, 15))
     await waitFor(() => expect(result.current.error).not.toBeNull())
 
     fetchRoute.mockResolvedValue(fakeResponse())
-    act(() => result.current.findRoute())
+    act(() => result.current.setEnd({ ...END })) // the same trip: no retry
+    expect(fetchRoute).toHaveBeenCalledTimes(1)
+    expect(result.current.error).not.toBeNull()
+
+    act(() => result.current.setEnd({ lat: 40.69, lon: -73.98 }))
     await waitFor(() => expect(result.current.route).not.toBeNull())
     expect(fetchRoute).toHaveBeenCalledTimes(2)
+    expect(result.current.error).toBeNull()
   })
 
   it("routeWalkTime stays the drawn route's own while the next one loads", async () => {
     fetchRoute.mockResolvedValue(fakeResponse())
     const arrival = { year: 2026, month: 9, day: 27, hour: 13, minute: 0, arrive: true }
-    const { result } = renderHook(() => useRouteQuery(START, END, 15, arrival, true))
+    const { result } = renderHook(() => useRouteQuery(START, END, 15, arrival))
     await waitFor(() => expect(result.current.routeWalkTime).toEqual(arrival))
 
     fetchRoute.mockImplementation(() => new Promise(() => {})) // the next route never lands

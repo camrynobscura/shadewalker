@@ -98,10 +98,17 @@ describe('fetchRoute errors', () => {
     await expect(fetchRoute(A, B, [0], new AbortController().signal)).rejects.not.toBeInstanceOf(RouteError)
   })
 
-  it('has a wait message for a 429 even without a detail body', async () => {
+  it("says to wait and refresh for a 429, in place of the server's own detail", async () => {
+    mockFetchOnce({ detail: 'too many requests — wait a moment and try again' }, false, 429)
+    await expect(fetchRoute(A, B, [0], new AbortController().signal)).rejects.toThrow(
+      new RouteError('too many routes at once — wait a moment, then refresh the page'),
+    )
+  })
+
+  it('has the same message for a 429 without a detail body', async () => {
     mockFetchOnce({ error: 'Rate limit exceeded: 30 per 1 minute' }, false, 429)
     await expect(fetchRoute(A, B, [0], new AbortController().signal)).rejects.toThrow(
-      new RouteError('too many routes at once — wait a moment and try again'),
+      new RouteError('too many routes at once — wait a moment, then refresh the page'),
     )
   })
 })

@@ -303,61 +303,6 @@
   text-box: trim-start cap alphabetic;
 }
 
-/* Phone only (the media block below shows it): desktop routes by itself. */
-.findRoute {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  min-height: var(--target-min);
-  margin: 0;
-  background: var(--green-dim);
-  color: var(--on-accent);
-  border: 1px solid var(--green-dim);
-  border-radius: 0;
-  font-size: var(--caps-size);
-  font-weight: var(--caps-weight);
-  letter-spacing: 0.12em;
-  cursor: pointer;
-}
-
-.findRoute:disabled {
-  background: var(--panel-raised);
-  color: var(--muted);
-  border-color: var(--line);
-  cursor: not-allowed;
-}
-
-/* Phone only; the media block below shows it. */
-.trip {
-  display: none;
-}
-
-.trip svg {
-  flex: none;
-  width: 14px;
-  height: 14px;
-}
-
-/* Each track grows from 0 to its text's width, sharing the room equally:
-   a short address shows whole and a long one takes the rest, and two
-   long ones get half each. */
-.tripWhere {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, max-content) auto minmax(0, max-content);
-}
-
-.tripPlace {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.tripArrow {
-  margin: 0 0.4em;
-}
-
 /* The trip's options as a pill row. The block padding holds the pills'
    44px tap areas; the negative margins hand it back, so the pill, not
    its tap area, sets the spacing (the fields' own gap). */
@@ -371,12 +316,6 @@
   /* 3px more room above than the tap pad (10px in all): a pill weighs
      less than a field. A one-off, off the spacing scale. */
   padding-top: calc(var(--tap-pad) + 3px);
-}
-
-/* Phone only; the media block below shows it. */
-.routeTripOptions {
-  composes: tripOptions;
-  display: none;
 }
 
 .routeRows {
@@ -550,42 +489,6 @@
 /* Tighter rhythm for the stacked mobile layout, where the panel is a
    short scroll window under a 45vh map. */
 @media (max-width: 720px) {
-  /* The phone's two screens (App's data-view): one shows at a time. */
-  :global([data-view='route']) .addressGroup,
-  :global([data-view='plan']) .routeGroup {
-    display: none;
-  }
-
-  /* Flex so the trip line's negative margins don't collapse into the
-     next section's. */
-  .routeGroup {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .findRoute {
-    display: flex;
-  }
-
-  /* The tap area stays 44px; the negative margins hand back what the
-     ~18px line doesn't use, so the line, not the box, sets the spacing. */
-  .trip {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    width: 100%;
-    min-height: var(--target-min);
-    margin: -13px 0;
-    padding: 0;
-    background: none;
-    color: var(--green-dim);
-    border: none;
-    border-radius: 0;
-    font-size: var(--font-size-pill);
-    text-align: left;
-    cursor: pointer;
-  }
-
   /* One line that scrolls sideways, out to the screen edges. */
   .tripOptions {
     flex-wrap: nowrap;
@@ -597,16 +500,6 @@
 
   .tripOptions::-webkit-scrollbar {
     display: none;
-  }
-
-  /* -1.5px: the pill sits 10px under the trip line's words (the half
-     pixel is the words centred in their 44px box), 16px above the
-     divider. The two tap areas overlap by about 11px there; each keeps
-     about 32px of its own. */
-  .routeTripOptions {
-    display: flex;
-    margin-top: -1.5px;
-    margin-bottom: calc(-1 * var(--tap-pad));
   }
 
   .addressFields {

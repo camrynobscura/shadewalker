@@ -58,9 +58,8 @@ interface TimeControlProps {
  * DONE). Tapping Leave now closes the menu; Depart at and
  * Arrive by keep it open for the date and time.
  *
- * The caller places it (a pill row) and decides what a change does:
- * Controls mounts one under the addresses and, on a phone, one on the
- * route screen that re-routes. */
+ * The caller places it: Controls mounts it in the pill row under the
+ * addresses. */
 export function TimeControl({ walkTime, onChange }: TimeControlProps) {
   const mode = modeOf(walkTime)
   const [fields, setFields] = useState(() => fieldsOf(walkTime ?? nowInNewYork()))

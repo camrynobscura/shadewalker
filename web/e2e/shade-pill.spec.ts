@@ -143,7 +143,7 @@ test.describe('on a phone', () => {
     await expect(shadePill(page, 'Building shade')).toBeVisible()
   })
 
-  test('on the route screen a pick re-routes at once', async ({ page }) => {
+  test('a pick re-routes at once', async ({ page }) => {
     await mockGeocode(page)
     await page.goto(routeUrl(POINT_A, POINT_B))
     await expect(routeDrawn(page)).toBeVisible()
@@ -152,29 +152,5 @@ test.describe('on a phone', () => {
     const sent = await nextRouteLayers(page, () => page.getByRole('radio', { name: 'Tree shade' }).tap())
     expect(sent).toBe('trees')
     await expect(shadePill(page, 'Tree shade')).toBeVisible()
-  })
-
-  test('on the plan screen a pick waits for FIND_ROUTE, like the addresses', async ({ page }) => {
-    await mockGeocode(page)
-    await page.goto(routeUrl(POINT_A, POINT_B))
-    await expect(routeDrawn(page)).toBeVisible()
-    await page.getByRole('button', { name: /^Change trip:/ }).tap()
-    // Both screens have a shade pill: wait for the plan screen, or the tap
-    // can land on the route screen's as it hides.
-    await expect(page.getByRole('button', { name: 'Find route' })).toBeVisible()
-
-    const routes: string[] = []
-    page.on('request', (r) => {
-      if (r.url().includes('/route?')) routes.push(r.url())
-    })
-    await shadePill(page, 'All shade').tap()
-    await page.getByRole('radio', { name: 'Tree shade' }).tap()
-    await expect(shadePill(page, 'Tree shade')).toBeVisible()
-    // A "nothing happened" check needs a window to happen in.
-    await page.waitForTimeout(500)
-    expect(routes).toHaveLength(0)
-
-    const sent = await nextRouteLayers(page, () => page.getByRole('button', { name: 'Find route' }).tap())
-    expect(sent).toBe('trees')
   })
 })
