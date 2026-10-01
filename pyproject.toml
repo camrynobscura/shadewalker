@@ -34,7 +34,7 @@ pipeline = [
     "rasterio>=1.5.1",
 ]
 dev = [
-    "httpx2>=2.12.0",
+    "httpx2>=2.13.1",
     "pytest>=9.1.1",
 ]
 
