@@ -78,7 +78,7 @@ export function useAddressField(
   // someone types a fresh address.
   const prevExternalRef = useRef<Point | null>(externalPoint)
 
-  const suggestions = useGeocodeSuggestions(query, suggestOn)
+  const { suggestions, searching } = useGeocodeSuggestions(query, suggestOn)
 
   // What the listbox holds right now: recents while the text is empty,
   // live suggestions once there's typed text. One list at a time — the
@@ -298,6 +298,8 @@ export function useAddressField(
     /** Whether the listbox is rendered: options exist and the dropdown
      * phase is on (typed text, or a focused empty field). */
     open: suggestOn && options.length > 0,
+    /** Whether the suggestions are still catching up with the typed text. */
+    searching,
     onChange,
     resolve,
     selectSuggestion,

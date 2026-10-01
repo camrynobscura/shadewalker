@@ -190,8 +190,8 @@ export async function geocode(query: string): Promise<GeocodeResult | null> {
 /** Autocomplete suggestions: the same /geocode proxy, more results.
  * Separate from geocode() because the failure semantics differ — a
  * failed suggestion lookup means "no dropdown" (silently empty), while a
- * failed submit-resolve means NOT_FOUND. The AbortSignal is the caller's
- * rate control: every newer keystroke cancels the in-flight lookup. */
+ * failed submit-resolve means NOT_FOUND. The AbortSignal lets the caller
+ * drop a lookup it no longer wants (the field stopped suggesting). */
 export async function suggest(query: string, signal: AbortSignal): Promise<GeocodeResult[]> {
   const params = new URLSearchParams({ q: query, limit: '5' })
   const res = await fetch(`/geocode?${params}`, { signal })
