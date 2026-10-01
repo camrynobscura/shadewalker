@@ -12,8 +12,7 @@ interface ShadeControlProps {
  * Building shade -- which kinds
  * of shade the routes are scored by, and the route rows count. It opens
  * the same small white menu as the time pill; a pick applies and closes
- * it. The caller decides what a change does, as for the time pill: the
- * plan screen waits for FIND_ROUTE, the route screen re-routes. */
+ * it. */
 export function ShadeControl({ layers, onChange }: ShadeControlProps) {
   return (
     <PillMenu

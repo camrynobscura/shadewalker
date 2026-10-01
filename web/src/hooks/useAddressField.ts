@@ -11,7 +11,7 @@ type FieldStatus = 'idle' | 'searching' | 'notfound' | 'unavailable' | 'found'
 
 /** Owns one address field's query/status and how to resolve it. A hook,
  * not a component, because Controls needs two independent copies (start,
- * end) that a single shared "find route" submit can resolve together.
+ * end).
  *
  * `externalPoint` is the other direction: a point that landed in `start`/
  * `end` from outside this field's own resolve() -- a map click, or the
@@ -69,9 +69,8 @@ export function useAddressField(
   // gets dropped instead of refilling the field.
   const resolveSeqRef = useRef(0)
   // The lookup resolve() has in flight, so a second caller waits for it
-  // instead of starting another: FIND_ROUTE's tap blurs this field (which
-  // resolves) a moment before its click asks every field to resolve, and
-  // it must wait for that answer before routing.
+  // instead of starting another: Enter resolves the text, and the blur
+  // that follows asks again.
   const inflightRef = useRef<Promise<void> | null>(null)
   // Previous externalPoint, so the effect below can tell a point being
   // cleared (value -> null) from the steady "no point yet" state while

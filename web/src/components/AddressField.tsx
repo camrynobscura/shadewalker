@@ -22,7 +22,6 @@ export function AddressField({
   field,
   emptyAccessory,
   notice,
-  onSubmit,
 }: {
   label: string
   /** The field's map-marker letter ("A" start, "B" end). Rendered as a
@@ -45,10 +44,6 @@ export function AddressField({
    * Controls. The field's own NOT_FOUND wins when both apply: it's the
    * answer to the more recent action (typing beats a parked error). */
   notice?: ReactNode
-  /** Enter with nothing highlighted, after the typed text starts
-   * resolving: the End field's FIND_ROUTE (Controls waits for the
-   * lookup before routing). */
-  onSubmit?: () => void
 }) {
   // useId generates a unique, SSR-safe id so <label htmlFor> can point at
   // the input even when the component appears twice on the page.
@@ -167,7 +162,6 @@ export function AddressField({
       e.preventDefault()
       void field.resolve()
       if (expanded) collapse()
-      onSubmit?.()
       return
     }
     if (!open) {

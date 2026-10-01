@@ -180,7 +180,7 @@
   }
 
   /* Phone header = wordmark + ⓘ only: the tagline and instructions are
-     out of the a11y tree too — room for the panel's two screens. */
+     out of the a11y tree too — room for the panel. */
   .headerText {
     display: none;
   }

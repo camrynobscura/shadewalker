@@ -41,7 +41,6 @@ test('reaches and operates every control in order via keyboard alone', async ({ 
   await expect(page.getByRole('button', { name: 'Clear end point' })).toBeFocused()
 
   // Then the time pill under the addresses: when, right after where.
-  // (No FIND_ROUTE on desktop: it routes by itself.)
   await page.keyboard.press('Tab')
   await expect(page.getByRole('button', { name: 'Start time: Leave now' })).toBeFocused()
 

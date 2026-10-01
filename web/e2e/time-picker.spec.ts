@@ -2,8 +2,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 import { mockGeocode, pauseClockAt, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
 
-// The time pill (#118): a small pill under the address fields -- and on
-// a phone's route screen, under the trip line -- that reads "Leave now"
+// The time pill (#118): a small pill under the address fields that reads "Leave now"
 // until a time is set, then "Depart <when>" or "Arrive <when>". It opens
 // a small white menu under it (PillMenu):
 // Leave now, Depart at or Arrive by, the last two with native date + time
@@ -337,22 +336,20 @@ test.describe('on a phone', () => {
     expect(new URL(page.url()).searchParams.has('from')).toBe(false)
   })
 
-  test('a shared arrival shows on the route screen, under the trip line', async ({ page }) => {
+  test('a shared arrival shows on the pill', async ({ page }) => {
     await mockGeocode(page)
     await page.goto(`${routeUrl(POINT_A, POINT_B)}&arrive=2026-07-15T13:00`)
     await expect(routeDrawn(page)).toBeVisible()
-    // The pill says when, so the trip line says only where.
     await expect(timePill(page, /Arrive 7\/15, 1:00\sPM$/)).toBeVisible()
-    await expect(page.getByRole('button', { name: /^Change trip:/ })).toHaveAccessibleName(/to 3rd Ave$/)
   })
 
-  test('on the route screen a time change re-routes as you go', async ({ page }) => {
+  test('a time change re-routes as you go', async ({ page }) => {
     await mockGeocode(page)
     await page.goto(routeUrl(POINT_A, POINT_B))
     await expect(routeDrawn(page)).toBeVisible()
 
     await timePill(page, 'Leave now').tap()
-    // No FIND_ROUTE here, and no DONE: a pick re-routes at once...
+    // No DONE: a pick re-routes at once...
     const picked = await nextRouteTime(page, () => page.getByRole('radio', { name: 'Arrive by' }).tap())
     expect(picked[4]).toBe('true')
     // ...and typed fields after the pause, the way Shade_priority is instant.
@@ -361,33 +358,5 @@ test.describe('on a phone', () => {
     await expect(timePill(page, /Arrive 7\/15/)).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(page.getByRole('radio', { name: /^Medium: leave by / })).toBeVisible()
-  })
-
-  test('on the plan screen a time change waits for FIND_ROUTE, like the addresses', async ({ page }) => {
-    await mockGeocode(page)
-    await page.goto(routeUrl(POINT_A, POINT_B))
-    await expect(routeDrawn(page)).toBeVisible()
-    await page.getByRole('button', { name: /^Change trip:/ }).tap()
-    // The switch lands a moment later (history.back()), and both screens
-    // have a "Start time: Leave now" pill. Tapped too soon, the tap grabs
-    // the route screen's, which then hides, and Playwright waits on it for
-    // 30s. FIND_ROUTE is on the plan screen only.
-    await expect(page.getByRole('button', { name: 'Find route' })).toBeVisible()
-
-    const routes: string[] = []
-    page.on('request', (r) => {
-      if (r.url().includes('/route?')) routes.push(r.url())
-    })
-    await timePill(page, 'Leave now').tap()
-    await page.getByRole('radio', { name: 'Depart at' }).tap()
-    await fillWhen(page, '2026-07-15', '09:05')
-    await page.keyboard.press('Escape')
-    await expect(timePill(page, /Depart 7\/15, 9:05\sAM$/)).toBeVisible()
-    // A "nothing happened" check needs a window to happen in.
-    await page.waitForTimeout(700)
-    expect(routes).toHaveLength(0)
-
-    const sent = await nextRouteTime(page, () => page.getByRole('button', { name: 'Find route' }).tap())
-    expect(sent).toEqual(['7', '15', '9', '5', null])
   })
 })

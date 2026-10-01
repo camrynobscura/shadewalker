@@ -12,7 +12,7 @@ Built on four public datasets: the Forestry Tree Points (tree data) and Building
 - ~900,000 city tree records, scored onto the side of the street they actually shade
 - One 54 MB export; the whole city routes from ~0.6 GB of RAM (measured on the server, 2026-09-26)
 - Every request computes all four shade presets; typical full response ~400 ms
-- 426 backend tests, 132 unit, 125 end-to-end in Chromium and WebKit, CI on every PR
+- 426 backend tests, 131 unit, 118 end-to-end in Chromium and WebKit, CI on every PR
 - Lighthouse 100/100/100 (accessibility / best practices / SEO); zero axe violations, scanned per app state on every PR
 
 ## How it works
@@ -72,7 +72,7 @@ Four tiers, all in CI except the data-dependent one:
 
 - `uv run pytest` — pipeline + server (426 tests), including route-regression goldens and a latency canary that run only where the real citywide export exists (they skip cleanly elsewhere)
 - `npm run test:unit` — Vitest for pure logic and hooks
-- `npx playwright test` — end-to-end against a committed pilot fixture: smoke, keyboard navigation, axe accessibility scans per app state, the shade-monotonicity guarantee, the time and shade pills in both engines, the phone's two screens and Back through them, night routing, and every backend failure the panel has to explain
+- `npx playwright test` — end-to-end against a committed pilot fixture: smoke, keyboard navigation, axe accessibility scans per app state, the shade-monotonicity guarantee, the time and shade pills in both engines, routing by itself on desktop and phone, night routing, and every backend failure the panel has to explain
 - `npx tsc -b` / `npm run lint` — tsc clean; lint prints nothing (oxlint with the React Compiler rules on)
 
 ## Accessibility

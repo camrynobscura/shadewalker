@@ -25,7 +25,7 @@ function cursorShouldBlink(onMap: boolean): boolean {
 }
 
 /* Phones only (CSS): the ⓘ opens what the desktop header says beside
-   the wordmark, which phones hide to fit the panel's two screens, plus
+   the wordmark, which phones hide to leave room for the panel, plus
    the way to About. A tap-to-open disclosure, not a hover
    tooltip: phones have no hover. It closes on the ⓘ, Escape, or a tap
    anywhere else -- which the backdrop takes, so that tap can't also drop

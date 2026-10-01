@@ -206,20 +206,3 @@ export function CheckIcon() {
     </svg>
   )
 }
-
-/** The trip summary's way back: a left chevron. */
-export function BackIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      width="18"
-      height="18"
-      viewBox="0 0 18 18"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <polyline points="11.5,3 5.5,9 11.5,15" />
-    </svg>
-  )
-}

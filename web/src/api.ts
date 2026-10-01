@@ -143,14 +143,16 @@ export async function fetchRoute(
   const res = await fetch(`/route?${params}`, { signal })
   if (!res.ok) {
     const detail = await errorDetail(res)
+    // A rate limit gets the page's own wording, whatever the body says:
+    // nothing here asks again by itself, so it names the way to (the
+    // server's one 429 body also serves the address search).
+    if (res.status === 429)
+      throw new RouteError('too many routes at once — wait a moment, then refresh the page')
     // A 4xx with our detail is the server explaining itself (outside
-    // coverage, no path, rate limited). A 5xx, or a body that isn't ours,
-    // is the server being broken -- a plain Error, so the caller shows
-    // its generic wording rather than "Routing failed (502)".
+    // coverage, no path). A 5xx, or a body that isn't ours, is the
+    // server being broken -- a plain Error, so the caller shows its
+    // generic wording rather than "Routing failed (502)".
     if (res.status < 500 && detail) throw new RouteError(detail)
-    // slowapi's stock 429 body has no detail; ours does, but keep the
-    // wait message even if that handler ever goes missing.
-    if (res.status === 429) throw new RouteError('too many routes at once — wait a moment and try again')
     throw new Error(`route request failed (${res.status})`)
   }
   return res.json()

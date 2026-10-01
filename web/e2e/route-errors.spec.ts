@@ -1,11 +1,13 @@
 import { expect, test } from '@playwright/test'
-import { mockGeocode, pauseClockAt, POINT_A, POINT_B, routeUrl } from './fixtures'
+import { mockGeocode, pauseClockAt, POINT_A, POINT_B, routeDrawn, routeUrl } from './fixtures'
 
 // What the panel says when the backend is broken, not merely refusing
 // (the refusals -- outside coverage, no path -- are covered elsewhere).
 // Every failure is staged with page.route() in the browser, so the real
 // test backend is never touched: a request that never answers, a proxy
-// error page in place of uvicorn, a rate limit, a dead geocoder.
+// error page in place of uvicorn, a rate limit, a dead geocoder. Nothing
+// asks again by itself: the messages say to refresh, which re-reads the
+// trip from the link.
 
 const ERROR = () => 'alert'
 
@@ -57,7 +59,36 @@ test('a rate-limited route shows the wait message', async ({ page }) => {
     }),
   )
   await page.goto(routeUrl(POINT_A, POINT_B))
-  await expect(page.getByRole(ERROR())).toContainText('wait a moment')
+  await expect(page.getByRole(ERROR())).toContainText('wait a moment, then refresh the page')
+})
+
+test('refreshing the page asks for the failed trip again, and the route draws once the server is back', async ({
+  page,
+}) => {
+  await mockGeocode(page)
+  // Down for the first request only.
+  let down = true
+  let asked = 0
+  await page.route('**/route?*', (route) => {
+    asked++
+    if (!down) return route.continue()
+    return route.fulfill({ status: 502, contentType: 'text/html', body: '<html>502</html>' })
+  })
+  await page.goto('/')
+  await page.getByRole('combobox', { name: 'Start point' }).fill('250 Court St')
+  await page.keyboard.press('Enter')
+  await page.getByRole('combobox', { name: 'End point' }).fill('3rd St & 3rd Ave')
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole(ERROR())).toContainText('refresh the page')
+  expect(asked).toBe(1)
+
+  // The typed trip is in the link, so a refresh is all it takes.
+  down = false
+  await page.reload()
+  await expect(routeDrawn(page)).toBeVisible()
+  expect(asked).toBe(2)
+  await expect(page.getByRole(ERROR())).toHaveText('')
+  await expect(page.getByRole('combobox', { name: 'End point' })).not.toHaveValue('')
 })
 
 test('a dead geocoder shows SEARCH_DOWN, not NOT_FOUND, and Enter retries the same text', async ({

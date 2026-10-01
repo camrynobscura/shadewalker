@@ -13,8 +13,8 @@ const TREE_WEIGHTS = TREE_PRESETS.map((preset) => preset.value)
  * forever. */
 export const ROUTE_TIMEOUT_MS = 10_000
 
-/** The trip a route was asked for: a snapshot of the fields at FIND_ROUTE,
- * so editing them afterwards doesn't re-route until it's pressed again. */
+/** The trip a route was asked for: the fields as they stood, so a new
+ * request goes out only when one of them really changed. */
 interface RouteRequest {
   start: Point
   end: Point
@@ -66,10 +66,6 @@ export interface UseRouteQueryResult {
   setEnd: (point: Point | null) => void
   setWalkTime: (time: WalkTime | null) => void
   setLayers: (layers: ShadeLayers) => void
-  /** FIND_ROUTE: route the trip as the fields stand now. A no-op without
-   * both points; the same trip again (after going back to look) keeps the
-   * route already drawn, unless that one failed. */
-  findRoute: () => void
 }
 
 /** Owns the request → response lifecycle for a route: start/end/treeWeight
@@ -77,15 +73,9 @@ export interface UseRouteQueryResult {
  * stale response can't paint over a fresh one), and the resolved snap
  * points the server returns alongside a route.
  *
- * On a phone (`auto` false) routes are fetched on FIND_ROUTE
- * (`findRoute`), not whenever both points exist: the phone panel is two
- * screens, and the button is the checkpoint where a wrong address gets
- * caught before the app moves on. Points given at mount (a shared
- * link's) count as already found. Editing a field keeps the drawn route
- * until the next FIND_ROUTE; emptying one clears it, since there's no
- * trip left. On desktop (`auto` true) there's no second screen to move
- * to, so no button either: the fields' trip is routed the moment it's
- * complete, and again whenever it changes. Deliberately doesn't touch
+ * There is no button: the fields' trip is routed the moment it's
+ * complete, and again whenever it changes. Emptying a field clears the
+ * route, since there's no trip left. Deliberately doesn't touch
  * the URL — App.tsx mirrors the returned start/end/treeWeight to the query
  * string itself, a separate concern that doesn't need to know how the
  * fetch works.
@@ -104,7 +94,6 @@ export function useRouteQuery(
   initialEnd: Point | null,
   initialTreeWeight: number,
   initialWalkTime: WalkTime | null = null,
-  auto = false,
   initialLayers: ShadeLayers = 'both',
 ): UseRouteQueryResult {
   const [start, setStartRaw] = useState<Point | null>(initialStart)
@@ -129,11 +118,13 @@ export function useRouteQuery(
   const [settled, setSettled] = useState<RouteRequest | null>(null)
   const loading = request !== null && settled !== request
 
-  // Desktop: the complete trip in the fields is the request. Adjusted
+  // The complete trip in the fields is the request. Adjusted
   // while rendering (React's pattern for state that follows other state)
   // rather than in an effect, so the fetch can't lag a render behind. A
-  // failed trip isn't retried until something in it changes.
-  if (auto && start && end) {
+  // failed trip isn't asked for again until something in it changes; the
+  // messages below say to refresh the page, which re-reads the trip from
+  // the link.
+  if (start && end) {
     const fields = { start, end, walkTime, layers }
     if (!sameRequest(request, fields)) {
       setRequest(fields)
@@ -171,20 +162,10 @@ export function useRouteQuery(
     setWalkTimeRaw((current) => (sameWalkTime(current, t) ? current : t))
   }
 
-  function findRoute() {
-    if (!start || !end) return
-    const next = { start, end, walkTime, layers }
-    // The same trip again keeps the route drawn -- unless it failed: a
-    // fresh object retries it.
-    if (sameRequest(request, next) && !error) return
-    setRequest(next)
-    setError(null)
-  }
-
   // Fetch whenever a new trip is requested -- deliberately not on
   // treeWeight, see this hook's own doc comment above. The
   // AbortController in the cleanup cancels the in-flight request each
-  // time a newer one supersedes it (e.g. FIND_ROUTE again before the
+  // time a newer one supersedes it (e.g. an address changed before the
   // previous fetch resolves) — otherwise slow responses could arrive out
   // of order and paint a stale route over a fresh one.
   useEffect(() => {
@@ -216,12 +197,12 @@ export function useRouteQuery(
         // Controls' error slot prefixes "// ERROR:", so these read as its
         // sentence body.
         if (err instanceof DOMException && err.name === 'TimeoutError') {
-          setError('the server took too long — try again')
+          setError('the server took too long — refresh the page')
         } else {
           setError(
             err instanceof RouteError
               ? err.message
-              : "couldn't load the route — check your connection and try again",
+              : "couldn't load the route — check your connection or refresh the page",
           )
         }
         setSnappedStart(null)
@@ -257,6 +238,5 @@ export function useRouteQuery(
     setEnd,
     setWalkTime,
     setLayers,
-    findRoute,
   }
 }
