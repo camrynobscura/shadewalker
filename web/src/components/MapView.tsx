@@ -418,28 +418,19 @@ export function MapView({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url={TILE_URL}
           subdomains={['a', 'b']} /* only the two hosts we preconnect in index.html */
-          // detectRetina is deliberately off, and maxNativeZoom is why.
+          // detectRetina stays off. With it on, Leaflet asks for tiles one
+          // zoom level above the map's own, and that left blank grey tiles
+          // when zoomed in (measured 2026-08-24).
           //
-          // With it on, Leaflet fills the URL's {r} token with @2x and asks
-          // for tiles one zoom level above the map's own. CARTO serves @2x
-          // only to z17: a z18 @2x request does not 404, it hangs and times
-          // out (measured 2026-08-24 -- z17 @2x 200, z18 @2x 15s timeout,
-          // while plain z18 and z19 both return 200). Leaflet leaves a tile
-          // it never receives blank, so zooming in past that point scatters
-          // grey squares over the map.
+          // High-density screens still get sharp tiles: Leaflet turns the
+          // URL's {r} token into @2x on its own, at the map's zoom. Those
+          // tiles are about three times the bytes of plain ones, a cost
+          // accepted so that which side of a street a route uses stays
+          // legible.
           //
-          // Plain tiles go to z19, so turning this off buys real detail at
-          // exactly the zoom that matters here: seeing which side of a street
-          // a route uses is the whole point of per-sidewalk routing. The cost
-          // is softer rendering on high-DPI screens, accepted knowingly. It
-          // should also help Lighthouse performance, since a base tile is a
-          // quarter of @2x's pixels.
-          //
-          // maxNativeZoom is the belt-and-braces half: it caps what is
-          // requested while maxZoom caps what the map allows, so past z19
-          // Leaflet upscales the last real tile instead of requesting one
-          // that may not exist. That makes blank tiles structurally
-          // impossible even if CARTO's ceiling moves again.
+          // maxNativeZoom caps what is requested while maxZoom caps what the
+          // map allows, so past z19 Leaflet upscales the last real tile
+          // instead of requesting one that may not exist.
           maxNativeZoom={19}
           maxZoom={20}
         />

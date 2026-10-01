@@ -1,7 +1,7 @@
-# Data is regenerable from the pipeline — never committed (can be 100s of MB
-# citywide). The committed pilot test fixture lives in tests/fixtures/, NOT
-# here — data/tiles/ must hold only real production tiles, so nothing the
-# tests depend on ever loads into the production server by accident.
+# Data is regenerable from the pipeline and never committed. The committed
+# pilot test fixture lives in tests/fixtures/, not here: the server loads
+# every export it finds in data/export/, so nothing the tests depend on may
+# sit beside the real one.
 data/*
 
 # Python
@@ -13,7 +13,7 @@ __pycache__/
 # Secrets — uv auto-loads this at run time; never commit it (SOCRATA_APP_TOKEN)
 .env
 
-# Frontend (arrives in M4)
+# Frontend
 node_modules/
 web/dist/
 
