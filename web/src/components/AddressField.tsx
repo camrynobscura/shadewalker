@@ -321,6 +321,11 @@ export function AddressField({
                 // RECENT
               </li>
             )}
+            {field.searching && (
+              <li className={styles.searchingRow} role="presentation" aria-hidden="true">
+                // SEARCHING…
+              </li>
+            )}
             {options.map((suggestion, i) => (
               <li
                 key={`${suggestion.label}-${i}`}
@@ -345,11 +350,18 @@ export function AddressField({
             ))}
           </ul>
         )}
+        {/* The first answer can take a second or more, so the wait gets a
+            line where the list will appear. Not a listbox and unspoken:
+            the status line below tells screen readers. */}
+        {!open && field.searching && focused && (
+          <div className={styles.suggestList} aria-hidden="true">
+            <div className={styles.searchingRow}>// SEARCHING…</div>
+          </div>
+        )}
       </div>
       {/* role="status" = a polite live region: screen readers announce the
-          result without stealing focus. Nothing shown for 'searching': a
-          lookup is sub-second, and a per-field "searching" line just
-          flickers on and off. */}
+          result without stealing focus. While suggestions load it holds
+          only a spoken "Searching", so the panel's layout stays still. */}
       <p
         className={
           field.status === 'notfound' || field.status === 'unavailable' || notice
@@ -370,7 +382,7 @@ export function AddressField({
             unavailable — tap the map instead
           </>
         ) : (
-          notice
+          (notice ?? (field.searching && <span className={styles.visuallyHidden}>Searching…</span>))
         )}
       </p>
     </div>

@@ -176,6 +176,13 @@
   color: var(--muted);
 }
 
+.searchingRow {
+  composes: recentHeader;
+  display: flex;
+  align-items: center;
+  min-height: var(--target-min);
+}
+
 .suggestOption {
   display: flex;
   align-items: center;
