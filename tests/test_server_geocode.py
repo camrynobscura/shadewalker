@@ -117,6 +117,52 @@ def test_search_parses_plain_address():
     assert parsed is not None and parsed["label"] == "575 Henry Street, New York"
 
 
+def test_search_named_place_carries_its_street_address():
+    # Two branches of a chain in one borough must not read the same.
+    f = feature({"name": "Whole Foods Market", "housenumber": "250", "street": "7th Avenue",
+                 "locality": "Chelsea District", "district": "Manhattan", "city": "New York"})
+    parsed = geocode._parse_search_feature(f)
+    assert parsed is not None and parsed["label"] == "Whole Foods Market, 250 7th Avenue, Manhattan"
+
+
+def test_search_named_place_without_an_address_carries_its_neighborhood():
+    f = feature({"name": "Whole Foods Promenade", "locality": "Gowanus",
+                 "district": "Brooklyn", "city": "New York"})
+    parsed = geocode._parse_search_feature(f)
+    assert parsed is not None and parsed["label"] == "Whole Foods Promenade, Gowanus, Brooklyn"
+
+
+def test_search_named_street_does_not_repeat_itself_as_its_address():
+    # A feature whose `street` is its own name must not say it twice.
+    f = feature({"name": "Court Street", "street": "Court Street",
+                 "locality": "Cobble Hill", "district": "Brooklyn", "city": "New York"})
+    parsed = geocode._parse_search_feature(f)
+    assert parsed is not None and parsed["label"] == "Court Street, Brooklyn"
+
+
+def test_search_plain_address_stays_short():
+    f = feature({"housenumber": "575", "street": "Henry Street", "locality": "Carroll Gardens",
+                 "district": "Brooklyn", "city": "New York"})
+    parsed = geocode._parse_search_feature(f)
+    assert parsed is not None and parsed["label"] == "575 Henry Street, Brooklyn"
+
+
+def test_search_merges_results_that_read_the_same(monkeypatch):
+    shop = {"name": "Whole Foods", "housenumber": "301", "street": "West 50th Street",
+            "district": "Manhattan", "city": "New York", "state": "New York"}
+    patch_upstream(monkeypatch, photon_body(
+        feature(shop, lon=-73.9870, lat=40.7627),
+        feature(shop, lon=-73.9871, lat=40.7628),
+        feature({**shop, "housenumber": "66", "street": "Broadway"}),
+    ))
+    results = geocode.search("whole foods", 5)
+    assert [r["label"] for r in results] == [
+        "Whole Foods, 301 West 50th Street, Manhattan",
+        "Whole Foods, 66 Broadway, Manhattan",
+    ]
+    assert results[0]["lon"] == -73.9870  # the first of a pair is the one kept
+
+
 def test_search_label_does_not_repeat_context():
     f = feature({"name": "New York", "city": "New York"})
     parsed = geocode._parse_search_feature(f)

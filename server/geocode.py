@@ -73,12 +73,19 @@ def search(q: str, limit: int) -> tuple[dict, ...]:
     so nobody gets a list they might mutate."""
     data = _get("/api", {"q": q, "limit": limit, "lang": "en", "bbox": _CITY_BBOX})
     results = []
+    seen_labels = set()
     for feature in data.get("features", []):
         if not _in_nyc(feature.get("properties", {})):
             continue
         parsed = _parse_search_feature(feature)
-        if parsed is not None:
-            results.append(parsed)
+        if parsed is None:
+            continue
+        # OSM often maps one shop twice (a point and its building), and
+        # two rows a person cannot tell apart are one choice, not two.
+        if parsed["label"] in seen_labels:
+            continue
+        seen_labels.add(parsed["label"])
+        results.append(parsed)
     return tuple(results)
 
 
@@ -118,19 +125,35 @@ def _in_nyc(props: dict) -> bool:
 
 def _parse_search_feature(feature: dict) -> dict | None:
     """One Photon GeoJSON feature → {lat, lon, label}, or None if it has
-    nothing displayable. Label is "primary, context": the thing itself,
-    then the neighborhood (Photon's `district`) or city that tells two
-    same-named streets apart."""
+    nothing displayable. The label reads "the thing, where on the street,
+    borough": a named place carries its street address, because a chain
+    has many branches in one borough and the name alone cannot tell them
+    apart. A named place with no address (a park, a plaza, a street)
+    carries its neighborhood instead."""
     coords = feature.get("geometry", {}).get("coordinates")
     if not coords or len(coords) < 2:
         return None
-    primary = _primary_name(feature.get("properties", {}))
+    props = feature.get("properties", {})
+    primary = _primary_name(props)
     if primary is None:
         return None
-    props = feature.get("properties", {})
-    context = props.get("district") or props.get("city")
-    label = f"{primary}, {context}" if context and context != primary else primary
-    return {"lat": coords[1], "lon": coords[0], "label": label}
+    parts = [primary]
+    if props.get("name"):
+        parts.append(_street_address(props) or props.get("locality"))
+    parts.append(props.get("district") or props.get("city"))
+    label_parts = []
+    for part in parts:
+        if part and part not in label_parts:
+            label_parts.append(part)
+    return {"lat": coords[1], "lon": coords[0], "label": ", ".join(label_parts)}
+
+
+def _street_address(props: dict) -> str | None:
+    """"250 7th Avenue", or just the street when there is no number."""
+    street = props.get("street")
+    if props.get("housenumber") and street:
+        return f"{props['housenumber']} {street}"
+    return street or None
 
 
 def _primary_name(props: dict) -> str | None:
@@ -139,10 +162,7 @@ def _primary_name(props: dict) -> str | None:
     typed "Lucali" wants Lucali back."""
     if props.get("name"):
         return props["name"]
-    street = props.get("street")
-    if props.get("housenumber") and street:
-        return f"{props['housenumber']} {street}"
-    return street or None
+    return _street_address(props)
 
 
 def _reverse_label(props: dict) -> str | None:

@@ -338,9 +338,17 @@
   height: 14px;
 }
 
+/* Each track grows from 0 to its text's width, sharing the room equally:
+   a short address shows whole and a long one takes the rest, and two
+   long ones get half each. */
 .tripWhere {
   flex: 1;
   min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) auto minmax(0, max-content);
+}
+
+.tripPlace {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
