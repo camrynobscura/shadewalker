@@ -22,21 +22,3 @@ web/dist/
 
 # Editor: VS Code's Markdown Preview Enhanced writes its config here
 .crossnote/
-
-# Claude Code local (per-machine) state — settings, plans, scheduled-task locks
-.claude/
-
-# Every .md file is a personal/working note and stays OUT of git -- the sole
-# exception is the public README. This un-anchored *.md (with the README
-# negation) covers, at any depth and automatically as new ones appear:
-#   - CLAUDE.md, incl. nested per-area ones (web/CLAUDE.md, any future
-#     server//pipeline/ equivalent) -- these MUST stay in place, Claude Code
-#     auto-loads them by walking the tree; they are ignored, never moved.
-#   - PLAN.md (current state/next steps), HISTORY.md + history/ (the narrative
-#     it indexes), FIXES.md (open-bug punch list), REFETCH.md (per-refetch
-#     rituals), EXTERNAL_AUDIT.md, and any ad-hoc note (accessibility-audit.md).
-# If a doc ever SHOULD be tracked (a committed spec, an ADR), add its own
-# `!path` negation alongside README's below.
-*.md
-!README.md
-history/
