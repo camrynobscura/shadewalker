@@ -62,5 +62,46 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 
+# No devices, kernel settings, clock, hostname, namespaces or special
+# privileges: a server that reads files and speaks HTTP needs none of them.
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RemoveIPC=true
+UMask=0077
+
+# Internet sockets for Caddy on localhost and the outbound geocoder calls,
+# plus Unix sockets, which reach nothing off the box.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Only the system calls an ordinary service makes; a blocked call fails
+# with EPERM instead of killing the process. No memory that is both
+# writable and executable.
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+MemoryDenyWriteExecute=true
+
+# Other processes and most of /proc hidden, and a private user mapping.
+ProtectProc=invisible
+ProcSubset=pid
+PrivateUsers=true
+
+# `systemd-analyze security shadewalker`: 8.3 before the settings above,
+# 1.1 after (systemd 255, measured on the box 2026-10-01). What still
+# counts is the network the app needs (Caddy reaches it on localhost; it
+# calls the geocoder), and the read-only clock device ProtectClock allows,
+# which PrivateDevices leaves out of /dev anyway.
+
 [Install]
 WantedBy=multi-user.target
