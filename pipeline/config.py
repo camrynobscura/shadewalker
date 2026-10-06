@@ -207,7 +207,26 @@ SERVER_MALLOC_ARENAS = 1
 # instance by default, a self-hosted index by flipping this env var; the
 # frontend never knows which.
 PHOTON_URL = os.environ.get("SHADEWALKER_PHOTON_URL", "https://photon.komoot.io")
-PHOTON_TIMEOUT_S = 3.0
+# How long a search waits on Photon before the backup answers instead. Its
+# slowest normal answer measured from the server was 1.66 s (2026-09-23).
+PHOTON_TIMEOUT_S = 2.0
+# The backup that answers while Photon is failing: NYC Planning's GeoSearch,
+# a public Pelias server over the city's Property Address Directory. It
+# knows addresses and landmarks but no businesses, which is why it is the
+# backup and not the main search.
+BACKUP_GEOCODER_URL = os.environ.get(
+    "SHADEWALKER_BACKUP_GEOCODER_URL", "https://geosearch.planninglabs.nyc/v2")
+BACKUP_GEOCODER_TIMEOUT_S = 2.0
+# After a Photon failure the backup answers every search, and Photon is
+# asked again in the background at most this often. Short enough that
+# businesses come back soon after it recovers; long enough not to pile
+# requests onto a server that is struggling.
+PHOTON_RECHECK_AFTER_S = 60
+# The backup's reverse lookup offers the nearest address however far away it
+# is (167 m for a point in a Prospect Park meadow, 2026-10-06). Past about a
+# short block it is not where the person is standing, and the page shows
+# coordinates instead.
+BACKUP_REVERSE_MAX_DISTANCE_M = 100
 # A geocoder query is a street address, not a document; anything longer is
 # garbage or abuse and gets a 422.
 MAX_GEOCODE_QUERY_CHARS = 200

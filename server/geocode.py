@@ -1,4 +1,4 @@
-"""Server-side geocoding proxy — Photon upstream, one hop, cached.
+"""Server-side geocoding proxy — Photon upstream, a backup behind it, cached.
 
 The browser never calls a public geocoder directly. Geocoder usage
 policies bind the application in aggregate (Nominatim, for one, caps the
@@ -14,6 +14,13 @@ at once:
 - visitors' IPs and search text stop flowing to a third party; requests
   leave from here under an app-identifying User-Agent instead.
 
+Photon is a free public server with no guarantee, so a second geocoder
+stands behind it (config.BACKUP_GEOCODER_URL). When a Photon call fails,
+the backup answers that search and every search after it; Photon is asked
+again in the background, and takes over once it answers. Only the search
+that discovers an outage waits on Photon. "Photon found nothing" is an
+answer, not a failure, and never goes to the backup.
+
 Query text and coordinates are location data and are deliberately never
 logged here. uvicorn's access log would still see request paths, which
 is why production runs with --no-access-log (server/app.py).
@@ -24,6 +31,9 @@ touches exactly one file.
 """
 
 import logging
+import string
+import threading
+import time
 from functools import lru_cache
 
 import requests
@@ -41,46 +51,162 @@ _CITY_BBOX = (
     f"{config.CITY_BBOX.lon_max},{config.CITY_BBOX.lat_max}"
 )
 
+# The backup lists a lot's named places ahead of its addresses at the same
+# distance, so a reverse lookup reads a few candidates to reach an address.
+_BACKUP_REVERSE_CANDIDATES = 10
+
 _session = requests.Session()
 _session.headers["User-Agent"] = USER_AGENT
 
 logger = logging.getLogger(__name__)
 
+# Whether Photon is failing, shared by every request thread. A failed call
+# sets _photon_down; only a background check that gets an answer clears it.
+_state_lock = threading.Lock()
+_photon_down = False
+_next_check_at = 0.0     # time.monotonic() before which no check starts
+_check_running = False
+
 
 class UpstreamError(Exception):
-    """Photon unreachable, timed out, or non-200 — app.py maps this to 502.
+    """A geocoder unreachable, timed out, or answering anything but usable
+    JSON. search() and reverse() raise it only when the backup failed too;
+    app.py maps it to 502.
 
     Raised (not returned) so lru_cache never memoizes a failure: the next
     request retries the upstream instead of replaying an outage.
     """
 
 
-def _get(path: str, params: dict) -> dict:
-    try:
-        resp = _session.get(
-            f"{config.PHOTON_URL}{path}", params=params,
-            timeout=config.PHOTON_TIMEOUT_S,
-        )
-    except requests.RequestException as exc:
-        # The kind of failure only: the exception's own text holds the
-        # request URL, and with it what someone searched for.
-        logger.warning("[geocode] Photon unreachable: %s", type(exc).__name__)
-        raise UpstreamError(str(exc)) from exc
-    if resp.status_code != 200:
-        # The one record of the fair-use upstream refusing us (a 429 is a
-        # throttle). The status alone, never the searched text.
-        logger.warning("[geocode] Photon answered %s", resp.status_code)
-        raise UpstreamError(f"Photon answered {resp.status_code}")
-    return resp.json()
-
-
-@lru_cache(maxsize=config.GEOCODE_CACHE_MAX_ENTRIES)
 def search(q: str, limit: int) -> tuple[dict, ...]:
     """Forward search, NYC-bounded, English labels. Callers pass q already
     whitespace-normalized (app.py does) so trivially-different keys don't
     double-cache. Returns a tuple — this exact object lives in the cache,
     so nobody gets a list they might mutate."""
-    data = _get("/api", {"q": q, "limit": limit, "lang": "en", "bbox": _CITY_BBOX})
+    return _answer(lambda: _photon_search(q, limit), lambda: _backup_search(q, limit))
+
+
+def reverse(lat: float, lon: float) -> str | None:
+    """Point → short address label, or None when nothing address-shaped is
+    nearby (callers fall back to showing coordinates). app.py rounds the
+    coordinates to 5dp (~1m) first so re-clicks cache-hit."""
+    return _answer(lambda: _photon_reverse(lat, lon), lambda: _backup_reverse(lat, lon))
+
+
+def clear_caches() -> None:
+    """Forget every cached answer and treat Photon as healthy. For tests."""
+    global _photon_down, _next_check_at, _check_running
+    for cached in (_photon_search, _photon_reverse, _backup_search, _backup_reverse):
+        cached.cache_clear()
+    with _state_lock:
+        _photon_down = False
+        _next_check_at = 0.0
+        _check_running = False
+
+
+# --- Which geocoder answers ------------------------------------------------
+
+def _answer(ask_photon, ask_backup):
+    """Photon's answer, or the backup's while Photon is failing.
+
+    The two are cached apart, so an answer the backup gave during an outage
+    (no businesses) is never served once Photon is back.
+    """
+    with _state_lock:
+        photon_down = _photon_down
+    if photon_down:
+        _check_photon_in_background(ask_photon)
+        return ask_backup()
+    try:
+        return ask_photon()
+    except UpstreamError:
+        _mark_photon_down()
+        return ask_backup()
+
+
+def _mark_photon_down() -> None:
+    global _photon_down, _next_check_at
+    with _state_lock:
+        already_down = _photon_down
+        _photon_down = True
+        _next_check_at = _now() + config.PHOTON_RECHECK_AFTER_S
+    if not already_down:
+        logger.warning("[geocode] Photon failed; the backup geocoder answers until it recovers")
+
+
+def _check_photon_in_background(ask_photon) -> None:
+    """Ask Photon the search in hand, off the request's own thread, when a
+    check is due and none is running. The visitor's answer never waits on
+    it. A real search is used so that there is no traffic to Photon when
+    nobody is searching."""
+    global _check_running
+    with _state_lock:
+        if _check_running or _now() < _next_check_at:
+            return
+        _check_running = True
+    _run_in_background(lambda: _check_photon(ask_photon))
+
+
+def _check_photon(ask_photon) -> None:
+    global _photon_down, _next_check_at, _check_running
+    recovered = False
+    try:
+        ask_photon()
+        recovered = True
+    except Exception:
+        # _get has already logged the kind of failure. Anything else is
+        # swallowed too: an escaped exception would leave _check_running
+        # set, and Photon would never be asked again.
+        pass
+    finally:
+        with _state_lock:
+            _check_running = False
+            if recovered:
+                _photon_down = False
+            else:
+                _next_check_at = _now() + config.PHOTON_RECHECK_AFTER_S
+    if recovered:
+        logger.info("[geocode] Photon is answering again")
+
+
+def _run_in_background(task) -> None:
+    threading.Thread(target=task, daemon=True).start()
+
+
+def _now() -> float:
+    return time.monotonic()
+
+
+def _get(upstream: str, url: str, params: dict, timeout_s: float) -> dict:
+    """One GET to a geocoder. `upstream` is its name in the log."""
+    try:
+        resp = _session.get(url, params=params, timeout=timeout_s)
+    except requests.RequestException as exc:
+        # The kind of failure only: the exception's own text holds the
+        # request URL, and with it what someone searched for.
+        logger.warning("[geocode] %s unreachable: %s", upstream, type(exc).__name__)
+        raise UpstreamError(f"{upstream} unreachable: {type(exc).__name__}") from exc
+    if resp.status_code != 200:
+        # The one record of a fair-use upstream refusing us (a 429 is a
+        # throttle). The status alone, never the searched text.
+        logger.warning("[geocode] %s answered %s", upstream, resp.status_code)
+        raise UpstreamError(f"{upstream} answered {resp.status_code}")
+    try:
+        return resp.json()
+    except ValueError as exc:
+        logger.warning("[geocode] %s answered unreadable JSON", upstream)
+        raise UpstreamError(f"{upstream} answered unreadable JSON") from exc
+
+
+# --- Photon ----------------------------------------------------------------
+
+def _photon_get(path: str, params: dict) -> dict:
+    return _get("Photon", f"{config.PHOTON_URL}{path}", params, config.PHOTON_TIMEOUT_S)
+
+
+@lru_cache(maxsize=config.GEOCODE_CACHE_MAX_ENTRIES)
+def _photon_search(q: str, limit: int) -> tuple[dict, ...]:
+    data = _photon_get("/api", {"q": q, "limit": limit, "lang": "en", "bbox": _CITY_BBOX})
     results = []
     seen_labels = set()
     for feature in data.get("features", []):
@@ -99,11 +225,8 @@ def search(q: str, limit: int) -> tuple[dict, ...]:
 
 
 @lru_cache(maxsize=config.GEOCODE_CACHE_MAX_ENTRIES)
-def reverse(lat: float, lon: float) -> str | None:
-    """Point → short address label, or None when nothing address-shaped is
-    nearby (callers fall back to showing coordinates). app.py rounds the
-    coordinates to 5dp (~1m) first so re-clicks cache-hit."""
-    data = _get("/reverse", {"lat": lat, "lon": lon, "lang": "en"})
+def _photon_reverse(lat: float, lon: float) -> str | None:
+    data = _photon_get("/reverse", {"lat": lat, "lon": lon, "lang": "en"})
     features = data.get("features", [])
     if not features:
         return None
@@ -194,3 +317,76 @@ def _reverse_label(props: dict) -> str | None:
     if props.get("osm_key") == "highway" and props.get("name"):
         return props["name"]
     return None
+
+
+# --- The backup (Pelias over the city's address directory) -----------------
+
+def _backup_get(path: str, params: dict) -> dict:
+    return _get("backup geocoder", f"{config.BACKUP_GEOCODER_URL}{path}", params,
+                config.BACKUP_GEOCODER_TIMEOUT_S)
+
+
+@lru_cache(maxsize=config.GEOCODE_CACHE_MAX_ENTRIES)
+def _backup_search(q: str, limit: int) -> tuple[dict, ...]:
+    data = _backup_get("/autocomplete", {"text": q, "size": limit})
+    results = []
+    seen_labels = set()
+    for feature in data.get("features", []):
+        parsed = _parse_backup_feature(feature)
+        if parsed is None or parsed["label"] in seen_labels:
+            continue
+        seen_labels.add(parsed["label"])
+        results.append(parsed)
+    return tuple(results)
+
+
+@lru_cache(maxsize=config.GEOCODE_CACHE_MAX_ENTRIES)
+def _backup_reverse(lat: float, lon: float) -> str | None:
+    """The nearest real address, as an address field needs (the same rule
+    as _reverse_label), and only when it is close by."""
+    data = _backup_get("/reverse", {"point.lat": lat, "point.lon": lon,
+                                    "size": _BACKUP_REVERSE_CANDIDATES})
+    for feature in data.get("features", []):
+        props = feature.get("properties", {})
+        distance_km = props.get("distance")
+        if distance_km is None or distance_km * 1000 > config.BACKUP_REVERSE_MAX_DISTANCE_M:
+            continue
+        address = _backup_address(props)
+        if address:
+            return address
+    return None
+
+
+def _parse_backup_feature(feature: dict) -> dict | None:
+    """One backup feature → {lat, lon, label} in the labels Photon's
+    results use: "350 Fifth Avenue, Manhattan" or "Prospect Park,
+    Brooklyn". Only a result in one of the five boroughs carries `borough`;
+    anything without it (a bare "United States") is dropped."""
+    coords = feature.get("geometry", {}).get("coordinates")
+    if not coords or len(coords) < 2:
+        return None
+    props = feature.get("properties", {})
+    borough = props.get("borough")
+    if not borough:
+        return None
+    # A plain address repeats itself as its name; a named place has no
+    # house number and repeats its name as its street.
+    primary = _backup_address(props) or _title(props.get("name"))
+    if primary is None:
+        return None
+    return {"lat": coords[1], "lon": coords[0], "label": f"{primary}, {borough}"}
+
+
+def _backup_address(props: dict) -> str | None:
+    """"350 Fifth Avenue" when the feature is an address, else None."""
+    if props.get("housenumber") and props.get("street"):
+        return f"{props['housenumber']} {_title(props['street'])}"
+    return None
+
+
+def _title(text: str | None) -> str | None:
+    """The directory is upper case. capwords, not str.title, which would
+    write "5Th Avenue" and "Barclay'S Center"."""
+    if not text:
+        return None
+    return string.capwords(text)

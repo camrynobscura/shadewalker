@@ -1,5 +1,5 @@
 """Tests for server/geocode.py + the /geocode endpoints -- the Photon
-proxy.
+proxy and the backup geocoder behind it.
 
 The behaviors pinned here:
 - the address-not-POI reverse rule: reverse right outside a restaurant
@@ -7,41 +7,76 @@ The behaviors pinned here:
 - upstream failures raise so the LRU cache can never memoize an outage;
 - the cache actually absorbs repeat queries -- politeness to a fair-use
   public upstream is the proxy's reason to exist;
-- the 502 mapping never echoes query text back (location data).
+- the 502 mapping never echoes query text back (location data);
+- when Photon fails the backup answers, Photon is re-asked only in the
+  background, and a backup answer is never served once Photon is back.
 
 No test here touches the network: _session.get is monkeypatched with
-canned Photon GeoJSON. TestClient is used without its context manager on
+canned GeoJSON. TestClient is used without its context manager on
 purpose -- lifespan (and with it the graph load) only runs inside
 `with`, and these endpoints don't need the graph.
 """
+
+import threading
 
 import pytest
 import requests
 from fastapi.testclient import TestClient
 
+from pipeline import config
 from server import geocode
 from server.app import app
 
 client = TestClient(app)
 
+_start_real_thread = geocode._run_in_background
+
 
 @pytest.fixture(autouse=True)
 def clear_caches():
-    """lru_cache outlives each test; a stale hit would silently bypass a
-    test's own monkeypatch and let it assert against another test's data."""
-    geocode.search.cache_clear()
-    geocode.reverse.cache_clear()
+    """lru_cache and the Photon-is-down flag outlive each test; a stale hit
+    would silently bypass a test's own monkeypatch and let it assert
+    against another test's data."""
+    geocode.clear_caches()
     yield
-    geocode.search.cache_clear()
-    geocode.reverse.cache_clear()
+    geocode.clear_caches()
+
+
+@pytest.fixture(autouse=True)
+def background(monkeypatch) -> list:
+    """Background Photon checks are collected here instead of started, so a
+    test runs one when it chooses and no thread outlives a test."""
+    tasks = []
+    monkeypatch.setattr(geocode, "_run_in_background", tasks.append)
+    return tasks
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture
+def clock(monkeypatch) -> FakeClock:
+    fake = FakeClock()
+    monkeypatch.setattr(geocode, "_now", fake)
+    return fake
 
 
 class FakeResponse:
-    def __init__(self, body: dict, status_code: int = 200):
+    def __init__(self, body, status_code: int = 200):
         self._body = body
         self.status_code = status_code
 
-    def json(self) -> dict:
+    def json(self):
+        if isinstance(self._body, Exception):
+            raise self._body
         return self._body
 
 
@@ -69,6 +104,35 @@ def patch_upstream(monkeypatch, body: dict, status_code: int = 200) -> list[dict
 
     monkeypatch.setattr(geocode._session, "get", fake_get)
     return calls
+
+
+def patch_upstreams(monkeypatch, photon, backup=None) -> list[dict]:
+    """Canned answers per upstream: a body (answered with 200), a status
+    code, or an exception to raise. Returns the call log, each call tagged
+    with the upstream it went to."""
+    answers = {"photon": photon, "backup": backup}
+    calls = []
+
+    def fake_get(url, params=None, timeout=None):
+        upstream = "backup" if url.startswith(config.BACKUP_GEOCODER_URL) else "photon"
+        calls.append({"upstream": upstream, "url": url, "params": params, "timeout": timeout})
+        answer = answers[upstream]
+        if isinstance(answer, Exception):
+            raise answer
+        if isinstance(answer, int):
+            return FakeResponse({}, answer)
+        return FakeResponse(answer)
+
+    monkeypatch.setattr(geocode._session, "get", fake_get)
+    return calls
+
+
+def asked(calls: list[dict], upstream: str) -> int:
+    return sum(1 for call in calls if call["upstream"] == upstream)
+
+
+def backup_feature(props: dict, lon: float = -73.99, lat: float = 40.68) -> dict:
+    return feature({"layer": "venue", "source": "nycpad", **props}, lon=lon, lat=lat)
 
 
 # --- reverse label: an address field needs an address, never a POI name --
@@ -273,15 +337,16 @@ def test_repeat_search_hits_cache_not_upstream(monkeypatch):
 
 
 def test_failures_are_never_cached(monkeypatch):
-    # An outage must not be memoized: the next request retries and gets
-    # the real answer once the upstream is back.
-    patch_upstream(monkeypatch, {}, status_code=503)
+    # An outage of both geocoders must not be memoized: the next request
+    # asks again and gets a real answer once one of them is back.
+    patch_upstreams(monkeypatch, photon=503, backup=503)
     with pytest.raises(geocode.UpstreamError):
         geocode.search("smith st", 1)
-    calls = patch_upstream(monkeypatch, photon_body(
-        feature({"name": "Smith Street", "city": "New York", "state": "New York"})))
-    assert geocode.search("smith st", 1)[0]["label"] == "Smith Street, New York"
-    assert len(calls) == 1
+    calls = patch_upstreams(monkeypatch, photon=503, backup=photon_body(
+        backup_feature({"name": "100 SMITH STREET", "housenumber": "100",
+                        "street": "SMITH STREET", "borough": "Brooklyn"})))
+    assert geocode.search("smith st", 1)[0]["label"] == "100 Smith Street, Brooklyn"
+    assert asked(calls, "backup") == 1
 
 
 # --- the endpoints -------------------------------------------------------
@@ -330,3 +395,245 @@ def test_reverse_endpoint_passes_null_through(monkeypatch):
 
 def test_reverse_endpoint_rejects_out_of_range_coords():
     assert client.get("/geocode/reverse", params={"lat": 95, "lon": 0}).status_code == 422
+
+
+# --- the backup geocoder: its labels -------------------------------------
+
+EMPIRE_STATE = backup_feature({"name": "350 FIFTH AVENUE", "housenumber": "350",
+                               "street": "FIFTH AVENUE", "borough": "Manhattan"},
+                              lon=-73.9857, lat=40.7484)
+PROSPECT_PARK = backup_feature({"name": "PROSPECT PARK", "housenumber": None,
+                                "street": "PROSPECT PARK", "borough": "Brooklyn"})
+
+
+def test_backup_address_reads_like_a_photon_address():
+    assert geocode._parse_backup_feature(EMPIRE_STATE) == {
+        "lat": 40.7484, "lon": -73.9857, "label": "350 Fifth Avenue, Manhattan"}
+
+
+def test_backup_named_place_carries_its_borough():
+    # The directory repeats a place's name as its street; the label must not.
+    assert geocode._parse_backup_feature(PROSPECT_PARK)["label"] == "Prospect Park, Brooklyn"
+
+
+def test_backup_labels_are_not_left_in_upper_case():
+    parsed = geocode._parse_backup_feature(backup_feature(
+        {"name": "BARCLAY'S CENTER & ARENA", "street": "BARCLAY'S CENTER & ARENA",
+         "borough": "Brooklyn"}))
+    assert parsed["label"] == "Barclay's Center & Arena, Brooklyn"
+    queens = geocode._parse_backup_feature(backup_feature(
+        {"name": "37-10 30 AVENUE", "housenumber": "37-10", "street": "30 AVENUE",
+         "borough": "Queens"}))
+    assert queens["label"] == "37-10 30 Avenue, Queens"
+    # str.title would have written "5Th".
+    assert geocode._title("EAST 5TH STREET") == "East 5th Street"
+
+
+def test_backup_drops_anything_outside_the_five_boroughs():
+    # What the backup returns for a point it has nothing near.
+    country = feature({"name": "United States", "layer": "country"})
+    assert geocode._parse_backup_feature(country) is None
+    assert geocode._parse_backup_feature({"properties": {"borough": "Brooklyn"}}) is None
+    assert geocode._parse_backup_feature(backup_feature({"borough": "Brooklyn"})) is None
+
+
+# --- the backup geocoder: when it answers --------------------------------
+
+def test_backup_answers_when_photon_times_out(monkeypatch):
+    calls = patch_upstreams(monkeypatch, photon=requests.ReadTimeout("slow"),
+                            backup=photon_body(EMPIRE_STATE, EMPIRE_STATE))
+    results = geocode.search("350 fifth", 5)
+    # Two rows that read the same are one choice, as with Photon.
+    assert [r["label"] for r in results] == ["350 Fifth Avenue, Manhattan"]
+    assert asked(calls, "photon") == 1
+    backup_call = calls[-1]
+    assert backup_call["url"] == f"{config.BACKUP_GEOCODER_URL}/autocomplete"
+    assert backup_call["params"] == {"text": "350 fifth", "size": 5}
+    assert backup_call["timeout"] == config.BACKUP_GEOCODER_TIMEOUT_S
+
+
+def test_backup_answers_when_photon_refuses_or_answers_garbage(monkeypatch):
+    patch_upstreams(monkeypatch, photon=429, backup=photon_body(PROSPECT_PARK))
+    assert geocode.search("prospect park", 1)[0]["label"] == "Prospect Park, Brooklyn"
+
+    geocode.clear_caches()
+    monkeypatch.setattr(geocode._session, "get", _json_error_for_photon(PROSPECT_PARK))
+    assert geocode.search("prospect park", 1)[0]["label"] == "Prospect Park, Brooklyn"
+
+
+def _json_error_for_photon(backup_result: dict):
+    """Photon answers 200 with a body that is not JSON; the backup is fine."""
+    def fake_get(url, params=None, timeout=None):
+        if url.startswith(config.BACKUP_GEOCODER_URL):
+            return FakeResponse(photon_body(backup_result))
+        return FakeResponse(ValueError("Expecting value"))
+    return fake_get
+
+
+def test_photon_finding_nothing_is_an_answer_not_a_failure(monkeypatch):
+    # The backup must never patch Photon's coverage, only its outages.
+    calls = patch_upstreams(monkeypatch, photon=photon_body(), backup=photon_body(PROSPECT_PARK))
+    assert geocode.search("zzzz", 5) == ()
+    assert asked(calls, "backup") == 0
+
+
+def test_while_photon_is_down_searches_do_not_wait_on_it(monkeypatch, clock, background):
+    calls = patch_upstreams(monkeypatch, photon=503, backup=photon_body(PROSPECT_PARK))
+    geocode.search("prospect", 5)          # discovers the outage
+    assert asked(calls, "photon") == 1
+
+    clock.advance(config.PHOTON_RECHECK_AFTER_S - 1)
+    geocode.search("prospect p", 5)
+    geocode.search("prospect pa", 5)
+    assert asked(calls, "photon") == 1     # not asked again
+    assert asked(calls, "backup") == 3
+    assert background == []                # and no check before the wait is up
+
+
+def test_a_due_check_runs_in_the_background_while_the_backup_answers(monkeypatch, clock, background):
+    patch_upstreams(monkeypatch, photon=503, backup=photon_body(PROSPECT_PARK))
+    geocode.search("prospect", 5)
+    clock.advance(config.PHOTON_RECHECK_AFTER_S)
+
+    court = feature({"name": "Court Street", "city": "New York", "state": "New York"})
+    calls = patch_upstreams(monkeypatch, photon=photon_body(court),
+                            backup=photon_body(PROSPECT_PARK))
+    # The visitor's own search is answered by the backup, without Photon.
+    assert geocode.search("prospect park", 5)[0]["label"] == "Prospect Park, Brooklyn"
+    assert asked(calls, "photon") == 0
+    assert len(background) == 1
+
+    # A second search while that check is still out starts no second one.
+    geocode.search("prospect park w", 5)
+    assert len(background) == 1
+
+    background.pop()()                     # the check gets its answer
+    assert asked(calls, "photon") == 1
+    assert calls[-1]["params"]["q"] == "prospect park"   # it asked the search in hand
+    assert geocode.search("court st", 5)[0]["label"] == "Court Street, New York"
+    assert asked(calls, "backup") == 2     # nothing more went to the backup
+
+
+def test_a_check_that_fails_waits_before_the_next_one(monkeypatch, clock, background):
+    calls = patch_upstreams(monkeypatch, photon=requests.ReadTimeout("slow"),
+                            backup=photon_body(PROSPECT_PARK))
+    geocode.search("prospect", 5)
+    clock.advance(config.PHOTON_RECHECK_AFTER_S)
+    geocode.search("prospect p", 5)
+    background.pop()()                     # Photon is still down
+    assert asked(calls, "photon") == 2
+
+    geocode.search("prospect pa", 5)
+    assert background == []                # the wait started over
+    clock.advance(config.PHOTON_RECHECK_AFTER_S)
+    geocode.search("prospect par", 5)
+    assert len(background) == 1
+
+
+def test_a_check_that_blows_up_does_not_block_later_checks(monkeypatch, clock, background):
+    patch_upstreams(monkeypatch, photon=503, backup=photon_body(PROSPECT_PARK))
+    geocode.search("prospect", 5)
+    clock.advance(config.PHOTON_RECHECK_AFTER_S)
+    # A 200 whose JSON is a list, which the parser was never written for.
+    patch_upstreams(monkeypatch, photon=["not", "a", "collection"],
+                    backup=photon_body(PROSPECT_PARK))
+    geocode.search("prospect p", 5)
+    background.pop()()                     # raises inside; must be swallowed
+
+    clock.advance(config.PHOTON_RECHECK_AFTER_S)
+    geocode.search("prospect pa", 5)
+    assert len(background) == 1            # a new check could start
+
+
+def test_a_backup_answer_is_never_served_once_photon_is_back(monkeypatch, clock, background):
+    # During an outage the backup knows no businesses. That empty answer
+    # must not stick to the search after Photon recovers.
+    patch_upstreams(monkeypatch, photon=503, backup=photon_body())
+    assert geocode.search("whole foods", 5) == ()
+
+    shop = feature({"name": "Whole Foods Market", "housenumber": "214", "street": "3rd Street",
+                    "district": "Brooklyn", "city": "New York", "state": "New York"})
+    patch_upstreams(monkeypatch, photon=photon_body(shop), backup=photon_body())
+    clock.advance(config.PHOTON_RECHECK_AFTER_S)
+    geocode.search("whole foods", 5)       # still the backup; starts the check
+    background.pop()()
+    assert geocode.search("whole foods", 5)[0]["label"] == (
+        "Whole Foods Market, 214 3rd Street, Brooklyn")
+
+
+def test_the_real_background_runner_starts_a_thread():
+    ran = threading.Event()
+    _start_real_thread(ran.set)
+    assert ran.wait(timeout=5)
+
+
+def test_the_switch_and_the_recovery_are_logged_without_the_searched_text(
+        monkeypatch, clock, background, caplog):
+    patch_upstreams(monkeypatch, photon=503, backup=photon_body(PROSPECT_PARK))
+    with caplog.at_level("INFO", logger="server.geocode"):
+        geocode.search("250 court st", 5)
+        geocode.search("250 court str", 5)
+        clock.advance(config.PHOTON_RECHECK_AFTER_S)
+        patch_upstreams(monkeypatch, photon=photon_body(), backup=photon_body(PROSPECT_PARK))
+        geocode.search("250 court stre", 5)
+        background.pop()()
+    assert caplog.text.count("the backup geocoder answers until it recovers") == 1
+    assert "Photon is answering again" in caplog.text
+    assert "court" not in caplog.text
+
+
+def test_a_backup_failure_is_logged_by_kind_without_the_url(monkeypatch, caplog):
+    boom = requests.ConnectTimeout("timed out: https://example/autocomplete?text=250+court+st")
+    patch_upstreams(monkeypatch, photon=503, backup=boom)
+    with caplog.at_level("WARNING", logger="server.geocode"):
+        with pytest.raises(geocode.UpstreamError):
+            geocode.search("250 court st", 5)
+    assert "backup geocoder unreachable: ConnectTimeout" in caplog.text
+    assert "court" not in caplog.text
+
+
+# --- the backup geocoder: reverse ----------------------------------------
+
+def test_backup_reverse_takes_the_nearest_address_not_the_named_place(monkeypatch):
+    # The directory lists a lot's named places ahead of its addresses.
+    arena = backup_feature({"name": "BARCLAY'S CENTER & ARENA",
+                            "street": "BARCLAY'S CENTER & ARENA",
+                            "borough": "Brooklyn", "distance": 0.012})
+    address = backup_feature({"name": "620 ATLANTIC AVENUE", "housenumber": "620",
+                              "street": "ATLANTIC AVENUE", "borough": "Brooklyn",
+                              "distance": 0.012})
+    calls = patch_upstreams(monkeypatch, photon=503, backup=photon_body(arena, address))
+    assert geocode.reverse(40.6826, -73.9754) == "620 Atlantic Avenue"
+    backup_call = calls[-1]
+    assert backup_call["url"] == f"{config.BACKUP_GEOCODER_URL}/reverse"
+    assert backup_call["params"]["point.lat"] == 40.6826
+    assert backup_call["params"]["point.lon"] == -73.9754
+
+
+def test_backup_reverse_ignores_an_address_too_far_to_be_where_you_stand(monkeypatch):
+    far_km = (config.BACKUP_REVERSE_MAX_DISTANCE_M + 1) / 1000
+    far = backup_feature({"name": "41 EAST DRIVE", "housenumber": "41", "street": "EAST DRIVE",
+                          "borough": "Brooklyn", "distance": far_km})
+    nowhere = feature({"name": "United States", "layer": "country", "distance": 3195.22})
+    patch_upstreams(monkeypatch, photon=503, backup=photon_body(far, nowhere))
+    assert geocode.reverse(40.6628, -73.9690) is None
+
+
+def test_reverse_endpoint_uses_the_backup_too(monkeypatch):
+    address = backup_feature({"name": "16 MOTT STREET", "housenumber": "16",
+                              "street": "MOTT STREET", "borough": "Manhattan",
+                              "distance": 0.004})
+    patch_upstreams(monkeypatch, photon=requests.ReadTimeout("slow"),
+                    backup=photon_body(address))
+    resp = client.get("/geocode/reverse", params={"lat": 40.71425, "lon": -73.99855})
+    assert resp.status_code == 200
+    assert resp.json() == {"label": "16 Mott Street"}
+
+
+def test_search_endpoint_answers_from_the_backup_when_photon_is_down(monkeypatch):
+    patch_upstreams(monkeypatch, photon=requests.ReadTimeout("slow"),
+                    backup=photon_body(EMPIRE_STATE))
+    resp = client.get("/geocode", params={"q": "350 fifth ave", "limit": 5})
+    assert resp.status_code == 200
+    assert resp.json() == {"results": [
+        {"lat": 40.7484, "lon": -73.9857, "label": "350 Fifth Avenue, Manhattan"}]}

@@ -57,11 +57,9 @@ def rate_limiter_on():
 def _clear_geocode_caches():
     # A cache hit would skip the upstream but still counts against the
     # limiter; clearing keeps each test's mocking clean regardless.
-    geocode.search.cache_clear()
-    geocode.reverse.cache_clear()
+    geocode.clear_caches()
     yield
-    geocode.search.cache_clear()
-    geocode.reverse.cache_clear()
+    geocode.clear_caches()
 
 
 class _FakePhoton:
