@@ -257,8 +257,38 @@ test.describe('on a short phone map', () => {
   })
 })
 
+// The landing view: with no route the map opens pulled back on a piece of
+// the city with water and bridges in it (Barclays Center up to Washington
+// Square Park), not on a close-up of street grid, which was zoom 15. The
+// frame is two corners, so the zoom depends on the map's size; a link with
+// one point still opens close-up on that point.
+test('with no route the map opens pulled back, and a one-point link still opens close-up', async ({
+  page,
+}) => {
+  await mockGeocode(page)
+  await page.goto('/')
+  const [landing, ...others] = await tileZooms(page)
+  expect(others).toEqual([])
+  expect(landing).toBeGreaterThanOrEqual(12)
+  expect(landing).toBeLessThanOrEqual(14)
+
+  await page.goto(`/?from=${POINT_A}`)
+  await settledMarkerBox(page)
+  expect(await tileZooms(page)).toEqual([15])
+})
+
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
+
+  test("the landing view pulls back further to fit the same area in a phone's short map", async ({
+    page,
+  }) => {
+    await page.goto('/')
+    const zooms = await tileZooms(page)
+    expect(zooms).toHaveLength(1)
+    expect(zooms[0]).toBeGreaterThanOrEqual(11)
+    expect(zooms[0]).toBeLessThanOrEqual(13)
+  })
 
   test('two tapped points frame in the middle of the map, not its right side', async ({ page }) => {
     // A wide left padding "for the legend" would be half a phone's map,
