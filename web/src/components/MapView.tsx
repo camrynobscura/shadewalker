@@ -17,12 +17,19 @@ import { MOBILE_LAYOUT_QUERY } from '../hooks/useMediaQuery'
 import { CollapseIcon, CrosshairIcon, ExpandIcon } from './icons'
 import styles from './MapView.module.css'
 
-// Where the map opens before any route exists: Washington Square, framing
-// Greenwich Village + the East Village. Midtown looks dramatic but its
-// shade scores are low and flat, so first clicks there return
-// near-identical routes across every preset; Village blocks vary enough
-// that the presets visibly diverge, which is the actual demo.
-const INITIAL_CENTER: [number, number] = [40.732, -73.9985]
+// Where the map opens before any route exists: Barclays Center up to
+// Washington Square Park, so the East River, its bridges and both shores
+// are on screen and the view reads as a place in the city (a close-up of
+// street grid alone could be anywhere). Two corners rather than a centre
+// and a zoom, so the same area fits a phone's short map and a wide desktop
+// one. It still holds the Village, where shade varies enough from block to
+// block that a first route's presets visibly differ.
+const LANDING_BOUNDS: [[number, number], [number, number]] = [
+  [40.6826, -73.9973],
+  [40.7308, -73.9754],
+]
+// A link with one point opens on it, close enough to read its block.
+const LONE_POINT_ZOOM = 15
 
 /* CARTO watermarks keyless raster tile requests ("API KEY REQUIRED"
    repeated across the map). The key is a build-time
@@ -134,7 +141,7 @@ function fullyVisible(map: LeafletMap, points: [number, number][]): boolean {
 }
 
 /** Keeps the whole route in view as start/end/the selected preset change --
- * without this, the map's viewport never moves on its own (INITIAL_CENTER
+ * without this, the map's viewport never moves on its own (LANDING_BOUNDS
  * is only ever applied once, at mount), so with all 5 boroughs live, an
  * address search or click outside whatever's currently on screen would
  * compute and draw a real route the user can't actually see without
@@ -378,9 +385,9 @@ export function MapView({
   onToggleExpanded,
 }: MapViewProps) {
   const helpId = useId()
-  // A link with only A (or only B) opens on that point, not the Village,
-  // so its marker is on screen from the start. Read once: MapContainer
-  // applies `center` at mount only.
+  // A link with only A (or only B) opens on that point, not the landing
+  // view, so its marker is on screen from the start. Read once:
+  // MapContainer applies its opening view at mount only.
   const [openAt] = useState(() => lonePoint(start, end))
   return (
     <div className={styles.mapRegion} role="region" aria-label="Map">
@@ -409,8 +416,9 @@ export function MapView({
           are immutable, and a mid-session OS toggle is rare enough to
           not chase. */}
       <MapContainer
-        center={openAt ? [openAt.lat, openAt.lon] : INITIAL_CENTER}
-        zoom={15}
+        {...(openAt
+          ? { center: [openAt.lat, openAt.lon] as [number, number], zoom: LONE_POINT_ZOOM }
+          : { bounds: LANDING_BOUNDS })}
         zoomAnimation={!reducedMotion()}
         className={styles.map}
       >

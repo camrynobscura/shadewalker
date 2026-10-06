@@ -234,19 +234,21 @@ export function Controls({
             keydown) and on blur; the route follows the moment both points
             exist. */}
         <div className={styles.addressFields}>
-          {/* Both examples verified against /geocode: each resolves to
-              the right spot in the Village, inside the landing view.
-              Tempting alternatives fail silently -- "45 Charles St" lands
-              in Alden Manor, "99 Perry St" on Staten Island. */}
+          {/* The two places the landing view is framed around. Place names
+              on purpose: each exists once in the city, and resolves to the
+              right spot on Photon and on the backup geocoder (checked
+              2026-10-06). A street address is a trap as an example, since
+              the same number and street exist in several boroughs: "24
+              East 7th St" came back as Brooklyn's first. */}
           <AddressField
             label="Start_point"
             marker="A"
-            example="Washington Square Park"
+            example="Barclays Center"
             field={start}
             emptyAccessory={locationAccessory}
             notice={locationNotice}
           />
-          <AddressField label="End_point" marker="B" example="24 East 7th St" field={end} />
+          <AddressField label="End_point" marker="B" example="Washington Square Park" field={end} />
           {/* The trip's options, right under where (Google Maps' order),
               as small pills: most walks are right now and by all shade,
               so they shouldn't weigh what the addresses do. A change

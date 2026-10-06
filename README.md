@@ -12,7 +12,7 @@ Built on four public datasets: the Forestry Tree Points (tree data) and Building
 - ~900,000 city tree records, scored onto the side of the street they actually shade
 - One 54 MB export; the whole city routes from ~0.6 GB of RAM (measured on the server, 2026-09-26)
 - Every request computes all four shade presets; typical full response ~400 ms
-- 445 backend tests, 127 unit, 119 end-to-end in Chromium and WebKit, CI on every PR
+- 445 backend tests, 127 unit, 121 end-to-end in Chromium and WebKit, CI on every PR
 - Lighthouse 100/100/100 (accessibility / best practices / SEO); zero axe violations, scanned per app state on every PR
 
 ## How it works

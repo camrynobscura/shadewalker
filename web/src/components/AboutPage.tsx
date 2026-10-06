@@ -140,7 +140,10 @@ export function AboutPage() {
             The background map is drawn by{' '}
             <ExternalLink href="https://carto.com/attributions">CARTO</ExternalLink>, and address search is
             answered by <ExternalLink href="https://photon.komoot.io/">Photon</ExternalLink>, an open geocoder
-            from komoot. We refresh our copies of the map, the trees, and the buildings once a month.
+            from komoot, with{' '}
+            <ExternalLink href="https://geosearch.planninglabs.nyc/">GeoSearch</ExternalLink> from NYC
+            Planning as a backup when Photon is down. We refresh our copies of the map, the trees, and the
+            buildings once a month.
           </p>
         </section>
 
@@ -242,8 +245,9 @@ export function AboutPage() {
             </ExternalLink>
             : we sample it along each path to score its shade, and it is provided as-is, without warranty.
             Basemap tiles by <ExternalLink href="https://carto.com/attributions">CARTO</ExternalLink>.
-            Geocoding by <ExternalLink href="https://photon.komoot.io/">Photon</ExternalLink>, from komoot.
-            Shade Walker is open source, and you can{' '}
+            Geocoding by <ExternalLink href="https://photon.komoot.io/">Photon</ExternalLink>, from komoot,
+            with <ExternalLink href="https://geosearch.planninglabs.nyc/">GeoSearch</ExternalLink> from NYC
+            Planning as the backup. Shade Walker is open source, and you can{' '}
             <ExternalLink href="https://github.com/camrynobscura/shadewalker">
               read the code on GitHub
             </ExternalLink>
