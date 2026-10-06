@@ -12,7 +12,7 @@ Built on four public datasets: the Forestry Tree Points (tree data) and Building
 - ~900,000 city tree records, scored onto the side of the street they actually shade
 - One 54 MB export; the whole city routes from ~0.6 GB of RAM (measured on the server, 2026-09-26)
 - Every request computes all four shade presets; typical full response ~400 ms
-- 426 backend tests, 127 unit, 119 end-to-end in Chromium and WebKit, CI on every PR
+- 445 backend tests, 127 unit, 119 end-to-end in Chromium and WebKit, CI on every PR
 - Lighthouse 100/100/100 (accessibility / best practices / SEO); zero axe violations, scanned per app state on every PR
 
 ## How it works
@@ -27,7 +27,8 @@ pipeline/   Python · OSM extract + Forestry Tree Points + land-cover raster
 server/     FastAPI + igraph · loads the export into memory, serves
             /route (Dijkstra over shade-weighted costs: trees and
             building shadows for the requested time, combined by union),
-            /geocode and /geocode/reverse (proxies to Photon), /health —
+            /geocode and /geocode/reverse (proxies to Photon, with NYC
+            GeoSearch behind it as a backup), /health —
             and the built frontend
 web/        Vite + React + TypeScript + react-leaflet
 ```
@@ -70,7 +71,7 @@ Production runs as **one process**: `uvicorn server.app:app --no-access-log --no
 
 Four tiers, all in CI except the data-dependent one:
 
-- `uv run pytest` — pipeline + server (426 tests), including route-regression goldens and a latency canary that run only where the real citywide export exists (they skip cleanly elsewhere)
+- `uv run pytest` — pipeline + server (445 tests), including route-regression goldens and a latency canary that run only where the real citywide export exists (they skip cleanly elsewhere)
 - `npm run test:unit` — Vitest for pure logic and hooks
 - `npx playwright test` — end-to-end against a committed pilot fixture: smoke, keyboard navigation, axe accessibility scans per app state, the shade-monotonicity guarantee, the time and shade pills in both engines, routing by itself on desktop and phone, night routing, and every backend failure the panel has to explain
 - `npx tsc -b` / `npm run lint` — tsc clean; lint prints nothing (oxlint with the React Compiler rules on)
@@ -87,7 +88,7 @@ Targets WCAG 2.1/2.2 AA. Last audited 2026-08-30: axe-core across five app state
 
 ## Data & attribution
 
-Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL). Tree data: [NYC Open Data](https://opendata.cityofnewyork.us/) / NYC Parks Forestry Tree Points. Building footprints: NYC Open Data / Office of Technology and Innovation. Park and path canopy: The Nature Conservancy. 2024. [New York City Land Cover (2021), Tree Canopy Change (2017-2021), and Estimated Tree Location and Crown Data (2021)](https://doi.org/10.5281/zenodo.14053441). Developed under contract by the University of Vermont Spatial Analysis Laboratory. Used under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/), as-is and without warranty; we sample it along each path to score its shade. Basemap tiles by [CARTO](https://carto.com/attributions). Geocoding by [Photon](https://photon.komoot.io/) (komoot). The `data/` directory is fully regenerable from these sources and never committed.
+Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL). Tree data: [NYC Open Data](https://opendata.cityofnewyork.us/) / NYC Parks Forestry Tree Points. Building footprints: NYC Open Data / Office of Technology and Innovation. Park and path canopy: The Nature Conservancy. 2024. [New York City Land Cover (2021), Tree Canopy Change (2017-2021), and Estimated Tree Location and Crown Data (2021)](https://doi.org/10.5281/zenodo.14053441). Developed under contract by the University of Vermont Spatial Analysis Laboratory. Used under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/), as-is and without warranty; we sample it along each path to score its shade. Basemap tiles by [CARTO](https://carto.com/attributions). Geocoding by [Photon](https://photon.komoot.io/) (komoot), with [NYC GeoSearch](https://geosearch.planninglabs.nyc/) (NYC Planning) as the backup when Photon is unavailable. The `data/` directory is fully regenerable from these sources and never committed.
 
 ## License
 
