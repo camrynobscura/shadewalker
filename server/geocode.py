@@ -19,7 +19,10 @@ stands behind it (config.BACKUP_GEOCODER_URL). When a Photon call fails,
 the backup answers that search and every search after it; Photon is asked
 again in the background, and takes over once it answers. Only the search
 that discovers an outage waits on Photon. "Photon found nothing" is an
-answer, not a failure, and never goes to the backup.
+answer, not a failure, and never goes to the backup. The other way round
+is different: the backup knows every address and landmark but no
+businesses, so a search it has nothing for is asked of Photon once more,
+with a long wait, rather than answered with nothing.
 
 Query text and coordinates are location data and are deliberately never
 logged here. uvicorn's access log would still see request paths, which
@@ -83,7 +86,8 @@ def search(q: str, limit: int) -> tuple[dict, ...]:
     whitespace-normalized (app.py does) so trivially-different keys don't
     double-cache. Returns a tuple — this exact object lives in the cache,
     so nobody gets a list they might mutate."""
-    return _answer(lambda: _photon_search(q, limit), lambda: _backup_search(q, limit))
+    return _answer(lambda: _photon_search(q, limit), lambda: _backup_search(q, limit),
+                   ask_photon_slowly=lambda: _photon_search_slowly(q, limit))
 
 
 def reverse(lat: float, lon: float) -> str | None:
@@ -96,7 +100,8 @@ def reverse(lat: float, lon: float) -> str | None:
 def clear_caches() -> None:
     """Forget every cached answer and treat Photon as healthy. For tests."""
     global _photon_down, _next_check_at, _check_running
-    for cached in (_photon_search, _photon_reverse, _backup_search, _backup_reverse):
+    for cached in (_photon_search, _photon_search_slowly, _photon_reverse, _backup_search,
+                   _backup_reverse):
         cached.cache_clear()
     with _state_lock:
         _photon_down = False
@@ -106,22 +111,39 @@ def clear_caches() -> None:
 
 # --- Which geocoder answers ------------------------------------------------
 
-def _answer(ask_photon, ask_backup):
+def _answer(ask_photon, ask_backup, ask_photon_slowly=None):
     """Photon's answer, or the backup's while Photon is failing.
 
     The two are cached apart, so an answer the backup gave during an outage
     (no businesses) is never served once Photon is back.
+
+    `ask_photon_slowly`, when given, is tried after an EMPTY backup answer:
+    the backup has every address and landmark, so nothing from it means a
+    business name (or a typo), which only Photon can answer. A slow answer
+    does not mark Photon up again; the background check decides that. If
+    the slow ask fails too, the empty answer stands: search is working, it
+    just found nothing.
     """
     with _state_lock:
         photon_down = _photon_down
     if photon_down:
         _check_photon_in_background(ask_photon)
-        return ask_backup()
+        return _backup_then_slow_photon(ask_backup, ask_photon_slowly)
     try:
         return ask_photon()
     except UpstreamError:
         _mark_photon_down()
-        return ask_backup()
+        return _backup_then_slow_photon(ask_backup, ask_photon_slowly)
+
+
+def _backup_then_slow_photon(ask_backup, ask_photon_slowly):
+    answer = ask_backup()
+    if answer or ask_photon_slowly is None:
+        return answer
+    try:
+        return ask_photon_slowly()
+    except UpstreamError:
+        return answer
 
 
 def _mark_photon_down() -> None:
@@ -200,13 +222,29 @@ def _get(upstream: str, url: str, params: dict, timeout_s: float) -> dict:
 
 # --- Photon ----------------------------------------------------------------
 
-def _photon_get(path: str, params: dict) -> dict:
-    return _get("Photon", f"{config.PHOTON_URL}{path}", params, config.PHOTON_TIMEOUT_S)
+def _photon_get(path: str, params: dict, timeout_s: float = config.PHOTON_TIMEOUT_S) -> dict:
+    return _get("Photon", f"{config.PHOTON_URL}{path}", params, timeout_s)
 
 
 @lru_cache(maxsize=config.GEOCODE_CACHE_MAX_ENTRIES)
 def _photon_search(q: str, limit: int) -> tuple[dict, ...]:
-    data = _photon_get("/api", {"q": q, "limit": limit, "lang": "en", "bbox": _CITY_BBOX})
+    return _parse_photon_search(_photon_get("/api", _photon_search_params(q, limit)))
+
+
+@lru_cache(maxsize=config.GEOCODE_CACHE_MAX_ENTRIES)
+def _photon_search_slowly(q: str, limit: int) -> tuple[dict, ...]:
+    """The same search with the long wait, for a business name during an
+    outage. Cached on its own: a hit here is a real Photon answer, but one
+    that took seconds, and must not stand in for the fast path's."""
+    return _parse_photon_search(
+        _photon_get("/api", _photon_search_params(q, limit), config.PHOTON_SLOW_TIMEOUT_S))
+
+
+def _photon_search_params(q: str, limit: int) -> dict:
+    return {"q": q, "limit": limit, "lang": "en", "bbox": _CITY_BBOX}
+
+
+def _parse_photon_search(data: dict) -> tuple[dict, ...]:
     results = []
     seen_labels = set()
     for feature in data.get("features", []):

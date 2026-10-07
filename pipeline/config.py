@@ -210,6 +210,13 @@ PHOTON_URL = os.environ.get("SHADEWALKER_PHOTON_URL", "https://photon.komoot.io"
 # How long a search waits on Photon before the backup answers instead. Its
 # slowest normal answer measured from the server was 1.66 s (2026-09-23).
 PHOTON_TIMEOUT_S = 2.0
+# While Photon is failing, a search the backup has no answer for is most
+# likely a business name, which only Photon knows. That one search asks
+# Photon again with this longer wait, so it gets an answer eventually
+# instead of nothing. Ten seconds is where people stop waiting at all
+# (Nielsen's response-time limits), and each waiting search holds one of
+# the server's worker threads.
+PHOTON_SLOW_TIMEOUT_S = 10.0
 # The backup that answers while Photon is failing: NYC Planning's GeoSearch,
 # a public Pelias server over the city's Property Address Directory. It
 # knows addresses and landmarks but no businesses, which is why it is the
