@@ -196,6 +196,10 @@ export function AboutPage() {
               bridges, scaffolding and sidewalk sheds (we don't have that data).
             </li>
             <li>
+              <strong>Weather isn't in the data.</strong> The shade percentages assume a sunny day. Clouds,
+              haze and the sun going in and out are not something the app knows about.
+            </li>
+            <li>
               <strong>Some places can't be routed</strong>, and that's due to data limitations from our
               reliance on OpenStreetMap. We rely on OSM for our information about NYC's sidewalks, paths and
               crossings, and because OSM is built by volunteers, its sidewalk coverage is uneven. The thinnest
