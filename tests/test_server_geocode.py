@@ -545,20 +545,110 @@ def test_a_check_that_blows_up_does_not_block_later_checks(monkeypatch, clock, b
     assert len(background) == 1            # a new check could start
 
 
+SHOP = feature({"name": "Whole Foods Market", "housenumber": "214", "street": "3rd Street",
+                "district": "Brooklyn", "city": "New York", "state": "New York"})
+SHOP_LABEL = "Whole Foods Market, 214 3rd Street, Brooklyn"
+
+
 def test_a_backup_answer_is_never_served_once_photon_is_back(monkeypatch, clock, background):
-    # During an outage the backup knows no businesses. That empty answer
-    # must not stick to the search after Photon recovers.
-    patch_upstreams(monkeypatch, photon=503, backup=photon_body())
+    # During an outage the backup knows no businesses, and here Photon is
+    # too slow even for the long wait. That empty answer must not stick to
+    # the search after Photon recovers.
+    patch_upstreams(monkeypatch, photon=requests.ReadTimeout("slow"), backup=photon_body())
     assert geocode.search("whole foods", 5) == ()
 
-    shop = feature({"name": "Whole Foods Market", "housenumber": "214", "street": "3rd Street",
-                    "district": "Brooklyn", "city": "New York", "state": "New York"})
-    patch_upstreams(monkeypatch, photon=photon_body(shop), backup=photon_body())
+    patch_upstreams(monkeypatch, photon=photon_body(SHOP), backup=photon_body())
     clock.advance(config.PHOTON_RECHECK_AFTER_S)
-    geocode.search("whole foods", 5)       # still the backup; starts the check
+    geocode.search("whole foods", 5)       # starts the check
     background.pop()()
-    assert geocode.search("whole foods", 5)[0]["label"] == (
-        "Whole Foods Market, 214 3rd Street, Brooklyn")
+    assert geocode.search("whole foods", 5)[0]["label"] == SHOP_LABEL
+
+
+# --- a business name during an outage: the backup is empty, so Photon is
+# asked once more with the long wait -------------------------------------
+
+def patch_photon_by_speed(monkeypatch, fast, slow, backup) -> list[dict]:
+    """Photon answers `fast` to a call with the normal wait and `slow` to one
+    with the long wait; the backup answers `backup`. Same answer shapes as
+    patch_upstreams."""
+    calls = []
+
+    def fake_get(url, params=None, timeout=None):
+        if url.startswith(config.BACKUP_GEOCODER_URL):
+            upstream, answer = "backup", backup
+        elif timeout == config.PHOTON_SLOW_TIMEOUT_S:
+            upstream, answer = "photon-slow", slow
+        else:
+            upstream, answer = "photon", fast
+        calls.append({"upstream": upstream, "url": url, "params": params, "timeout": timeout})
+        if isinstance(answer, Exception):
+            raise answer
+        if isinstance(answer, int):
+            return FakeResponse({}, answer)
+        return FakeResponse(answer)
+
+    monkeypatch.setattr(geocode._session, "get", fake_get)
+    return calls
+
+
+def test_an_empty_backup_answer_asks_photon_again_with_the_long_wait(monkeypatch):
+    calls = patch_photon_by_speed(monkeypatch, fast=requests.ReadTimeout("slow"),
+                                  slow=photon_body(SHOP), backup=photon_body())
+    assert geocode.search("whole foods", 5)[0]["label"] == SHOP_LABEL
+    assert [c["upstream"] for c in calls] == ["photon", "backup", "photon-slow"]
+    assert calls[-1]["params"]["q"] == "whole foods"
+    assert config.PHOTON_SLOW_TIMEOUT_S > config.PHOTON_TIMEOUT_S
+
+
+def test_a_backup_answer_with_results_never_waits_on_photon(monkeypatch):
+    calls = patch_photon_by_speed(monkeypatch, fast=503, slow=photon_body(SHOP),
+                                  backup=photon_body(PROSPECT_PARK))
+    assert geocode.search("prospect park", 5)[0]["label"] == "Prospect Park, Brooklyn"
+    assert asked(calls, "photon-slow") == 0
+
+
+def test_when_the_long_wait_fails_too_the_answer_is_nothing_found_not_an_error(monkeypatch):
+    patch_photon_by_speed(monkeypatch, fast=503, slow=requests.ReadTimeout("still slow"),
+                          backup=photon_body())
+    assert geocode.search("whole foods", 5) == ()
+    resp = client.get("/geocode", params={"q": "whole foods"})
+    assert resp.status_code == 200
+    assert resp.json() == {"results": []}
+
+
+def test_a_slow_answer_does_not_mark_photon_up(monkeypatch, clock, background):
+    calls = patch_photon_by_speed(monkeypatch, fast=503, slow=photon_body(SHOP),
+                                  backup=photon_body())
+    geocode.search("whole foods", 5)
+    clock.advance(1)
+    geocode.search("prospect park", 5)     # the backup, still: no fast Photon call
+    assert asked(calls, "photon") == 1
+    assert background == []
+
+
+def test_a_slow_answer_is_cached_for_the_outage(monkeypatch):
+    calls = patch_photon_by_speed(monkeypatch, fast=503, slow=photon_body(SHOP),
+                                  backup=photon_body())
+    geocode.search("whole foods", 5)
+    geocode.search("whole foods", 5)
+    assert asked(calls, "photon-slow") == 1
+
+
+def test_a_failed_long_wait_is_not_cached(monkeypatch):
+    patch_photon_by_speed(monkeypatch, fast=503, slow=requests.ReadTimeout("slow"),
+                          backup=photon_body())
+    assert geocode.search("whole foods", 5) == ()
+    calls = patch_photon_by_speed(monkeypatch, fast=503, slow=photon_body(SHOP),
+                                  backup=photon_body())
+    assert geocode.search("whole foods", 5)[0]["label"] == SHOP_LABEL
+    assert asked(calls, "backup") == 0     # the backup's empty answer was cached; only Photon was re-asked
+
+
+def test_reverse_never_uses_the_long_wait(monkeypatch):
+    # An empty reverse answer means nothing is nearby, not a business.
+    calls = patch_photon_by_speed(monkeypatch, fast=503, slow=photon_body(), backup=photon_body())
+    assert geocode.reverse(40.6628, -73.9690) is None
+    assert asked(calls, "photon-slow") == 0
 
 
 def test_the_real_background_runner_starts_a_thread():
